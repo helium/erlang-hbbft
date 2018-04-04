@@ -2,13 +2,14 @@
 
 -behaviour(gen_statem).
 
--export([start/0, input/1, get_val/0, stop/0]).
+-export([start_link/3, input/2, val/4, echo/5, ready/3, stop/1]).
 -export([random_n/2]).
 -export([terminate/3, code_change/4, init/1, callback_mode/0, handle_event/4]).
 
 -record(data, {
           n :: pos_integer(),
           f :: pos_integer(),
+          size :: pos_integer(),
           msg = undefined :: binary() | undefined,
           h = undefined :: binary() | undefined,
           shares = [] :: [{merkerl:proof(), binary()}],
@@ -26,8 +27,8 @@
 -type send_commands() :: [unicast() | multicast()].
 
 %% API.
-start(N, F) ->
-    gen_statem:start(?MODULE, [N, F], []).
+start_link(N, F, Size) ->
+    gen_statem:start_link(?MODULE, [N, F, Size], []).
 
 -spec input(pid(), binary()) -> {send, send_commands()} | {error, already_initialized}.
 input(Pid, Msg) ->
@@ -37,18 +38,13 @@ input(Pid, Msg) ->
 val(Pid, H, Bi, Si) ->
     gen_statem:call(Pid, {val, H, Bi, Si}).
 
--spec echo(pid(), merkerl:hash(), merkerl:proof(), binary()) -> ok | {send, send_commands()} | {result, V :: binary()} | abort.
-echo(Pid, H, Bi, Si) ->
-    gen_statem:call(Pid, {echo, H, Bi, Si}).
+-spec echo(pid(), non_neg_integer(), merkerl:hash(), merkerl:proof(), binary()) -> ok | {send, send_commands()} | {result, V :: binary()} | abort.
+echo(Pid, J, H, Bi, Si) ->
+    gen_statem:call(Pid, {echo, J, H, Bi, Si}).
 
--spec ready(pid(), merkerl:hash()) -> ok | {send, send_commands()} | {result, V :: binary()}.
-ready(Pid, H) ->
-    gen_statem:call(Pid, {ready, H}).
-
-
--spec get_val(pid()) -> any().
-get_val(Pid) ->
-    gen_statem:call(Pid, get_val).
+-spec ready(pid(), non_neg_integer(), merkerl:hash()) -> ok | {send, send_commands()} | {result, V :: binary()}.
+ready(Pid, J, H) ->
+    gen_statem:call(Pid, {ready, J, H}).
 
 stop(Pid) ->
     gen_statem:stop(Pid).
@@ -60,8 +56,8 @@ terminate(_Reason, _State, _Data) ->
 code_change(_Vsn, State, Data, _Extra) ->
     {ok, State, Data}.
 
-init([N, F]) ->
-    State = init, Data = #data{n=N, f=F},
+init([N, F, Size]) ->
+    State = init, Data = #data{n=N, f=F, size=Size},
     {ok, State, Data}.
 
 callback_mode() -> handle_event_function.
@@ -85,7 +81,7 @@ handle_event({call, From}, {input, Msg}, init, Data =#data{n=N, f=F}) ->
     Result = [ {unicast, J, {val, MerkleRootHash, lists:nth(J+1, BranchesForShards), lists:nth(J+1, Shards)}} || J <- lists:seq(1, N-1)],
     %% unicast all the VAL packets and multicast the ECHO for our own share
     {next_state, waiting, NewData, [{reply, From, {send, [{multicast, {echo, MerkleRootHash, hd(BranchesForShards), hd(Shards)}} | Result]}}]};
-handle_event({call, From}, {val, J, H, Bj, Sj}, init, Data = #data{shares=[]}) ->
+handle_event({call, From}, {val, H, Bj, Sj}, init, Data = #data{shares=[]}) ->
     NewData = Data#data{h=H, shares=[{Bj, Sj}]},
     {next_state, waiting, NewData, [{reply, From, {send, [{multicast, {echo, H, Bj, Sj}}]}}]};
 handle_event({call, From}, {echo, J, H, Bj, Sj}, _State, Data = #data{n=N, f=F}) ->
@@ -100,7 +96,7 @@ handle_event({call, From}, {echo, J, H, Bj, Sj}, _State, Data = #data{n=N, f=F})
                     %% interpolate Sj from any N-2f leaves received
                     Threshold = N - 2*F,
                     {_, Shards} = lists:unzip(NewData#data.shares),
-                    case leo_erasure:decode({Threshold, N - Threshold}, NewData#data.shares, Size) of
+                    case leo_erasure:decode({Threshold, N - Threshold}, NewData#data.shares, NewData#data.size) of
                         {ok, Msg} ->
                             %% recompute merkle root H
                             Merkle = merkerl:new(Shards, fun merkerl:hash_value/1),
@@ -119,44 +115,53 @@ handle_event({call, From}, {echo, J, H, Bj, Sj}, _State, Data = #data{n=N, f=F})
                                                     {stop_and_reply, normal, [{reply, From, {result, Msg}}]};
                                                 false ->
                                                     %% wait for enough echoes and readies?
-                                                    {next_state, waiting, NewData}
+                                                    {next_state, waiting, NewData#data{msg=Msg}}
                                             end;
                                         false ->
                                             %% send ready(h)
-                                            {next_state, waiting, NewData, [{reply, From, {send, [{multicast, {ready, H}}]}}]}
+                                            {next_state, waiting, NewData#data{msg=Msg}, [{reply, From, {send, [{multicast, {ready, H}}]}}]}
                                     end;
                                 false ->
                                     %% abort
-                                    {next_state, waiting, NewData, [{reply, From, abort}]}
-                            end,
-            {keep_state, NewData, [{reply, From, ok}]};
+                                    {stop_and_reply, NewData, [{reply, From, abort}]}
+                            end;
+                        {error, _} ->
+                            {next_state, waiting, NewData, [{reply, From, ok}]}
+                    end;
+                false ->
+                    {next_state, waiting, NewData, [{reply, From, ok}]}
+            end;
         {error, _} ->
             %% otherwise discard
             {keep_state_and_data, [{reply, From, ok}]}
     end;
-handle_event({call, From}, {ready, H}, waiting, #data{h=H, n=N, f=F, num_readies=NumReadies}=Data) ->
-    case sets:size(NumReadies) >= F + 1 of
+handle_event({call, From}, {ready, J, H}, waiting, #data{h=H, n=N, f=F}=Data) ->
+    %% TODO increment num_readies
+    NewData = Data#data{num_readies=sets:add_element(J, Data#data.num_readies)},
+    case sets:size(NewData#data.num_readies) >= F + 1 of
         true ->
+            Threshold = N - 2*F,
             %% check if we have 2*F + 1 readies and N - 2*F echoes
-            case sets:size(Data#data.num_echoes) >= Threshold andalso sets:size(NumReadies) >= 2*F + 1 of
+            case sets:size(NewData#data.num_echoes) >= Threshold andalso sets:size(NewData#data.num_readies) >= 2*F + 1 of
                 true ->
                     %% done
-                    %% Decode V
-                    %% V = ?
-                    {stop_and_reply, normal, [{reply, From, {result, V}}]};
-                false ->
-                    %% multicase ready
-                    {next_state, waiting, Data, [{reply, From, {send, [{multicast, {ready, H}}]}}]}
+                    {stop_and_reply, normal, [{reply, From, {result, NewData#data.msg}}]};
+                false when not NewData#data.ready_sent ->
+                    %% multicast ready
+                    {next_state, waiting, NewData#data{ready_sent=true}, [{reply, From, {send, [{multicast, {ready, H}}]}}]};
+                _ ->
+                    {next_state, waiting, NewData, [{reply, From, ok}]}
             end;
         false ->
             %% waiting
             {keep_state_and_data, [{reply, From, ok}]}
     end;
-handle_event({call, From}, {val, _, _, _}, waiting, _Data) ->
+handle_event({call, From}, {val, _, _, _, _}, waiting, _Data) ->
     %% we already had a val, just ignore this
     {keep_state_and_data, [{reply, From, ok}]};
-handle_event({call, From}, get_val, State, Data) ->
-    {next_state, State, Data, [{reply, From, Data}]}.
+handle_event({call, From}, {ready, _, _}, init, _Data) ->
+    %% ignore a ready before we know what we're doing
+    {keep_state_and_data, [{reply, From, ok}]}.
 
 %% helpers
 random_n(N, List) ->
@@ -170,18 +175,43 @@ shuffle(List) ->
 -include_lib("eunit/include/eunit.hrl").
 
 init_test() ->
-    {ok, _Pid} = reliable_broadcast:start(),
-    %% merkle should not be constructed yet
-    #data{br=NoBr} = reliable_broadcast:get_val(),
-    ?assertEqual(NoBr, undefined),
-    N = 14,
-    F = 4,
+    N = 5,
+    F = 1,
     Msg = crypto:strong_rand_bytes(512),
-    reliable_broadcast:input(N, F, Msg),
-    %% there must be some branches now
-    #data{br=Br, sj=Sj} = reliable_broadcast:get_val(),
-    ?assertNotEqual(Br, undefined),
-    ?assertEqual(length(Br), length(Sj)),
+    {ok, Pid0} = reliable_broadcast:start_link(N, F, 512),
+    {ok, Pid1} = reliable_broadcast:start_link(N, F, 512),
+    {ok, Pid2} = reliable_broadcast:start_link(N, F, 512),
+    {ok, Pid3} = reliable_broadcast:start_link(N, F, 512),
+    {ok, Pid4} = reliable_broadcast:start_link(N, F, 512),
+    Pids = [Pid0, Pid1, Pid2, Pid3, Pid4],
+    {send, MsgsToSend} = reliable_broadcast:input(Pid0, Msg),
+    ?debugFmt("MsgsToSend ~p~n", [MsgsToSend]),
+    AThing = do_send_outer([{0, {send, MsgsToSend}}], Pids),
+    ?debugFmt("A Thing ~p~n", [AThing]),
+    ?assert(false),
     ok.
+
+do_send_outer([], _) ->
+    ok;
+do_send_outer([H|T], Pids) ->
+    R = do_send(H, Pids),
+    ?debugFmt("Round output ~p~n", [R]),
+    ?debugFmt("Round output 1~p~n", [hd(R)]),
+    do_send_outer(T++[R], Pids).
+
+do_send({_, {send, []}}, _) ->
+    [];
+do_send({Id, {send, [{unicast, J, {val, H, Bj, Sj}}|T]}}, Pids) ->
+    Destination = lists:nth(J+1, Pids),
+    [{J, val(Destination, H, Bj, Sj)}] ++ do_send({Id, {send, T}}, Pids);
+do_send({Id, {send, [{multicast, Msg}|T]}}, Pids) ->
+    case Msg of
+        {echo, H, Bj, Sj} ->
+            PidsWithId = lists:zip(lists:seq(0, length(Pids) - 1), Pids),
+            [{J, echo(P, Id, H, Bj, Sj)} || {J, P} <- Pids, J /= Id] ++ do_send({Id, {send, T}}, Pids);
+        {ready, H} ->
+            PidsWithId = lists:zip(lists:seq(0, length(Pids) - 1), Pids),
+            [{J, ready(P, Id, H)} || {J, P} <- Pids, J /= Id] ++ do_send({Id, {send, T}}, Pids)
+    end.
 
 -endif.
