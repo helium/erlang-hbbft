@@ -1,0 +1,16 @@
+{application, erlang_hbbft,
+ [{description, "Erlang implementation of HoneyBadgerBFT"},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {mod, { erlang_hbbft, []}},
+  {applications,
+   [kernel,
+    stdlib
+   ]},
+  {env,[]},
+  {modules, []},
+
+  {maintainers, ["Helium"]},
+  {licenses, ["Apache 2.0"]},
+  {links, []}
+ ]}.
