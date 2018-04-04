@@ -6,7 +6,6 @@
 -export([random_n/2]).
 -export([terminate/3, code_change/4, init/1, callback_mode/0, handle_event/4]).
 
-%% TODO: better names
 -record(data, {
           n :: pos_integer(),
           f :: pos_integer(),
@@ -14,7 +13,8 @@
           h = undefined :: binary() | undefined,
           shares = [] :: [{merkerl:proof(), binary()}],
           num_echoes = sets:new() :: sets:set(non_neg_integer()),
-          num_readies = sets:new() :: sets:set(non_neg_integer())
+          num_readies = sets:new() :: sets:set(non_neg_integer()),
+          ready_sent = false :: boolean()
          }).
 
 -type val_msg() :: {val, merkerl:hash(), merkerl:proof(), binary()}.
@@ -50,8 +50,8 @@ ready(Pid, H) ->
 get_val(Pid) ->
     gen_statem:call(Pid, get_val).
 
-stop() ->
-    gen_statem:stop(name()).
+stop(Pid) ->
+    gen_statem:stop(Pid).
 
 %% Mandatory callback functions
 terminate(_Reason, _State, _Data) ->
@@ -84,17 +84,17 @@ handle_event({call, From}, {input, Msg}, init, Data =#data{n=N, f=F}) ->
     NewData = Data#data{msg=Msg, h=MerkleRootHash},
     Result = [ {unicast, J, {val, MerkleRootHash, lists:nth(J+1, BranchesForShards), lists:nth(J+1, Shards)}} || J <- lists:seq(1, N-1)],
     %% unicast all the VAL packets and multicast the ECHO for our own share
-    {next_state, waiting_for_echo, NewData, [{reply, From, {send, [{multicast, {echo, MerkleRootHash, hd(BranchesForShards), hd(Shards}} | Result]}}]};
+    {next_state, waiting, NewData, [{reply, From, {send, [{multicast, {echo, MerkleRootHash, hd(BranchesForShards), hd(Shards)}} | Result]}}]};
 handle_event({call, From}, {val, J, H, Bj, Sj}, init, Data = #data{shares=[]}) ->
     NewData = Data#data{h=H, shares=[{Bj, Sj}]},
-    {next_state, waiting_for_echo, NewData, [{reply, From, {send, [{multicast, {echo, H, Bj, Sj}}]}}]};
-handle_event({call, From}, {echo, J, H, Bj, Sj}, init, Data = #data{n=N, f=F}) ->
+    {next_state, waiting, NewData, [{reply, From, {send, [{multicast, {echo, H, Bj, Sj}}]}}]};
+handle_event({call, From}, {echo, J, H, Bj, Sj}, _State, Data = #data{n=N, f=F}) ->
     %% TODO echoes need to be *distinct* somehow
     %%
     %% Check that Bj is a valid merkle branch for root h and and leaf Sj
     case merkerl:verify_proof(merkerl:hash_value(Sj), H, Bj) of
         ok ->
-            NewData = Data#data{h=H, shares=lists:usort([{Bj, Sj}|Data#data.shares], num_echoes=sets:add_element(J, Data#data.num_echoes)},
+            NewData = Data#data{h=H, shares=lists:usort([{Bj, Sj}|Data#data.shares]), num_echoes=sets:add_element(J, Data#data.num_echoes)},
             case sets:size(NewData#data.num_echoes) >= (N - F) of
                 true ->
                     %% interpolate Sj from any N-2f leaves received
@@ -103,15 +103,58 @@ handle_event({call, From}, {echo, J, H, Bj, Sj}, init, Data = #data{n=N, f=F}) -
                     case leo_erasure:decode({Threshold, N - Threshold}, NewData#data.shares, Size) of
                         {ok, Msg} ->
                             %% recompute merkle root H
+                            Merkle = merkerl:new(Shards, fun merkerl:hash_value/1),
+                            MerkleRootHash = merkerl:root_hash(Merkle),
+                            case H == MerkleRootHash of
+                                true ->
+                                    %% root hashes match
+                                    %% check if ready already sent
+                                    case NewData#data.ready_sent of
+                                        true ->
+                                            %% check if we have enough readies and enough echoes
+                                            %% N-2F echoes and 2F + 1 readies
+                                            case sets:size(NewData#data.num_echoes) >= Threshold andalso sets:size(NewData#data.num_readies) >= 2*F + 1 of
+                                                true ->
+                                                    %% decode V. Done
+                                                    {stop_and_reply, normal, [{reply, From, {result, Msg}}]};
+                                                false ->
+                                                    %% wait for enough echoes and readies?
+                                                    {next_state, waiting, NewData}
+                                            end;
+                                        false ->
+                                            %% send ready(h)
+                                            {next_state, waiting, NewData, [{reply, From, {send, [{multicast, {ready, H}}]}}]}
+                                    end;
+                                false ->
+                                    %% abort
+                                    {next_state, waiting, NewData, [{reply, From, abort}]}
+                            end,
             {keep_state, NewData, [{reply, From, ok}]};
         {error, _} ->
             %% otherwise discard
             {keep_state_and_data, [{reply, From, ok}]}
     end;
-handle_event({call, From}, {val, _, _, _}, waiting_for_echo, _Data) ->
+handle_event({call, From}, {ready, H}, waiting, #data{h=H, n=N, f=F, num_readies=NumReadies}=Data) ->
+    case sets:size(NumReadies) >= F + 1 of
+        true ->
+            %% check if we have 2*F + 1 readies and N - 2*F echoes
+            case sets:size(Data#data.num_echoes) >= Threshold andalso sets:size(NumReadies) >= 2*F + 1 of
+                true ->
+                    %% done
+                    %% Decode V
+                    %% V = ?
+                    {stop_and_reply, normal, [{reply, From, {result, V}}]};
+                false ->
+                    %% multicase ready
+                    {next_state, waiting, Data, [{reply, From, {send, [{multicast, {ready, H}}]}}]}
+            end;
+        false ->
+            %% waiting
+            {keep_state_and_data, [{reply, From, ok}]}
+    end;
+handle_event({call, From}, {val, _, _, _}, waiting, _Data) ->
     %% we already had a val, just ignore this
-    {keep_state_and_data, [{reply, From, ok}]}.
-handle_event({call, From}, {val, {N, F, Msg}}, init, _Data) ->
+    {keep_state_and_data, [{reply, From, ok}]};
 handle_event({call, From}, get_val, State, Data) ->
     {next_state, State, Data, [{reply, From, Data}]}.
 
