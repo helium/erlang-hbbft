@@ -1,3 +1,4 @@
+{"1.1.0",
 [{<<"erl_tpke">>,
   {git,"https://github.com/helium/erlang_tpke.git",
        {ref,"744f6a26da55b71a2b0d262c5addb08d8e921131"}},
@@ -10,7 +11,8 @@
   {git,"https://github.com/helium/leo_erasure.git",
        {ref,"4dc5823c4d60be12ba74245e579527195fa5b3c2"}},
   0},
- {<<"merkerl">>,
-  {git,"https://github.com/helium/merkerl.git",
-       {ref,"850ee2c9c1781cd74fcdb35ec12065bb722e8068"}},
-  0}].
+ {<<"merkerl">>,{pkg,<<"merkerl">>,<<"1.0.1">>},0}]}.
+[
+{pkg_hash,[
+ {<<"merkerl">>, <<"FFFA7591CB3C62E837533A1C71B3C3795194FC3E09541E25369F1C87AF38EFE1">>}]}
+].
