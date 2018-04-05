@@ -16,8 +16,15 @@ encoded_decoded_equality_test(N, F, Msg) ->
 	%% io:format("Threshold: ~p~n", [Threshold]),
 	{ok, Sj} = leo_erasure:encode({Threshold, N}, Msg),
 	%% io:format("Sj: ~p~n", [Sj]),
-	Bits = reliable_broadcast:random_n(Threshold, Sj),
+	Bits = random_n(Threshold, Sj),
 	%% io:format("Bits: ~p~n", [Bits]),
 	{ok, Bin} = leo_erasure:decode({Threshold, N}, Bits, byte_size(Msg)),
 	%% io:format("Bin: ~p~n", [Bin]),
 	Bin == Msg.
+
+%% helpers
+random_n(N, List) ->
+    lists:sublist(shuffle(List), N).
+
+shuffle(List) ->
+    [X || {_,X} <- lists:sort([{rand:uniform(), N} || N <- List])].

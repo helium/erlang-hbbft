@@ -218,13 +218,6 @@ two_pid_dying_test() ->
     ?assertEqual(0, length(ConvergedResults)),
     ok.
 
-%% helpers
-random_n(N, List) ->
-    lists:sublist(shuffle(List), N).
-
-shuffle(List) ->
-    [X || {_,X} <- lists:sort([{rand:uniform(), N} || N <- List])].
-
 do_send_outer([], _, Acc) ->
     Acc;
 do_send_outer([{result, {Id, Result}} | T], Pids, Acc) ->
