@@ -8,7 +8,7 @@
           sid :: undefined | binary(),
           n :: pos_integer(),
           f :: pos_integer(),
-          shares = []
+          shares = sets:new()
          }).
 
 init(SecretKeyShard, Sid, N, F) ->
@@ -20,17 +20,17 @@ get_coin(Data) ->
     Share = tpke_privkey:sign(Data#data.sk, Data#data.sid),
     {Data, {send, [{multicast, {share, Share}}]}}.
 
-share(Data = #data{state=done}, _J, Share) ->
+share(Data = #data{state=done}, _J, _Share) ->
     {Data, ok};
 share(Data, _J, Share) ->
     case tpke_pubkey:verify_signature_share(tpke_privkey:public_key(Data#data.sk), Share, Data#data.sid) of
         true ->
-            NewData = Data#data{shares=lists:usort([Share|Data#data.shares])},
+            NewData = Data#data{shares=sets:add_element(Share, Data#data.shares)},
             %% check if we have at least f+1 shares
-            case length(NewData#data.shares) > Data#data.f of
+            case sets:size(NewData#data.shares) > Data#data.f of
                 true ->
                     %% combine shares
-                    Sig = tpke_pubkey:combine_signature_shares(tpke_privkey:public_key(NewData#data.sk), NewData#data.shares),
+                    Sig = tpke_pubkey:combine_signature_shares(tpke_privkey:public_key(NewData#data.sk), sets:to_list(NewData#data.shares)),
                     %% check if the signature is valid
                     case tpke_pubkey:verify_signature(tpke_privkey:public_key(NewData#data.sk), Sig, NewData#data.sid) of
                         true ->
