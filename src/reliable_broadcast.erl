@@ -80,7 +80,7 @@ handle_event({call, From}, {input, Msg}, init, Data =#data{n=N, f=F}) ->
     NewData = Data#data{msg=Msg, h=MerkleRootHash},
     Result = [ {unicast, J, {val, MerkleRootHash, lists:nth(J+1, BranchesForShards), lists:nth(J+1, Shards)}} || J <- lists:seq(1, N-1)],
     %% unicast all the VAL packets and multicast the ECHO for our own share
-    {next_state, waiting, NewData, [{reply, From, {send, [{multicast, {echo, MerkleRootHash, hd(BranchesForShards), hd(Shards)}} | Result]}}]};
+    {next_state, waiting, NewData, [{reply, From, {send, Result ++ [{multicast, {echo, MerkleRootHash, hd(BranchesForShards), hd(Shards)}}]}}]};
 handle_event({call, From}, {val, H, Bj, Sj}, init, Data = #data{shares=[]}) ->
     NewData = Data#data{h=H, shares=[{Bj, Sj}]},
     io:format("Got val msg~n"),
@@ -89,20 +89,20 @@ handle_event({call, From}, {echo, J, H, Bj, Sj}, _State, Data = #data{n=N, f=F})
     %% TODO echoes need to be *distinct* somehow
     %%
     %% Check that Bj is a valid merkle branch for root h and and leaf Sj
-    io:format("Got echo msg~n"),
+    io:format("~p Got echo msg from ~p ~p~n", [self(),J, _State]),
     case merkerl:verify_proof(merkerl:hash_value(Sj), H, Bj) of
         ok ->
             NewData = Data#data{h=H, shares=lists:usort([{Bj, Sj}|Data#data.shares]), num_echoes=sets:add_element(J, Data#data.num_echoes)},
-            io:format("NumEchoes: ~p~n", [sets:size(NewData#data.num_echoes)]),
+            io:format("~p: NumEchoes: ~p~n", [self(), sets:size(NewData#data.num_echoes)]),
             case sets:size(NewData#data.num_echoes) >= (N - F) of
                 true ->
-                    io:format("N - F is true: ~p~n", [sets:size(NewData#data.num_echoes)]),
+                    io:format("~p N - F is true: ~p~n", [self(), sets:size(NewData#data.num_echoes)]),
                     %% interpolate Sj from any N-2f leaves received
                     Threshold = N - 2*F,
                     {_, Shards} = lists:unzip(NewData#data.shares),
                     case leo_erasure:decode({Threshold, N - Threshold}, Shards, NewData#data.size) of
                         {ok, Msg} ->
-                            io:format("Recomputing Merkle after decode: ~p~n", [sets:size(NewData#data.num_echoes)]),
+                            io:format("~p Recomputing Merkle after decode: ~p~n", [self(), sets:size(NewData#data.num_echoes)]),
                             %% recompute merkle root H
                             {ok, AllShards} = leo_erasure:encode({Threshold, N - Threshold}, Msg),
                             Merkle = merkerl:new(AllShards, fun merkerl:hash_value/1),
@@ -118,25 +118,25 @@ handle_event({call, From}, {echo, J, H, Bj, Sj}, _State, Data = #data{n=N, f=F})
                                             case sets:size(NewData#data.num_echoes) >= Threshold andalso sets:size(NewData#data.num_readies) >= (2*F + 1) of
                                                 true ->
                                                     %% decode V. Done
-                                                    io:format("Done~n"),
+                                                    io:format("~p Done~n", [self()]),
                                                     {stop_and_reply, normal, [{reply, From, {result, Msg}}], NewData};
                                                 false ->
                                                     %% wait for enough echoes and readies?
-                                                    io:format("Not enought echoes or readies~n"),
+                                                    io:format("~p Not enought echoes or readies~n", [self()]),
                                                     {next_state, waiting, NewData#data{msg=Msg}}
                                             end;
                                         false ->
                                             %% send ready(h)
-                                            io:format("Sending Ready as it was not sent before~n"),
+                                            io:format("~p Sending Ready as it was not sent before~n", [self()]),
                                             {next_state, waiting, NewData#data{msg=Msg}, [{reply, From, {send, [{multicast, {ready, H}}]}}]}
                                     end;
                                 false ->
                                     %% abort
-                                    io:format("Abort~n"),
+                                    io:format("~p Abort~n", [self()]),
                                     {stop_and_reply, normal, [{reply, From, abort}], NewData}
                             end;
                         {error, Reason} ->
-                            io:format("Reason: ~p~n", [Reason]),
+                            io:format("~p Reason: ~p~n", [self(), Reason]),
                             {next_state, waiting, NewData, [{reply, From, ok}]}
                     end;
                 false ->
@@ -152,29 +152,30 @@ handle_event({call, From}, {ready, J, H}, waiting, #data{h=H, n=N, f=F}=Data) ->
     NewData = Data#data{num_readies=sets:add_element(J, Data#data.num_readies)},
     case sets:size(NewData#data.num_readies) >= F + 1 of
         true ->
-            io:format("Got enough readies~n"),
+            io:format("~p Got enough readies~n", [self()]),
             Threshold = N - 2*F,
             %% check if we have 2*F + 1 readies and N - 2*F echoes
             case sets:size(NewData#data.num_echoes) >= Threshold andalso sets:size(NewData#data.num_readies) >= 2*F + 1 of
                 true ->
                     %% done
-                    io:format("Got enough readies and echoes~n"),
+                    io:format("~p Got enough readies and echoes~n", [self()]),
                     {stop_and_reply, normal, [{reply, From, {result, NewData#data.msg}}], NewData};
                 false when not NewData#data.ready_sent ->
                     %% multicast ready
-                    io:format("Multicasting ready, not done before~n"),
+                    io:format("~p Multicasting ready, not done before~n", [self()]),
                     {next_state, waiting, NewData#data{ready_sent=true}, [{reply, From, {send, [{multicast, {ready, H}}]}}]};
                 _ ->
-                    io:format("Waiting for 2*f + 1 readies and enought num_echoes~n"),
+                    io:format("~p Waiting for 2*f + 1 readies and enought num_echoes~n", [self()]),
                     {next_state, waiting, NewData, [{reply, From, ok}]}
             end;
         false ->
             %% waiting
-            io:format("J: ~p~n", [J]),
-            io:format("Waiting for F+1 readies, readies so far:~p~n", [sets:size(NewData#data.num_readies)]),
+            io:format("~p J: ~p~n", [self(), J]),
+            io:format("~p Waiting for F+1 readies, readies so far:~p~n", [self(), sets:size(NewData#data.num_readies)]),
             {keep_state, NewData, [{reply, From, ok}]}
     end;
 handle_event({call, From}, {val, _, _, _, _}, waiting, _Data) ->
+    io:format("~p ignoring val~n", [self()]),
     %% we already had a val, just ignore this
     {keep_state_and_data, [{reply, From, ok}]};
 handle_event({call, From}, {ready, _, _}, init, _Data) ->
@@ -221,14 +222,36 @@ pid_dying_test() ->
     {ok, Pid4} = reliable_broadcast:start_link(N, F, 512),
     Pids = [Pid0, Pid1, Pid2, Pid3, Pid4],
     {send, MsgsToSend} = reliable_broadcast:input(Pid0, Msg),
-    %% ?debugFmt("MsgsToSend ~p~n", [MsgsToSend]),
+    io:format("MsgsToSend ~p~n", [MsgsToSend]),
     unlink(Pid2),
     exit(Pid2, kill),
+    io:format("sender is ~p~n", [Pid0]),
     AThing = do_send_outer([{0, {send, MsgsToSend}}], Pids, []),
     ?debugFmt("A Thing ~p~n", [AThing]),
     ?assertEqual(length(Pids) - 1, length(AThing)),
     ok.
 
+two_pid_dying_test() ->
+    N = 5,
+    F = 1,
+    Msg = crypto:strong_rand_bytes(512),
+    {ok, Pid0} = reliable_broadcast:start_link(N, F, 512),
+    {ok, Pid1} = reliable_broadcast:start_link(N, F, 512),
+    {ok, Pid2} = reliable_broadcast:start_link(N, F, 512),
+    {ok, Pid3} = reliable_broadcast:start_link(N, F, 512),
+    {ok, Pid4} = reliable_broadcast:start_link(N, F, 512),
+    Pids = [Pid0, Pid1, Pid2, Pid3, Pid4],
+    {send, MsgsToSend} = reliable_broadcast:input(Pid0, Msg),
+    io:format("MsgsToSend ~p~n", [MsgsToSend]),
+    unlink(Pid2),
+    exit(Pid2, kill),
+    unlink(Pid4),
+    exit(Pid4, kill),
+    io:format("sender is ~p~n", [Pid0]),
+    AThing = do_send_outer([{0, {send, MsgsToSend}}], Pids, []),
+    ?debugFmt("A Thing ~p~n", [AThing]),
+    ?assertEqual(0, length(AThing)),
+    ok.
 
 do_send_outer([], _, Acc) ->
     Acc;
@@ -258,10 +281,10 @@ do_send({Id, {send, [{multicast, Msg}|T]}}, Pids) ->
     case Msg of
         {echo, H, Bj, Sj} ->
             PidsWithId = lists:zip(lists:seq(0, length(Pids) - 1), Pids),
-            [{J, echo(P, Id, H, Bj, Sj)} || {J, P} <- PidsWithId, J /= Id, is_process_alive(P)] ++ do_send({Id, {send, T}}, Pids);
+            [{J, echo(P, Id, H, Bj, Sj)} || {J, P} <- PidsWithId, is_process_alive(P)] ++ do_send({Id, {send, T}}, Pids);
         {ready, H} ->
             PidsWithId = lists:zip(lists:seq(0, length(Pids) - 1), Pids),
-            [{J, ready(P, Id, H)} || {J, P} <- PidsWithId, J /= Id, is_process_alive(P)] ++ do_send({Id, {send, T}}, Pids)
+            [{J, ready(P, Id, H)} || {J, P} <- PidsWithId, is_process_alive(P)] ++ do_send({Id, {send, T}}, Pids)
     end.
 
 -endif.
