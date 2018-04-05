@@ -29,8 +29,15 @@ share(Data, _J, Share) ->
             %% check if we have at least f+1 shares
             case length(NewData#data.shares) > Data#data.f of
                 true ->
+                    %% combine shares
                     Sig = tpke_pubkey:combine_signature_shares(tpke_privkey:public_key(NewData#data.sk), NewData#data.shares),
-                    {NewData#data{state=done}, {result, Sig}};
+                    %% check if the signature is valid
+                    case tpke_pubkey:verify_signature(tpke_privkey:public_key(NewData#data.sk), Sig, NewData#data.sid) of
+                        true ->
+                            {NewData#data{state=done}, {result, Sig}};
+                        false ->
+                            {NewData, ok}
+                    end;
                 false ->
                     {NewData, ok}
             end;
