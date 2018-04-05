@@ -1,6 +1,6 @@
 [{<<"erl_tpke">>,
   {git,"https://github.com/helium/erlang_tpke.git",
-       {ref,"545ab6fdce1b1ae64d5dd0ef2effc5ed8663f39a"}},
+       {ref,"744f6a26da55b71a2b0d262c5addb08d8e921131"}},
   0},
  {<<"erlang_pbc">>,
   {git,"https://github.com/helium/erlang_pbc.git",
