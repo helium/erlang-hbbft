@@ -1,12 +1,9 @@
 -module(reliable_broadcast).
 
--behaviour(gen_statem).
-
--export([start_link/3, input/2, val/4, echo/5, ready/3, stop/1]).
--export([random_n/2]).
--export([terminate/3, code_change/4, init/1, callback_mode/0, handle_event/4]).
+-export([init/3, input/2, val/4, echo/5, ready/3]).
 
 -record(data, {
+          state = init :: init | waiting | aborted | done,
           n :: pos_integer(),
           f :: pos_integer(),
           size :: pos_integer(),
@@ -27,43 +24,13 @@
 -type send_commands() :: [unicast() | multicast()].
 
 %% API.
-start_link(N, F, Size) ->
-    gen_statem:start_link(?MODULE, [N, F, Size], []).
+-spec init(pos_integer(), pos_integer(), pos_integer()) -> {ok, #data{}}.
+init(N, F, Size) ->
+    Data = #data{n=N, f=F, size=Size},
+    {ok, Data}.
 
--spec input(pid(), binary()) -> {send, send_commands()} | {error, already_initialized}.
-input(Pid, Msg) ->
-    gen_statem:call(Pid, {input, Msg}).
-
--spec val(pid(), merkerl:hash(), merkerl:proof(), binary()) -> ok | {send, send_commands()}.
-val(Pid, H, Bi, Si) ->
-    gen_statem:call(Pid, {val, H, Bi, Si}).
-
--spec echo(pid(), non_neg_integer(), merkerl:hash(), merkerl:proof(), binary()) -> ok | {send, send_commands()} | {result, V :: binary()} | abort.
-echo(Pid, J, H, Bi, Si) ->
-    gen_statem:call(Pid, {echo, J, H, Bi, Si}).
-
--spec ready(pid(), non_neg_integer(), merkerl:hash()) -> ok | {send, send_commands()} | {result, V :: binary()}.
-ready(Pid, J, H) ->
-    gen_statem:call(Pid, {ready, J, H}).
-
-stop(Pid) ->
-    gen_statem:stop(Pid).
-
-%% Mandatory callback functions
-terminate(_Reason, _State, _Data) ->
-    void.
-
-code_change(_Vsn, State, Data, _Extra) ->
-    {ok, State, Data}.
-
-init([N, F, Size]) ->
-    State = init, Data = #data{n=N, f=F, size=Size},
-    {ok, State, Data}.
-
-callback_mode() -> handle_event_function.
-
-%% state callback(s)
-handle_event({call, From}, {input, Msg}, init, Data =#data{n=N, f=F}) ->
+-spec input(#data{}, binary()) -> {#data{}, {send, send_commands()} | {error, already_initialized}}.
+input(Data = #data{state=init, n=N, f=F}, Msg) ->
     %% Figure2 from honeybadger WP
     %%%% let {Sj} j∈[N] be the blocks of an (N − 2 f , N)-erasure coding
     %%%% scheme applied to v
@@ -80,16 +47,29 @@ handle_event({call, From}, {input, Msg}, init, Data =#data{n=N, f=F}) ->
     NewData = Data#data{msg=Msg, h=MerkleRootHash},
     Result = [ {unicast, J, {val, MerkleRootHash, lists:nth(J+1, BranchesForShards), lists:nth(J+1, Shards)}} || J <- lists:seq(1, N-1)],
     %% unicast all the VAL packets and multicast the ECHO for our own share
-    {next_state, waiting, NewData, [{reply, From, {send, Result ++ [{multicast, {echo, MerkleRootHash, hd(BranchesForShards), hd(Shards)}}]}}]};
-handle_event({call, From}, {val, H, Bj, Sj}, init, Data = #data{shares=[]}) ->
+    {NewData#data{state=waiting}, {send, Result ++ [{multicast, {echo, MerkleRootHash, hd(BranchesForShards), hd(Shards)}}]}};
+input(Data, _Msg) ->
+    %% can't init twice
+    {Data, {error, already_initialized}}.
+
+
+-spec val(#data{}, merkerl:hash(), merkerl:proof(), binary()) -> {#data{}, ok | {send, send_commands()}}.
+val(Data = #data{state=init}, H, Bj, Sj) ->
     NewData = Data#data{h=H, shares=[{Bj, Sj}]},
     io:format("Got val msg~n"),
-    {next_state, waiting, NewData, [{reply, From, {send, [{multicast, {echo, H, Bj, Sj}}]}}]};
-handle_event({call, From}, {echo, J, H, Bj, Sj}, _State, Data = #data{n=N, f=F}) ->
-    %% TODO echoes need to be *distinct* somehow
-    %%
+    {NewData, {send, [{multicast, {echo, H, Bj, Sj}}]}};
+val(Data, _H, _Bi, _Si) ->
+    %% we already had a val, just ignore this
+    {Data, ok}.
+
+-spec echo(#data{}, non_neg_integer(), merkerl:hash(), merkerl:proof(), binary()) -> {#data{}, ok | {send, send_commands()} | {result, V :: binary()} | abort}.
+echo(Data = #data{state=aborted}, _J, _H, _Bj, _Sj) ->
+    {Data, ok};
+echo(Data = #data{state=done}, _J, _H, _Bj, _Sj) ->
+    {Data, ok};
+echo(Data = #data{n=N, f=F}, J, H, Bj, Sj) ->
     %% Check that Bj is a valid merkle branch for root h and and leaf Sj
-    io:format("~p Got echo msg from ~p ~p~n", [self(),J, _State]),
+    io:format("~p Got echo msg from ~p~n", [self(),J]),
     case merkerl:verify_proof(merkerl:hash_value(Sj), H, Bj) of
         ok ->
             NewData = Data#data{h=H, shares=lists:usort([{Bj, Sj}|Data#data.shares]), num_echoes=sets:add_element(J, Data#data.num_echoes)},
@@ -119,36 +99,39 @@ handle_event({call, From}, {echo, J, H, Bj, Sj}, _State, Data = #data{n=N, f=F})
                                                 true ->
                                                     %% decode V. Done
                                                     io:format("~p Done~n", [self()]),
-                                                    {stop_and_reply, normal, [{reply, From, {result, Msg}}], NewData};
+                                                    {NewData#data{state=done}, {result, Msg}};
                                                 false ->
                                                     %% wait for enough echoes and readies?
                                                     io:format("~p Not enought echoes or readies~n", [self()]),
-                                                    {next_state, waiting, NewData#data{msg=Msg}}
+                                                    {NewData#data{state=waiting, msg=Msg}, ok}
                                             end;
                                         false ->
                                             %% send ready(h)
                                             io:format("~p Sending Ready as it was not sent before~n", [self()]),
-                                            {next_state, waiting, NewData#data{msg=Msg}, [{reply, From, {send, [{multicast, {ready, H}}]}}]}
+                                            {NewData#data{state=waiting, msg=Msg}, {send, [{multicast, {ready, H}}]}}
                                     end;
                                 false ->
                                     %% abort
                                     io:format("~p Abort~n", [self()]),
-                                    {stop_and_reply, normal, [{reply, From, abort}], NewData}
+                                    {NewData#data{state=aborted}, abort}
                             end;
                         {error, Reason} ->
                             io:format("~p Reason: ~p~n", [self(), Reason]),
-                            {next_state, waiting, NewData, [{reply, From, ok}]}
+                            {NewData#data{state=waiting}, ok}
                     end;
                 false ->
-                    {next_state, waiting, NewData, [{reply, From, ok}]}
+                    {NewData#data{state=waiting}, ok}
             end;
         {error, _} ->
             %% otherwise discard
             io:format("Merkle Verify Proof failure: ~p~n", [sets:size(Data#data.num_echoes)]),
-            {keep_state_and_data, [{reply, From, ok}]}
-    end;
-handle_event({call, From}, {ready, J, H}, waiting, #data{h=H, n=N, f=F}=Data) ->
-    %% TODO increment num_readies
+            {Data, ok}
+    end.
+
+
+-spec ready(#data{}, non_neg_integer(), merkerl:hash()) -> {#data{}, ok | {send, send_commands()} | {result, V :: binary()}}.
+ready(Data = #data{state=waiting, n=N, f=F}, J, H) ->
+    %% increment num_readies
     NewData = Data#data{num_readies=sets:add_element(J, Data#data.num_readies)},
     case sets:size(NewData#data.num_readies) >= F + 1 of
         true ->
@@ -159,28 +142,81 @@ handle_event({call, From}, {ready, J, H}, waiting, #data{h=H, n=N, f=F}=Data) ->
                 true ->
                     %% done
                     io:format("~p Got enough readies and echoes~n", [self()]),
-                    {stop_and_reply, normal, [{reply, From, {result, NewData#data.msg}}], NewData};
+                    {NewData#data{state=done}, {result, NewData#data.msg}};
                 false when not NewData#data.ready_sent ->
                     %% multicast ready
                     io:format("~p Multicasting ready, not done before~n", [self()]),
-                    {next_state, waiting, NewData#data{ready_sent=true}, [{reply, From, {send, [{multicast, {ready, H}}]}}]};
+                    {NewData, {send, [{multicast, {ready, H}}]}};
                 _ ->
                     io:format("~p Waiting for 2*f + 1 readies and enought num_echoes~n", [self()]),
-                    {next_state, waiting, NewData, [{reply, From, ok}]}
+                    {NewData, ok}
             end;
         false ->
             %% waiting
             io:format("~p J: ~p~n", [self(), J]),
             io:format("~p Waiting for F+1 readies, readies so far:~p~n", [self(), sets:size(NewData#data.num_readies)]),
-            {keep_state, NewData, [{reply, From, ok}]}
+            {NewData, ok}
     end;
-handle_event({call, From}, {val, _, _, _, _}, waiting, _Data) ->
-    io:format("~p ignoring val~n", [self()]),
-    %% we already had a val, just ignore this
-    {keep_state_and_data, [{reply, From, ok}]};
-handle_event({call, From}, {ready, _, _}, init, _Data) ->
-    %% ignore a ready before we know what we're doing
-    {keep_state_and_data, [{reply, From, ok}]}.
+ready(Data, _J, _H) ->
+    {Data, ok}.
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+kill(Data) ->
+    Data#data{state=aborted}.
+
+init_test() ->
+    N = 5,
+    F = 1,
+    Msg = crypto:strong_rand_bytes(512),
+    {ok, S0} = reliable_broadcast:init(N, F, 512),
+    {ok, S1} = reliable_broadcast:init(N, F, 512),
+    {ok, S2} = reliable_broadcast:init(N, F, 512),
+    {ok, S3} = reliable_broadcast:init(N, F, 512),
+    {ok, S4} = reliable_broadcast:init(N, F, 512),
+    {NewS0, {send, MsgsToSend}} = reliable_broadcast:input(S0, Msg),
+    States = [NewS0, S1, S2, S3, S4],
+    StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
+    ConvergedResults = do_send_outer([{0, {send, MsgsToSend}}], StatesWithId, []),
+    %% everyone should converge
+    ?assertEqual(N, length(ConvergedResults)),
+    ok.
+
+
+pid_dying_test() ->
+    N = 5,
+    F = 1,
+    Msg = crypto:strong_rand_bytes(512),
+    {ok, S0} = reliable_broadcast:init(N, F, 512),
+    {ok, S1} = reliable_broadcast:init(N, F, 512),
+    {ok, S2} = reliable_broadcast:init(N, F, 512),
+    {ok, S3} = reliable_broadcast:init(N, F, 512),
+    {ok, S4} = reliable_broadcast:init(N, F, 512),
+    {NewS0, {send, MsgsToSend}} = reliable_broadcast:input(S0, Msg),
+    States = [NewS0, S1, kill(S2), S3, S4],
+    StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
+    ConvergedResults = do_send_outer([{0, {send, MsgsToSend}}], StatesWithId, []),
+    %% everyone but the dead node should converge
+    ?assertEqual(N - 1, length(ConvergedResults)),
+    ok.
+
+two_pid_dying_test() ->
+    N = 5,
+    F = 1,
+    Msg = crypto:strong_rand_bytes(512),
+    {ok, S0} = reliable_broadcast:init(N, F, 512),
+    {ok, S1} = reliable_broadcast:init(N, F, 512),
+    {ok, S2} = reliable_broadcast:init(N, F, 512),
+    {ok, S3} = reliable_broadcast:init(N, F, 512),
+    {ok, S4} = reliable_broadcast:init(N, F, 512),
+    {NewS0, {send, MsgsToSend}} = reliable_broadcast:input(S0, Msg),
+    States = [NewS0, S1, kill(S2), S3, kill(S4)],
+    StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
+    ConvergedResults = do_send_outer([{0, {send, MsgsToSend}}], StatesWithId, []),
+    %% nobody should converge
+    ?assertEqual(0, length(ConvergedResults)),
+    ok.
 
 %% helpers
 random_n(N, List) ->
@@ -189,102 +225,40 @@ random_n(N, List) ->
 shuffle(List) ->
     [X || {_,X} <- lists:sort([{rand:uniform(), N} || N <- List])].
 
-
--ifdef(TEST).
--include_lib("eunit/include/eunit.hrl").
-
-init_test() ->
-    N = 5,
-    F = 1,
-    Msg = crypto:strong_rand_bytes(512),
-    {ok, Pid0} = reliable_broadcast:start_link(N, F, 512),
-    {ok, Pid1} = reliable_broadcast:start_link(N, F, 512),
-    {ok, Pid2} = reliable_broadcast:start_link(N, F, 512),
-    {ok, Pid3} = reliable_broadcast:start_link(N, F, 512),
-    {ok, Pid4} = reliable_broadcast:start_link(N, F, 512),
-    Pids = [Pid0, Pid1, Pid2, Pid3, Pid4],
-    {send, MsgsToSend} = reliable_broadcast:input(Pid0, Msg),
-    %% ?debugFmt("MsgsToSend ~p~n", [MsgsToSend]),
-    AThing = do_send_outer([{0, {send, MsgsToSend}}], Pids, []),
-    ?debugFmt("A Thing ~p~n", [AThing]),
-    ?assertEqual(length(AThing), length(Pids)),
-    ok.
-
-
-pid_dying_test() ->
-    N = 5,
-    F = 1,
-    Msg = crypto:strong_rand_bytes(512),
-    {ok, Pid0} = reliable_broadcast:start_link(N, F, 512),
-    {ok, Pid1} = reliable_broadcast:start_link(N, F, 512),
-    {ok, Pid2} = reliable_broadcast:start_link(N, F, 512),
-    {ok, Pid3} = reliable_broadcast:start_link(N, F, 512),
-    {ok, Pid4} = reliable_broadcast:start_link(N, F, 512),
-    Pids = [Pid0, Pid1, Pid2, Pid3, Pid4],
-    {send, MsgsToSend} = reliable_broadcast:input(Pid0, Msg),
-    io:format("MsgsToSend ~p~n", [MsgsToSend]),
-    unlink(Pid2),
-    exit(Pid2, kill),
-    io:format("sender is ~p~n", [Pid0]),
-    AThing = do_send_outer([{0, {send, MsgsToSend}}], Pids, []),
-    ?debugFmt("A Thing ~p~n", [AThing]),
-    ?assertEqual(length(Pids) - 1, length(AThing)),
-    ok.
-
-two_pid_dying_test() ->
-    N = 5,
-    F = 1,
-    Msg = crypto:strong_rand_bytes(512),
-    {ok, Pid0} = reliable_broadcast:start_link(N, F, 512),
-    {ok, Pid1} = reliable_broadcast:start_link(N, F, 512),
-    {ok, Pid2} = reliable_broadcast:start_link(N, F, 512),
-    {ok, Pid3} = reliable_broadcast:start_link(N, F, 512),
-    {ok, Pid4} = reliable_broadcast:start_link(N, F, 512),
-    Pids = [Pid0, Pid1, Pid2, Pid3, Pid4],
-    {send, MsgsToSend} = reliable_broadcast:input(Pid0, Msg),
-    io:format("MsgsToSend ~p~n", [MsgsToSend]),
-    unlink(Pid2),
-    exit(Pid2, kill),
-    unlink(Pid4),
-    exit(Pid4, kill),
-    io:format("sender is ~p~n", [Pid0]),
-    AThing = do_send_outer([{0, {send, MsgsToSend}}], Pids, []),
-    ?debugFmt("A Thing ~p~n", [AThing]),
-    ?assertEqual(0, length(AThing)),
-    ok.
-
 do_send_outer([], _, Acc) ->
     Acc;
 do_send_outer([{result, {Id, Result}} | T], Pids, Acc) ->
     do_send_outer(T, Pids, [{result, {Id, Result}} | Acc]);
-do_send_outer([H|T], Pids, Acc) ->
-    %% io:format("H: ~p~n", [H]),
-    R = do_send(H, Pids),
-    ?debugFmt("Round output ~p~n", [R]),
-    %% ?debugFmt("Round output 1~p~n", [hd(R)]),
-    do_send_outer(T++R, Pids, Acc).
+do_send_outer([H|T], States, Acc) ->
+    {R, NewStates} = do_send(H, [], States),
+    do_send_outer(T++R, NewStates, Acc).
 
-do_send({Id, {result, Result}}, _) ->
-    [{result, {Id, Result}}];
-do_send({_, ok}, _) ->
-    [];
-do_send({_, {send, []}}, _) ->
-    [];
-do_send({Id, {send, [{unicast, J, {val, H, Bj, Sj}}|T]}}, Pids) ->
-    Destination = lists:nth(J+1, Pids),
-    case is_process_alive(Destination) of
-        true ->
-            [{J, val(Destination, H, Bj, Sj)}] ++ do_send({Id, {send, T}}, Pids);
-        false -> do_send({Id, {send, T}}, Pids)
-    end;
-do_send({Id, {send, [{multicast, Msg}|T]}}, Pids) ->
+do_send({Id, {result, Result}}, Acc, States) ->
+    {[{result, {Id, Result}} | Acc], States};
+do_send({_, ok}, Acc, States) ->
+    {Acc, States};
+do_send({_, {send, []}}, Acc, States) ->
+    {Acc, States};
+do_send({Id, {send, [{unicast, J, {val, H, Bj, Sj}}|T]}}, Acc, States) ->
+    {J, State} = lists:keyfind(J, 1, States),
+    {NewState, Result} = val(State, H, Bj, Sj),
+    do_send({Id, {send, T}}, [{J, Result}|Acc], lists:keyreplace(J, 1, States, {J, NewState}));
+do_send({Id, {send, [{multicast, Msg}|T]}}, Acc, States) ->
     case Msg of
         {echo, H, Bj, Sj} ->
-            PidsWithId = lists:zip(lists:seq(0, length(Pids) - 1), Pids),
-            [{J, echo(P, Id, H, Bj, Sj)} || {J, P} <- PidsWithId, is_process_alive(P)] ++ do_send({Id, {send, T}}, Pids);
+            Res = lists:map(fun({J, State}) ->
+                                    {NewState, Result} = echo(State, Id, H, Bj, Sj),
+                                    {{J, NewState}, {J, Result}}
+                            end, States),
+            {NewStates, Results} = lists:unzip(Res),
+            do_send({Id, {send, T}}, Results ++ Acc, lists:ukeymerge(1, NewStates, States));
         {ready, H} ->
-            PidsWithId = lists:zip(lists:seq(0, length(Pids) - 1), Pids),
-            [{J, ready(P, Id, H)} || {J, P} <- PidsWithId, is_process_alive(P)] ++ do_send({Id, {send, T}}, Pids)
+            Res = lists:map(fun({J, State}) ->
+                                    {NewState, Result} = ready(State, Id, H),
+                                    {{J, NewState}, {J, Result}}
+                            end, States),
+            {NewStates, Results} = lists:unzip(Res),
+            do_send({Id, {send, T}}, Results ++ Acc, lists:ukeymerge(1, NewStates, States))
     end.
 
 -endif.
