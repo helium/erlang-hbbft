@@ -32,7 +32,22 @@ handle_msg(Data, J, {aux, V}) ->
     aux(Data, J, V);
 handle_msg(Data, J, {coin, CMsg}) ->
     %% dispatch the message to the nested coin protocol
-    ok.
+    case common_coin:handle_msg(Data#data.coin, J, CMsg) of
+        {NewCoin, {result, Result}} ->
+            %% ok, we've obtained the common coin
+            case sets:size(Data#data.bin_values) == 1 of
+                true ->
+                    %% if vals = {b}
+                    ok;
+                false ->
+                    %% else estr+1:=s%2
+                    ok
+            end;
+        {NewCoin, {send, Messages}} ->
+            {Data#data{coin=NewCoin}, {send, wrap(coin, Messages)}};
+        {NewCoin, ok} ->
+            {Data#data{coin=NewCoin}, ok}
+    end.
 
 %-spec bv_broadcast(#data{}, sets:set({non_neg_integer(), 0 | 1})) -> {#data{}, {send, broadcast()} | {error, not_enough_witnesses}}.
 bval(Data=#data{n=N, f=F}, Id, V) ->
@@ -61,7 +76,7 @@ bval(Data=#data{n=N, f=F}, Id, V) ->
                             %% instanciate the common coin
                             %% TODO need more entropy for the SID
                             {CoinData, {send, ToSend}} = common_coin:get_coin(common_coin:init(NewData#data.secret_key, {NewData#data.round}, N, F)),
-                            {NewData#data{coin=CoinData} , {send, [ToSend|AuxSend]}};
+                            {NewData#data{coin=CoinData} , {send, [wrap(coin, ToSend)|AuxSend]}};
                         _ ->
                             {NewData, {send, AuxSend}}
                     end
@@ -82,3 +97,10 @@ aux(Data = #data{n=N, f=F}, Id, V) ->
             {NewData, ok}
     end.
 
+%% wrap a subprotocol's outbound messages with a protocol identifier
+wrap(_, []) ->
+    [];
+wrap(Id, [{multicast, Msg}|T]) ->
+    [{multicast, {Id, Msg}}|wrap(Id, T)];
+wrap(Id, [{unicast, Dest, Msg}|T]) ->
+    [{unicast, Dest, {Id, Msg}}|wrap(Id, T)].
