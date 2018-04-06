@@ -29,13 +29,10 @@ input(Data = #data{state=done}, _BInput) ->
 handle_msg(Data = #data{state=done}, _J, _BInput) ->
     {Data, ok};
 handle_msg(Data = #data{round=R}, J, {bval, R, V}) ->
-    io:format("Got bval ~p from ~p in round ~p~n", [V, J, R]),
     bval(Data, J, V);
-handle_msg(Data = #data{round=_R}, J, {aux, R, V}) ->
-    io:format("Got aux ~p from ~p in round ~p~n", [V, J, R]),
+handle_msg(Data = #data{round=_R}, J, {aux, _R, V}) ->
     aux(Data, J, V);
 handle_msg(Data = #data{round=_R, coin=Coin}, J, {{coin, _R}, CMsg}) when Coin /= undefined ->
-    %io:format("Coin data ~p ~p~n", [Data#data.coin, CMsg]),
     %% dispatch the message to the nested coin protocol
     case common_coin:handle_msg(Data#data.coin, J, CMsg) of
         {_NewCoin, {result, Result}} ->
@@ -72,7 +69,6 @@ handle_msg(Data = #data{round=_R, coin=Coin}, J, {{coin, _R}, CMsg}) when Coin /
             {Data#data{coin=NewCoin}, ok}
     end;
 handle_msg(Data, _J, _Msg) ->
-    io:format("Ignored ~p from ~p~n", [_Msg, _J]),
     {Data, ok}.
 
 %-spec bv_broadcast(#data{}, sets:set({non_neg_integer(), 0 | 1})) -> {#data{}, {send, broadcast()} | {error, not_enough_witnesses}}.
@@ -80,7 +76,6 @@ bval(Data=#data{n=N, f=F}, Id, V) ->
     %% add to witnesses
     Witness = sets:add_element({Id, V}, Data#data.witness),
     WitnessCount = lists:sum([ 1 || {_, Val} <- sets:to_list(Witness), V == Val ]),
-    io:format("Witness count for ~p is ~p ~p~n", [V, WitnessCount, sets:to_list(Witness)]),
     {NewData, ToSend} = case WitnessCount >= F+1 andalso sets:is_element(V, Data#data.broadcasted) == false of
                             true ->
                                 %% add to broadcasted
