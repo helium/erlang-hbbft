@@ -29,10 +29,12 @@ input(Data = #data{state=init}, BInput) ->
     {Data#data{est = BInput}, {send, [{multicast, {bval, Data#data.round, BInput}}]}}.
 
 handle_msg(Data = #data{round=R}, J, {bval, R, V}) ->
-    bval(Data = #data{round=R}, J, V);
-handle_msg(Data = #data{round=R}, J, {aux, R, V}) ->
+    io:format("Got bval ~p from ~p in round ~p~n", [V, J, R]),
+    bval(Data, J, V);
+handle_msg(Data = #data{round=_R}, J, {aux, R, V}) ->
+    io:format("Got aux ~p from ~p in round ~p~n", [V, J, R]),
     aux(Data, J, V);
-handle_msg(Data = #data{round=R}, J, {coin, R, CMsg}) ->
+handle_msg(Data = #data{round=_R}, J, {coin, R, CMsg}) ->
     %% dispatch the message to the nested coin protocol
     case common_coin:handle_msg(Data#data.coin, J, CMsg) of
         {NewCoin, {result, Result}} ->
@@ -67,13 +69,17 @@ handle_msg(Data = #data{round=R}, J, {coin, R, CMsg}) ->
             {Data#data{coin=NewCoin}, {send, wrap(coin, Messages)}};
         {NewCoin, ok} ->
             {Data#data{coin=NewCoin}, ok}
-    end.
+    end;
+handle_msg(Data, _J, _Msg) ->
+    io:format("Ignored ~p from ~p~n", [_Msg, _J]),
+    {Data, ok}.
 
 %-spec bv_broadcast(#data{}, sets:set({non_neg_integer(), 0 | 1})) -> {#data{}, {send, broadcast()} | {error, not_enough_witnesses}}.
 bval(Data=#data{n=N, f=F}, Id, V) ->
     %% add to witnesses
     Witness = sets:add_element({Id, V}, Data#data.witness),
     WitnessCount = lists:sum([ 1 || {_, Val} <- sets:to_list(Witness), V == Val ]),
+    io:format("Witness count for ~p is ~p ~p~n", [V, WitnessCount, sets:to_list(Witness)]),
     {NewData, ToSend} = case WitnessCount >= F+1 andalso sets:is_element(V, Data#data.broadcasted) == false of
                             true ->
                                 %% add to broadcasted
@@ -81,7 +87,7 @@ bval(Data=#data{n=N, f=F}, Id, V) ->
                                                     broadcasted=sets:add_element(V, Data#data.broadcasted)},
                                 {NewData0, [{multicast, {bval, Data#data.round, V}}]};
                             false ->
-                                {Data, []}
+                                {Data#data{witness=Witness}, []}
                         end,
 
     case WitnessCount >= 2*F+1 of
@@ -92,7 +98,7 @@ bval(Data=#data{n=N, f=F}, Id, V) ->
             {NewData3, ToSend2} = case NewData2#data.aux_sent == false of
                           true ->
                               %% XXX How many times do we send AUX per round? I think just once
-                              Random = lists:nth(rand:uniform(sets:size(NewData#data.bin_values), sets:from_list(NewData#data.bin_values))),
+                              Random = lists:nth(rand:uniform(sets:size(NewData2#data.bin_values)), sets:to_list(NewData2#data.bin_values)),
                               {NewData2#data{aux_sent = true}, [{multicast, {aux, NewData2#data.round, Random}}|ToSend]};
                           false ->
                               {NewData2, ToSend}
