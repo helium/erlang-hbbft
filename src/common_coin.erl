@@ -139,6 +139,39 @@ too_many_dead_test() ->
     ?assertEqual(0, sets:size(ConvergedResults)),
     ok.
 
+mixed_keys_test() ->
+    N = 5,
+    F = 1,
+    dealer:start_link(N, F+1, 'SS512'),
+    {ok, PubKey, PrivateKeys} = dealer:deal(),
+    {ok, PubKey2, PrivateKeys2} = dealer:deal(),
+
+    gen_server:stop(dealer),
+
+    Sid = tpke_pubkey:hash_message(PubKey, crypto:strong_rand_bytes(32)),
+
+    [S0, S1, S2, _, _] = [common_coin:init(Sk, Sid, N, F) || Sk <- PrivateKeys],
+    [_, _, _, S3, S4] = [common_coin:init(Sk, Sid, N, F) || Sk <- PrivateKeys2],
+
+    StatesWithId = lists:zip(lists:seq(0, N - 1), [S0, S1, S2, S3, S4]),
+    %% all valid members should call get_coin
+    Res = lists:map(fun({J, State}) ->
+                            {NewState, Result} = get_coin(State),
+                            {{J, NewState}, {J, Result}}
+                    end, StatesWithId),
+    {NewStates, Results} = lists:unzip(Res),
+    ConvergedResults = do_send_outer(Results, NewStates, sets:new()),
+
+    DistinctCoins = sets:from_list([Coin || {result, {_, Coin}} <- sets:to_list(ConvergedResults)]),
+    io:format("DistinctCoins: ~p~n", [sets:to_list(DistinctCoins)]),
+    %% two distinct sets have converged with different coins each
+    ?assertEqual(2, sets:size(DistinctCoins)),
+
+    %% io:format("ConvergedResults: ~p~n", [sets:to_list(ConvergedResults)]),
+    %% everyone but two should converge
+    ?assertEqual(N, sets:size(ConvergedResults)),
+    ok.
+
 do_send_outer([], _, Acc) ->
     Acc;
 do_send_outer([{result, {Id, Result}} | T], Pids, Acc) ->
