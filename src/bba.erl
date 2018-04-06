@@ -34,7 +34,8 @@ handle_msg(Data = #data{round=R}, J, {bval, R, V}) ->
 handle_msg(Data = #data{round=_R}, J, {aux, R, V}) ->
     io:format("Got aux ~p from ~p in round ~p~n", [V, J, R]),
     aux(Data, J, V);
-handle_msg(Data = #data{round=_R}, J, {coin, R, CMsg}) ->
+handle_msg(Data = #data{round=_R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin /= undefined ->
+    %io:format("Coin data ~p ~p~n", [Data#data.coin, CMsg]),
     %% dispatch the message to the nested coin protocol
     case common_coin:handle_msg(Data#data.coin, J, CMsg) of
         {NewCoin, {result, Result}} ->
@@ -66,7 +67,7 @@ handle_msg(Data = #data{round=_R}, J, {coin, R, CMsg}) ->
                     input(NewData#data{round=Data#data.round + 1}, B)
             end;
         {NewCoin, {send, Messages}} ->
-            {Data#data{coin=NewCoin}, {send, wrap(coin, Messages)}};
+            {Data#data{coin=NewCoin}, {send, wrap({coin, Data#data.round}, Messages)}};
         {NewCoin, ok} ->
             {Data#data{coin=NewCoin}, ok}
     end;
@@ -108,8 +109,8 @@ bval(Data=#data{n=N, f=F}, Id, V) ->
                 true when NewData3#data.coin == undefined ->
                     %% instanciate the common coin
                     %% TODO need more entropy for the SID
-                    {CoinData, {send, CoinSend}} = common_coin:get_coin(common_coin:init(NewData3#data.secret_key, {NewData3#data.round}, N, F)),
-                    {NewData3#data{coin=CoinData} , {send, [wrap(coin, CoinSend)|ToSend2]}};
+                    {CoinData, {send, CoinSend}} = common_coin:get_coin(common_coin:init(NewData3#data.secret_key, term_to_binary({NewData3#data.round}), N, F)),
+                    {NewData3#data{coin=CoinData}, {send, [wrap({coin, Data#data.round}, CoinSend)|ToSend2]}};
                 _ ->
                     {NewData3, {send, ToSend2}}
             end;
@@ -125,8 +126,8 @@ aux(Data = #data{n=N, f=F}, Id, V) ->
         true when NewData#data.coin == undefined ->
             %% instanciate the common coin
             %% TODO need more entropy for the SID
-            {CoinData, {send, ToSend}} = common_coin:get_coin(common_coin:init(NewData#data.secret_key, {NewData#data.round}, N, F)),
-            {NewData#data{coin=CoinData} , {send, ToSend}};
+            {CoinData, {send, ToSend}} = common_coin:get_coin(common_coin:init(NewData#data.secret_key, term_to_binary({NewData#data.round}), N, F)),
+            {NewData#data{coin=CoinData}, {send, wrap({coin, Data#data.round}, ToSend)}};
         _ ->
             {NewData, ok}
     end.
@@ -160,8 +161,9 @@ init_test() ->
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
     ConvergedResults = do_send_outer(Results, NewStates, []),
+    io:format("Results ~p~n", [lists:usort(ConvergedResults)]),
     %% everyone should converge
-    ?assertEqual(N, length(ConvergedResults)),
+    ?assertEqual(N, length(lists:usort(ConvergedResults))),
     ok.
 
 do_send_outer([], _, Acc) ->

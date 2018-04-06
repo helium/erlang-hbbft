@@ -11,6 +11,9 @@
           shares = sets:new()
          }).
 
+init(SecretKeyShard, Bin, N, F) when is_binary(Bin) ->
+    Sid = tpke_pubkey:hash_message(tpke_privkey:public_key(SecretKeyShard), Bin),
+    init(SecretKeyShard, Sid, N, F);
 init(SecretKeyShard, Sid, N, F) ->
     #data{sk=SecretKeyShard, n=N, f=F, sid=Sid}.
 
@@ -37,7 +40,8 @@ share(Data, _J, Share) ->
                     %% check if the signature is valid
                     case tpke_pubkey:verify_signature(tpke_privkey:public_key(NewData#data.sk), Sig, NewData#data.sid) of
                         true ->
-                            {NewData#data{state=done}, {result, Sig}};
+                            <<Val:32/integer, _/binary>> = erlang_pbc:element_to_binary(Sig),
+                            {NewData#data{state=done}, {result, Val}};
                         false ->
                             {NewData, ok}
                     end;
