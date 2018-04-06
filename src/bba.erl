@@ -32,7 +32,7 @@ handle_msg(Data = #data{round=R}, J, {bval, R, V}) ->
     bval(Data, J, V);
 handle_msg(Data = #data{round=_R}, J, {aux, _R, V}) ->
     aux(Data, J, V);
-handle_msg(Data = #data{round=_R, coin=Coin}, J, {{coin, _R}, CMsg}) when Coin /= undefined ->
+handle_msg(Data = #data{round=R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin /= undefined ->
     %% dispatch the message to the nested coin protocol
     case common_coin:handle_msg(Data#data.coin, J, CMsg) of
         {_NewCoin, {result, Result}} ->
