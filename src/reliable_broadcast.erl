@@ -183,9 +183,9 @@ init_test() ->
     {NewS0, {send, MsgsToSend}} = reliable_broadcast:input(S0, Msg),
     States = [NewS0, S1, S2, S3, S4],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
-    ConvergedResults = do_send_outer([{0, {send, MsgsToSend}}], StatesWithId, []),
+    ConvergedResults = do_send_outer([{0, {send, MsgsToSend}}], StatesWithId, sets:new()),
     %% everyone should converge
-    ?assertEqual(N, length(ConvergedResults)),
+    ?assertEqual(N, sets:size(ConvergedResults)),
     ok.
 
 
@@ -201,9 +201,9 @@ pid_dying_test() ->
     {NewS0, {send, MsgsToSend}} = reliable_broadcast:input(S0, Msg),
     States = [NewS0, S1, kill(S2), S3, S4],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
-    ConvergedResults = do_send_outer([{0, {send, MsgsToSend}}], StatesWithId, []),
+    ConvergedResults = do_send_outer([{0, {send, MsgsToSend}}], StatesWithId, sets:new()),
     %% everyone but the dead node should converge
-    ?assertEqual(N - 1, length(ConvergedResults)),
+    ?assertEqual(N - 1, sets:size(ConvergedResults)),
     ok.
 
 two_pid_dying_test() ->
@@ -218,15 +218,15 @@ two_pid_dying_test() ->
     {NewS0, {send, MsgsToSend}} = reliable_broadcast:input(S0, Msg),
     States = [NewS0, S1, kill(S2), S3, kill(S4)],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
-    ConvergedResults = do_send_outer([{0, {send, MsgsToSend}}], StatesWithId, []),
+    ConvergedResults = do_send_outer([{0, {send, MsgsToSend}}], StatesWithId, sets:new()),
     %% nobody should converge
-    ?assertEqual(0, length(ConvergedResults)),
+    ?assertEqual(0, sets:size(ConvergedResults)),
     ok.
 
 do_send_outer([], _, Acc) ->
     Acc;
 do_send_outer([{result, {Id, Result}} | T], Pids, Acc) ->
-    do_send_outer(T, Pids, [{result, {Id, Result}} | Acc]);
+    do_send_outer(T, Pids, sets:add_element({result, {Id, Result}}, Acc));
 do_send_outer([H|T], States, Acc) ->
     {R, NewStates} = do_send(H, [], States),
     do_send_outer(T++R, NewStates, Acc).
@@ -248,5 +248,4 @@ do_send({Id, {send, [{multicast, Msg}|T]}}, Acc, States) ->
                     end, States),
     {NewStates, Results} = lists:unzip(Res),
     do_send({Id, {send, T}}, Results ++ Acc, lists:ukeymerge(1, NewStates, States)).
-
 -endif.

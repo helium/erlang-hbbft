@@ -74,9 +74,9 @@ init_test() ->
                             {{J, NewState}, {J, Result}}
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
-    ConvergedResults = do_send_outer(Results, NewStates, []),
+    ConvergedResults = do_send_outer(Results, NewStates, sets:new()),
     %% everyone should converge
-    ?assertEqual(N, length(ConvergedResults)),
+    ?assertEqual(N, sets:size(ConvergedResults)),
     ok.
 
 one_dead_test() ->
@@ -94,9 +94,9 @@ one_dead_test() ->
                             {{J, NewState}, {J, Result}}
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
-    ConvergedResults = do_send_outer(Results, NewStates, []),
+    ConvergedResults = do_send_outer(Results, NewStates, sets:new()),
     %% everyone but one should converge
-    ?assertEqual(N - 1, length(ConvergedResults)),
+    ?assertEqual(N - 1, sets:size(ConvergedResults)),
     ok.
 
 two_dead_test() ->
@@ -114,9 +114,9 @@ two_dead_test() ->
                             {{J, NewState}, {J, Result}}
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
-    ConvergedResults = do_send_outer(Results, NewStates, []),
+    ConvergedResults = do_send_outer(Results, NewStates, sets:new()),
     %% everyone but two should converge
-    ?assertEqual(N - 2, length(ConvergedResults)),
+    ?assertEqual(N - 2, sets:size(ConvergedResults)),
     ok.
 
 too_many_dead_test() ->
@@ -134,16 +134,15 @@ too_many_dead_test() ->
                             {{J, NewState}, {J, Result}}
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
-    ConvergedResults = do_send_outer(Results, NewStates, []),
+    ConvergedResults = do_send_outer(Results, NewStates, sets:new()),
     %% nobody should converge
-    ?assertEqual(0, length(ConvergedResults)),
+    ?assertEqual(0, sets:size(ConvergedResults)),
     ok.
-
 
 do_send_outer([], _, Acc) ->
     Acc;
 do_send_outer([{result, {Id, Result}} | T], Pids, Acc) ->
-    do_send_outer(T, Pids, [{result, {Id, Result}} | Acc]);
+    do_send_outer(T, Pids, sets:add_element({result, {Id, Result}}, Acc));
 do_send_outer([H|T], States, Acc) ->
     {R, NewStates} = do_send(H, [], States),
     do_send_outer(T++R, NewStates, Acc).
@@ -166,5 +165,3 @@ do_send({Id, {send, [{multicast, Msg}|T]}}, Acc, States) ->
     {NewStates, Results} = lists:unzip(Res),
     do_send({Id, {send, T}}, Results ++ Acc, lists:ukeymerge(1, NewStates, States)).
 -endif.
-
-

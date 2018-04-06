@@ -18,27 +18,27 @@
           bin_values = sets:new() :: set:set(0 | 1)
          }).
 
-%-type bval_msg() :: {bval, {pos_integer(), 0 | 1}}.
-
-%-type multicast() :: {multicast, bval_msg()}.
-
 init(SK, N, F) ->
     #data{secret_key=SK, n=N, f=F}.
 
 input(Data = #data{state=init}, BInput) ->
-    {Data#data{est = BInput}, {send, [{multicast, {bval, Data#data.round, BInput}}]}}.
+    {Data#data{est = BInput}, {send, [{multicast, {bval, Data#data.round, BInput}}]}};
+input(Data = #data{state=done}, _BInput) ->
+    {Data, ok}.
 
+handle_msg(Data = #data{state=done}, _J, _BInput) ->
+    {Data, ok};
 handle_msg(Data = #data{round=R}, J, {bval, R, V}) ->
     io:format("Got bval ~p from ~p in round ~p~n", [V, J, R]),
     bval(Data, J, V);
 handle_msg(Data = #data{round=_R}, J, {aux, R, V}) ->
     io:format("Got aux ~p from ~p in round ~p~n", [V, J, R]),
     aux(Data, J, V);
-handle_msg(Data = #data{round=_R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin /= undefined ->
+handle_msg(Data = #data{round=_R, coin=Coin}, J, {{coin, _R}, CMsg}) when Coin /= undefined ->
     %io:format("Coin data ~p ~p~n", [Data#data.coin, CMsg]),
     %% dispatch the message to the nested coin protocol
     case common_coin:handle_msg(Data#data.coin, J, CMsg) of
-        {NewCoin, {result, Result}} ->
+        {_NewCoin, {result, Result}} ->
             %% ok, we've obtained the common coin
             case sets:size(Data#data.bin_values) == 1 of
                 true ->
@@ -160,16 +160,37 @@ init_test() ->
                             {{J, NewState}, {J, Result}}
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
-    ConvergedResults = do_send_outer(Results, NewStates, []),
-    io:format("Results ~p~n", [lists:usort(ConvergedResults)]),
+    %% ConvergedResults = do_send_outer(Results, NewStates, []),
+    ConvergedResults = do_send_outer(Results, NewStates, sets:new()),
+    io:format("ConvergedResults ~p~n", [ConvergedResults]),
     %% everyone should converge
-    ?assertEqual(N, length(lists:usort(ConvergedResults))),
+    ?assertEqual(N, sets:size(ConvergedResults)),
     ok.
+
+one_dead_test() ->
+    N = 5,
+    F = 1,
+    dealer:start_link(N, F+1, 'SS512'),
+    {ok, PubKey, PrivateKeys} = dealer:deal(),
+    gen_server:stop(dealer),
+    [S0, S1, S2, S3, S4] = [bba:init(Sk, N, F) || Sk <- PrivateKeys],
+    StatesWithId = lists:zip(lists:seq(0, N - 1), [S0, S1, kill(S2), S3, S4]),
+    %% all valid members should call get_coin
+    Res = lists:map(fun({J, State}) ->
+                            {NewState, Result} = input(State, 1),
+                            {{J, NewState}, {J, Result}}
+                    end, StatesWithId),
+    {NewStates, Results} = lists:unzip(Res),
+    ConvergedResults = do_send_outer(Results, NewStates, sets:new()),
+    %% everyone but one should converge
+    ?assertEqual(N - 1, sets:size(ConvergedResults)),
+    ok.
+
 
 do_send_outer([], _, Acc) ->
     Acc;
 do_send_outer([{result, {Id, Result}} | T], Pids, Acc) ->
-    do_send_outer(T, Pids, [{result, {Id, Result}} | Acc]);
+    do_send_outer(T, Pids, sets:add_element({result, {Id, Result}}, Acc));
 do_send_outer([H|T], States, Acc) ->
     {R, NewStates} = do_send(H, [], States),
     do_send_outer(T++R, NewStates, Acc).
