@@ -21,7 +21,6 @@ input(Data = #data{n=N, f=F}, Inputs) ->
     RBCsWithResponses = [reliable_broadcast:input(reliable_broadcast:init(N, F, byte_size(Input)), Input) || Input <- Inputs],
     {RBCs, Responses} = lists:unzip(RBCsWithResponses),
     RBCMap = maps:from_list(lists:zip(lists:seq(0, length(Inputs) - 1), RBCs)),
-    io:format("RBC map ~p~n", [RBCMap]),
     WrappedResponses = [ wrap({rbc, I}, Response) || {I, {send, Response}} <- lists:zip(lists:seq(0, length(Inputs) - 1), Responses) ],
     {Data#data{rbc=RBCMap}, {send, lists:flatten(WrappedResponses)}}.
 
@@ -44,7 +43,7 @@ handle_msg(Data = #data{n=N, f=F, secret_key=SK}, J, {{rbc, I}, RBCMsg}) ->
         error ->
             %% instanciate RBC and pass the message to it
             %% TODO make RBC message size part of the RBC messages so it can be variable
-            {NewRBC, Response} = reliable_broadcast:handle_msg(reliable_broadcast:init(N, F, 32), J, RBCMsg),
+            {NewRBC, Response} = reliable_broadcast:handle_msg(reliable_broadcast:init(N, F, 512), J, RBCMsg),
             Reply = case Response of
                         {send, ToSend} ->
                             {send, wrap({rbc, I}, ToSend)};
@@ -75,7 +74,7 @@ handle_msg(Data = #data{n=N, f=F, secret_key=SK}, J, {{bba, I}, BBAMsg}) ->
                                                             end
                                                     end, [], lists:seq(0, maps:size(Data#data.rbc) - 1)),
                     {NewBBAs, Replies} = lists:unzip(NewBBAsAndReplies),
-                    {Data#data{bba=maps:merge(Data#data.bba, NewBBAs), bba_results=NewBBAResults, done=true}, {send, Replies}};
+                    {Data#data{bba=maps:merge(Data#data.bba, maps:from_list(NewBBAs)), bba_results=NewBBAResults, done=true}, {send, Replies}};
                 false ->
                     %% check if all the BBA protocols have completed and all the RBC protocols have finished
                     Response = case sets:size(sets:from_list([maps:size(NewBBAResults), maps:size(Data#data.bba),
@@ -105,21 +104,27 @@ wrap(Id, [{unicast, Dest, Msg}|T]) ->
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
-init_test() ->
-    N = 5,
-    F = 1,
-    dealer:start_link(N, F+1, 'SS512'),
-    {ok, PubKey, PrivateKeys} = dealer:deal(),
-    gen_server:stop(dealer),
-    [S0, S1, S2, S3, S4] = [acs:init(Sk, N, F) || Sk <- PrivateKeys],
-    Msgs = [ crypto:strong_rand_bytes(32) || _ <- lists:seq(1, 5)],
-    {NewS0, {send, MsgsToSend}} = acs:input(S0, Msgs),
-    States = [NewS0, S1, S2, S3, S4],
-    StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
-    ConvergedResults = do_send_outer([{0, {send, MsgsToSend}}], StatesWithId, sets:new()),
-    %% everyone should converge
-    ?assertEqual(N, sets:size(ConvergedResults)),
-    ok.
+init_test_() ->
+    {timeout, 60, [
+                   fun() ->
+                           N = 5,
+                           F = N div 4,
+                           dealer:start_link(N, F+1, 'SS512'),
+                           {ok, _PubKey, PrivateKeys} = dealer:deal(),
+                           gen_server:stop(dealer),
+                           [S0|T] = [acs:init(Sk, N, F) || Sk <- PrivateKeys],
+                           Msgs = [ crypto:strong_rand_bytes(512) || _ <- lists:seq(1, 5)],
+                           {NewS0, {send, MsgsToSend}} = acs:input(S0, Msgs),
+                           States = [NewS0|T],
+                           StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
+                           ConvergedResults = do_send_outer([{0, {send, MsgsToSend}}], StatesWithId, sets:new()),
+                           %% everyone should converge
+                           ?assertEqual(N, sets:size(ConvergedResults)),
+                           DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
+                           ?assertEqual(1, sets:size(DistinctResults)),
+                           ?assertEqual(Msgs, lists:flatten(sets:to_list(DistinctResults))),
+                           ok
+                   end]}.
 
 do_send_outer([], _, Acc) ->
     Acc;

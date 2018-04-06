@@ -61,7 +61,6 @@ handle_msg(Data, J, {ready, H}) ->
 -spec val(#data{}, merkerl:hash(), merkerl:proof(), binary()) -> {#data{}, ok | {send, send_commands()}}.
 val(Data = #data{state=init}, H, Bj, Sj) ->
     NewData = Data#data{h=H, shares=[{Bj, Sj}]},
-    io:format("Got val msg~n"),
     {NewData, {send, [{multicast, {echo, H, Bj, Sj}}]}};
 val(Data, _H, _Bi, _Si) ->
     %% we already had a val, just ignore this
@@ -74,20 +73,16 @@ echo(Data = #data{state=done}, _J, _H, _Bj, _Sj) ->
     {Data, ok};
 echo(Data = #data{n=N, f=F}, J, H, Bj, Sj) ->
     %% Check that Bj is a valid merkle branch for root h and and leaf Sj
-    io:format("~p Got echo msg from ~p~n", [self(),J]),
     case merkerl:verify_proof(merkerl:hash_value(Sj), H, Bj) of
         ok ->
             NewData = Data#data{h=H, shares=lists:usort([{Bj, Sj}|Data#data.shares]), num_echoes=sets:add_element(J, Data#data.num_echoes)},
-            io:format("~p: NumEchoes: ~p~n", [self(), sets:size(NewData#data.num_echoes)]),
             case sets:size(NewData#data.num_echoes) >= (N - F) of
                 true ->
-                    io:format("~p N - F is true: ~p~n", [self(), sets:size(NewData#data.num_echoes)]),
                     %% interpolate Sj from any N-2f leaves received
                     Threshold = N - 2*F,
                     {_, Shards} = lists:unzip(NewData#data.shares),
                     case leo_erasure:decode({Threshold, N - Threshold}, Shards, NewData#data.size) of
                         {ok, Msg} ->
-                            io:format("~p Recomputing Merkle after decode: ~p~n", [self(), sets:size(NewData#data.num_echoes)]),
                             %% recompute merkle root H
                             {ok, AllShards} = leo_erasure:encode({Threshold, N - Threshold}, Msg),
                             Merkle = merkerl:new(AllShards, fun merkerl:hash_value/1),
@@ -103,25 +98,20 @@ echo(Data = #data{n=N, f=F}, J, H, Bj, Sj) ->
                                             case sets:size(NewData#data.num_echoes) >= Threshold andalso sets:size(NewData#data.num_readies) >= (2*F + 1) of
                                                 true ->
                                                     %% decode V. Done
-                                                    io:format("~p Done~n", [self()]),
                                                     {NewData#data{state=done}, {result, Msg}};
                                                 false ->
                                                     %% wait for enough echoes and readies?
-                                                    io:format("~p Not enought echoes or readies~n", [self()]),
                                                     {NewData#data{state=waiting, msg=Msg}, ok}
                                             end;
                                         false ->
                                             %% send ready(h)
-                                            io:format("~p Sending Ready as it was not sent before~n", [self()]),
                                             {NewData#data{state=waiting, msg=Msg}, {send, [{multicast, {ready, H}}]}}
                                     end;
                                 false ->
                                     %% abort
-                                    io:format("~p Abort~n", [self()]),
                                     {NewData#data{state=aborted}, abort}
                             end;
-                        {error, Reason} ->
-                            io:format("~p Reason: ~p~n", [self(), Reason]),
+                        {error, _Reason} ->
                             {NewData#data{state=waiting}, ok}
                     end;
                 false ->
@@ -129,7 +119,6 @@ echo(Data = #data{n=N, f=F}, J, H, Bj, Sj) ->
             end;
         {error, _} ->
             %% otherwise discard
-            io:format("Merkle Verify Proof failure: ~p~n", [sets:size(Data#data.num_echoes)]),
             {Data, ok}
     end.
 
@@ -140,26 +129,20 @@ ready(Data = #data{state=waiting, n=N, f=F}, J, H) ->
     NewData = Data#data{num_readies=sets:add_element(J, Data#data.num_readies)},
     case sets:size(NewData#data.num_readies) >= F + 1 of
         true ->
-            io:format("~p Got enough readies~n", [self()]),
             Threshold = N - 2*F,
             %% check if we have 2*F + 1 readies and N - 2*F echoes
             case sets:size(NewData#data.num_echoes) >= Threshold andalso sets:size(NewData#data.num_readies) >= 2*F + 1 of
                 true ->
                     %% done
-                    io:format("~p Got enough readies and echoes~n", [self()]),
                     {NewData#data{state=done}, {result, NewData#data.msg}};
                 false when not NewData#data.ready_sent ->
                     %% multicast ready
-                    io:format("~p Multicasting ready, not done before~n", [self()]),
                     {NewData, {send, [{multicast, {ready, H}}]}};
                 _ ->
-                    io:format("~p Waiting for 2*f + 1 readies and enought num_echoes~n", [self()]),
                     {NewData, ok}
             end;
         false ->
             %% waiting
-            io:format("~p J: ~p~n", [self(), J]),
-            io:format("~p Waiting for F+1 readies, readies so far:~p~n", [self(), sets:size(NewData#data.num_readies)]),
             {NewData, ok}
     end;
 ready(Data, _J, _H) ->
