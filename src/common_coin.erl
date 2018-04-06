@@ -1,6 +1,6 @@
 -module(common_coin).
 
--export([init/4, get_coin/1, share/3]).
+-export([init/4, get_coin/1, handle_msg/3]).
 
 -record(data, {
           state = waiting :: waiting | done,
@@ -12,13 +12,16 @@
          }).
 
 init(SecretKeyShard, Sid, N, F) ->
-    {ok, #data{sk=SecretKeyShard, n=N, f=F, sid=Sid}}.
+    #data{sk=SecretKeyShard, n=N, f=F, sid=Sid}.
 
 get_coin(Data = #data{state=done}) ->
     {Data, ok};
 get_coin(Data) ->
     Share = tpke_privkey:sign(Data#data.sk, Data#data.sid),
     {Data, {send, [{multicast, {share, Share}}]}}.
+
+handle_msg(Data, J, {share, Share}) ->
+    share(Data, J, Share).
 
 share(Data = #data{state=done}, _J, _Share) ->
     {Data, ok};
@@ -59,7 +62,7 @@ init_test() ->
     {ok, PubKey, PrivateKeys} = dealer:deal(),
     gen_server:stop(dealer),
     Sid = tpke_pubkey:hash_message(PubKey, crypto:strong_rand_bytes(32)),
-    States = [element(2, common_coin:init(Sk, Sid, N, F)) || Sk <- PrivateKeys],
+    States = [common_coin:init(Sk, Sid, N, F) || Sk <- PrivateKeys],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
     %% all valid members should call get_coin
     Res = lists:map(fun({J, State}) ->
@@ -79,7 +82,7 @@ one_dead_test() ->
     {ok, PubKey, PrivateKeys} = dealer:deal(),
     gen_server:stop(dealer),
     Sid = tpke_pubkey:hash_message(PubKey, crypto:strong_rand_bytes(32)),
-    [S0, S1, S2, S3, S4] = [element(2, common_coin:init(Sk, Sid, N, F)) || Sk <- PrivateKeys],
+    [S0, S1, S2, S3, S4] = [common_coin:init(Sk, Sid, N, F) || Sk <- PrivateKeys],
     StatesWithId = lists:zip(lists:seq(0, N - 1), [S0, S1, kill(S2), S3, S4]),
     %% all valid members should call get_coin
     Res = lists:map(fun({J, State}) ->
@@ -99,7 +102,7 @@ two_dead_test() ->
     {ok, PubKey, PrivateKeys} = dealer:deal(),
     gen_server:stop(dealer),
     Sid = tpke_pubkey:hash_message(PubKey, crypto:strong_rand_bytes(32)),
-    [S0, S1, S2, S3, S4] = [element(2, common_coin:init(Sk, Sid, N, F)) || Sk <- PrivateKeys],
+    [S0, S1, S2, S3, S4] = [common_coin:init(Sk, Sid, N, F) || Sk <- PrivateKeys],
     StatesWithId = lists:zip(lists:seq(0, N - 1), [S0, S1, kill(S2), S3, kill(S4)]),
     %% all valid members should call get_coin
     Res = lists:map(fun({J, State}) ->
@@ -119,7 +122,7 @@ too_many_dead_test() ->
     {ok, PubKey, PrivateKeys} = dealer:deal(),
     gen_server:stop(dealer),
     Sid = tpke_pubkey:hash_message(PubKey, crypto:strong_rand_bytes(32)),
-    [S0, S1, S2, S3, S4] = [element(2, common_coin:init(Sk, Sid, N, F)) || Sk <- PrivateKeys],
+    [S0, S1, S2, S3, S4] = [common_coin:init(Sk, Sid, N, F) || Sk <- PrivateKeys],
     StatesWithId = lists:zip(lists:seq(0, N - 1), [S0, S1, kill(S2), S3, kill(S4)]),
     %% all valid members should call get_coin
     Res = lists:map(fun({J, State}) ->
@@ -147,17 +150,17 @@ do_send({_, ok}, Acc, States) ->
     {Acc, States};
 do_send({_, {send, []}}, Acc, States) ->
     {Acc, States};
+do_send({Id, {send, [{unicast, J, Msg}|T]}}, Acc, States) ->
+    {J, State} = lists:keyfind(J, 1, States),
+    {NewState, Result} = handle_msg(State, Id, Msg),
+    do_send({Id, {send, T}}, [{J, Result}|Acc], lists:keyreplace(J, 1, States, {J, NewState}));
 do_send({Id, {send, [{multicast, Msg}|T]}}, Acc, States) ->
-    case Msg of
-        {share, S} ->
-            Res = lists:map(fun({J, State}) ->
-                                    {NewState, Result} = share(State, Id, S),
-                                    {{J, NewState}, {J, Result}}
-                            end, States),
-            {NewStates, Results} = lists:unzip(Res),
-            do_send({Id, {send, T}}, Results ++ Acc, lists:ukeymerge(1, NewStates, States))
-    end.
-
+    Res = lists:map(fun({J, State}) ->
+                            {NewState, Result} = handle_msg(State, Id, Msg),
+                            {{J, NewState}, {J, Result}}
+                    end, States),
+    {NewStates, Results} = lists:unzip(Res),
+    do_send({Id, {send, T}}, Results ++ Acc, lists:ukeymerge(1, NewStates, States)).
 -endif.
 
 

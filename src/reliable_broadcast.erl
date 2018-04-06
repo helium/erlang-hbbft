@@ -1,6 +1,6 @@
 -module(reliable_broadcast).
 
--export([init/3, input/2, val/4, echo/5, ready/3]).
+-export([init/3, input/2, handle_msg/3]).
 
 -record(data, {
           state = init :: init | waiting | aborted | done,
@@ -24,10 +24,9 @@
 -type send_commands() :: [unicast() | multicast()].
 
 %% API.
--spec init(pos_integer(), pos_integer(), pos_integer()) -> {ok, #data{}}.
+-spec init(pos_integer(), pos_integer(), pos_integer()) -> #data{}.
 init(N, F, Size) ->
-    Data = #data{n=N, f=F, size=Size},
-    {ok, Data}.
+    #data{n=N, f=F, size=Size}.
 
 -spec input(#data{}, binary()) -> {#data{}, {send, send_commands()} | {error, already_initialized}}.
 input(Data = #data{state=init, n=N, f=F}, Msg) ->
@@ -52,6 +51,12 @@ input(Data, _Msg) ->
     %% can't init twice
     {Data, {error, already_initialized}}.
 
+handle_msg(Data, _J, {val, H, Bj, Sj}) ->
+    val(Data, H, Bj, Sj);
+handle_msg(Data, J, {echo, H, Bj, Sj}) ->
+    echo(Data, J, H, Bj, Sj);
+handle_msg(Data, J, {ready, H}) ->
+    ready(Data, J, H).
 
 -spec val(#data{}, merkerl:hash(), merkerl:proof(), binary()) -> {#data{}, ok | {send, send_commands()}}.
 val(Data = #data{state=init}, H, Bj, Sj) ->
@@ -170,11 +175,11 @@ init_test() ->
     N = 5,
     F = 1,
     Msg = crypto:strong_rand_bytes(512),
-    {ok, S0} = reliable_broadcast:init(N, F, 512),
-    {ok, S1} = reliable_broadcast:init(N, F, 512),
-    {ok, S2} = reliable_broadcast:init(N, F, 512),
-    {ok, S3} = reliable_broadcast:init(N, F, 512),
-    {ok, S4} = reliable_broadcast:init(N, F, 512),
+    S0 = reliable_broadcast:init(N, F, 512),
+    S1 = reliable_broadcast:init(N, F, 512),
+    S2 = reliable_broadcast:init(N, F, 512),
+    S3 = reliable_broadcast:init(N, F, 512),
+    S4 = reliable_broadcast:init(N, F, 512),
     {NewS0, {send, MsgsToSend}} = reliable_broadcast:input(S0, Msg),
     States = [NewS0, S1, S2, S3, S4],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
@@ -188,11 +193,11 @@ pid_dying_test() ->
     N = 5,
     F = 1,
     Msg = crypto:strong_rand_bytes(512),
-    {ok, S0} = reliable_broadcast:init(N, F, 512),
-    {ok, S1} = reliable_broadcast:init(N, F, 512),
-    {ok, S2} = reliable_broadcast:init(N, F, 512),
-    {ok, S3} = reliable_broadcast:init(N, F, 512),
-    {ok, S4} = reliable_broadcast:init(N, F, 512),
+    S0 = reliable_broadcast:init(N, F, 512),
+    S1 = reliable_broadcast:init(N, F, 512),
+    S2 = reliable_broadcast:init(N, F, 512),
+    S3 = reliable_broadcast:init(N, F, 512),
+    S4 = reliable_broadcast:init(N, F, 512),
     {NewS0, {send, MsgsToSend}} = reliable_broadcast:input(S0, Msg),
     States = [NewS0, S1, kill(S2), S3, S4],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
@@ -205,11 +210,11 @@ two_pid_dying_test() ->
     N = 5,
     F = 1,
     Msg = crypto:strong_rand_bytes(512),
-    {ok, S0} = reliable_broadcast:init(N, F, 512),
-    {ok, S1} = reliable_broadcast:init(N, F, 512),
-    {ok, S2} = reliable_broadcast:init(N, F, 512),
-    {ok, S3} = reliable_broadcast:init(N, F, 512),
-    {ok, S4} = reliable_broadcast:init(N, F, 512),
+    S0 = reliable_broadcast:init(N, F, 512),
+    S1 = reliable_broadcast:init(N, F, 512),
+    S2 = reliable_broadcast:init(N, F, 512),
+    S3 = reliable_broadcast:init(N, F, 512),
+    S4 = reliable_broadcast:init(N, F, 512),
     {NewS0, {send, MsgsToSend}} = reliable_broadcast:input(S0, Msg),
     States = [NewS0, S1, kill(S2), S3, kill(S4)],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
@@ -232,26 +237,16 @@ do_send({_, ok}, Acc, States) ->
     {Acc, States};
 do_send({_, {send, []}}, Acc, States) ->
     {Acc, States};
-do_send({Id, {send, [{unicast, J, {val, H, Bj, Sj}}|T]}}, Acc, States) ->
+do_send({Id, {send, [{unicast, J, Msg}|T]}}, Acc, States) ->
     {J, State} = lists:keyfind(J, 1, States),
-    {NewState, Result} = val(State, H, Bj, Sj),
+    {NewState, Result} = handle_msg(State, Id, Msg),
     do_send({Id, {send, T}}, [{J, Result}|Acc], lists:keyreplace(J, 1, States, {J, NewState}));
 do_send({Id, {send, [{multicast, Msg}|T]}}, Acc, States) ->
-    case Msg of
-        {echo, H, Bj, Sj} ->
-            Res = lists:map(fun({J, State}) ->
-                                    {NewState, Result} = echo(State, Id, H, Bj, Sj),
-                                    {{J, NewState}, {J, Result}}
-                            end, States),
-            {NewStates, Results} = lists:unzip(Res),
-            do_send({Id, {send, T}}, Results ++ Acc, lists:ukeymerge(1, NewStates, States));
-        {ready, H} ->
-            Res = lists:map(fun({J, State}) ->
-                                    {NewState, Result} = ready(State, Id, H),
-                                    {{J, NewState}, {J, Result}}
-                            end, States),
-            {NewStates, Results} = lists:unzip(Res),
-            do_send({Id, {send, T}}, Results ++ Acc, lists:ukeymerge(1, NewStates, States))
-    end.
+    Res = lists:map(fun({J, State}) ->
+                            {NewState, Result} = handle_msg(State, Id, Msg),
+                            {{J, NewState}, {J, Result}}
+                    end, States),
+    {NewStates, Results} = lists:unzip(Res),
+    do_send({Id, {send, T}}, Results ++ Acc, lists:ukeymerge(1, NewStates, States)).
 
 -endif.
