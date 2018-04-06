@@ -162,6 +162,75 @@ init_test() ->
     ?assertEqual(N, sets:size(ConvergedResults)),
     ok.
 
+init_with_zeroes_test() ->
+    N = 5,
+    F = 1,
+    dealer:start_link(N, F+1, 'SS512'),
+    {ok, PubKey, PrivateKeys} = dealer:deal(),
+    gen_server:stop(dealer),
+    States = [bba:init(Sk, N, F) || Sk <- PrivateKeys],
+    StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
+    ZeroList = lists:zip([1, 0, 0, 0, 0], StatesWithId),
+    %% all valid members should call get_coin
+    Res = lists:map(fun({I, {J, State}}) ->
+                            {NewState, Result} = input(State, I),
+                            {{J, NewState}, {J, Result}}
+                    end, ZeroList),
+    {NewStates, Results} = lists:unzip(Res),
+    ConvergedResults = do_send_outer(Results, NewStates, sets:new()),
+    DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
+    io:format("DistinctResults: ~p~n", [sets:to_list(DistinctResults)]),
+    %% io:format("ConvergedResults ~p~n", [ConvergedResults]),
+    ?assertEqual(N, sets:size(ConvergedResults)),
+    ?assertEqual([0], sets:to_list(DistinctResults)),
+    ok.
+
+init_with_ones_test() ->
+    N = 5,
+    F = 1,
+    dealer:start_link(N, F+1, 'SS512'),
+    {ok, PubKey, PrivateKeys} = dealer:deal(),
+    gen_server:stop(dealer),
+    States = [bba:init(Sk, N, F) || Sk <- PrivateKeys],
+    StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
+    OneList = lists:zip([1, 1, 1, 1, 0], StatesWithId),
+    %% all valid members should call get_coin
+    Res = lists:map(fun({I, {J, State}}) ->
+                            {NewState, Result} = input(State, I),
+                            {{J, NewState}, {J, Result}}
+                    end, OneList),
+    {NewStates, Results} = lists:unzip(Res),
+    ConvergedResults = do_send_outer(Results, NewStates, sets:new()),
+    DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
+    io:format("DistinctResults: ~p~n", [sets:to_list(DistinctResults)]),
+    %% io:format("ConvergedResults ~p~n", [ConvergedResults]),
+    ?assertEqual(N, sets:size(ConvergedResults)),
+    ?assertEqual([1], sets:to_list(DistinctResults)),
+    ok.
+
+init_with_mixed_zeros_and_ones_test() ->
+    N = 10,
+    F = 2,
+    dealer:start_link(N, F+1, 'SS512'),
+    {ok, PubKey, PrivateKeys} = dealer:deal(),
+    gen_server:stop(dealer),
+    States = [bba:init(Sk, N, F) || Sk <- PrivateKeys],
+    StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
+    MixedList = lists:zip([1, 1, 1, 0, 1, 0, 0, 0, 0, 0], StatesWithId),
+    %% all valid members should call get_coin
+    Res = lists:map(fun({I, {J, State}}) ->
+                            {NewState, Result} = input(State, I),
+                            {{J, NewState}, {J, Result}}
+                    end, MixedList),
+    {NewStates, Results} = lists:unzip(Res),
+    ConvergedResults = do_send_outer(Results, NewStates, sets:new()),
+    DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
+    io:format("DistinctResults: ~p~n", [sets:to_list(DistinctResults)]),
+    io:format("ConvergedResults ~p~n", [sets:to_list(ConvergedResults)]),
+    ?assertEqual(N, sets:size(ConvergedResults)),
+    ?assertEqual(1, sets:size(DistinctResults)),
+    ok.
+
 one_dead_test() ->
     N = 5,
     F = 1,
@@ -181,6 +250,24 @@ one_dead_test() ->
     ?assertEqual(N - 1, sets:size(ConvergedResults)),
     ok.
 
+two_dead_test() ->
+    N = 5,
+    F = 1,
+    dealer:start_link(N, F+1, 'SS512'),
+    {ok, PubKey, PrivateKeys} = dealer:deal(),
+    gen_server:stop(dealer),
+    [S0, S1, S2, S3, S4] = [bba:init(Sk, N, F) || Sk <- PrivateKeys],
+    StatesWithId = lists:zip(lists:seq(0, N - 1), [S0, S1, kill(S2), S3, kill(S4)]),
+    %% all valid members should call get_coin
+    Res = lists:map(fun({J, State}) ->
+                            {NewState, Result} = input(State, 1),
+                            {{J, NewState}, {J, Result}}
+                    end, StatesWithId),
+    {NewStates, Results} = lists:unzip(Res),
+    ConvergedResults = do_send_outer(Results, NewStates, sets:new()),
+    %% should not converge
+    ?assertEqual(0, sets:size(ConvergedResults)),
+    ok.
 
 do_send_outer([], _, Acc) ->
     Acc;
