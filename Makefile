@@ -8,6 +8,9 @@ compile:
 clean:
 	$(REBAR) clean
 
+cover:
+	$(REBAR) cover
+
 test: compile
 	$(REBAR) eunit
 
