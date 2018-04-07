@@ -6,7 +6,6 @@
           state = init :: init | waiting | aborted | done,
           n :: pos_integer(),
           f :: pos_integer(),
-          size :: pos_integer(),
           msg = undefined :: binary() | undefined,
           h = undefined :: binary() | undefined,
           shares = [] :: [{merkerl:proof(), binary()}],
@@ -48,7 +47,7 @@ input(Data = #data{state=init, n=N, f=F}, Msg) ->
     NewData = Data#data{msg=Msg, h=MerkleRootHash},
     Result = [ {unicast, J, {val, MerkleRootHash, lists:nth(J+1, BranchesForShards), lists:nth(J+1, ShardsWithSize)}} || J <- lists:seq(1, N-1)],
     %% unicast all the VAL packets and multicast the ECHO for our own share
-    {NewData#data{state=waiting, size=MsgSize}, {send, Result ++ [{multicast, {echo, MerkleRootHash, hd(BranchesForShards), hd(ShardsWithSize)}}]}};
+    {NewData#data{state=waiting}, {send, Result ++ [{multicast, {echo, MerkleRootHash, hd(BranchesForShards), hd(ShardsWithSize)}}]}};
 input(Data, _Msg) ->
     %% can't init twice
     {Data, {error, already_initialized}}.
@@ -83,11 +82,13 @@ echo(Data = #data{n=N, f=F}, J, H, Bj, Sj) ->
                     %% interpolate Sj from any N-2f leaves received
                     Threshold = N - 2*F,
                     {_, Shards} = lists:unzip(NewData#data.shares),
-                    case leo_erasure:decode({Threshold, N - Threshold}, Shards, NewData#data.size) of
+                    case leo_erasure:decode({Threshold, N - Threshold}, Shards) of
                         {ok, Msg} ->
                             %% recompute merkle root H
-                            {ok, AllShards} = leo_erasure:encode({Threshold, N - Threshold}, Msg),
-                            Merkle = merkerl:new(AllShards, fun merkerl:hash_value/1),
+                            MsgSize = byte_size(Msg),
+                            {ok, AllShards} = leo_erasure:encode({Threshold, N - Threshold}, Msg, MsgSize),
+                            AllShardsWithSize = [{MsgSize, Shard} || Shard <- AllShards],
+                            Merkle = merkerl:new(AllShardsWithSize, fun merkerl:hash_value/1),
                             MerkleRootHash = merkerl:root_hash(Merkle),
                             case H == MerkleRootHash of
                                 true ->
