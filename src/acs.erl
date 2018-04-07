@@ -18,7 +18,7 @@ init(SK, N, F) ->
 
 input(Data = #data{n=N, f=F}, J, Input) ->
     %% init the RBCs and input the message to them
-    RBCs = [{I, reliable_broadcast:init(N, F, 512)} || I <- lists:seq(0, N-1)],
+    RBCs = [{I, reliable_broadcast:init(N, F)} || I <- lists:seq(0, N-1)],
     {J, MyRBC0} = lists:keyfind(J, 1, RBCs),
     {MyRBC, {send, Responses}} = reliable_broadcast:input(MyRBC0, Input),
     RBCMap = maps:from_list(lists:keyreplace(J, 1, RBCs, {J, MyRBC})),
@@ -43,7 +43,7 @@ handle_msg(Data = #data{n=N, f=F, secret_key=SK}, J, {{rbc, I}, RBCMsg}) ->
         error ->
             %% instanciate RBC and pass the message to it
             %% TODO make RBC message size part of the RBC messages so it can be variable
-            {NewRBC, Response} = reliable_broadcast:handle_msg(reliable_broadcast:init(N, F, 512), J, RBCMsg),
+            {NewRBC, Response} = reliable_broadcast:handle_msg(reliable_broadcast:init(N, F), J, RBCMsg),
             Reply = case Response of
                         {send, ToSend} ->
                             {send, wrap({rbc, I}, ToSend)};
