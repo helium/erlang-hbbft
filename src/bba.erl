@@ -7,7 +7,7 @@
           round = 0,
           secret_key,
           coin,
-          est :: 0 | 1,
+          est :: undefined | 0 | 1,
           output,
           f :: pos_integer(),
           n :: pos_integer(),
@@ -63,8 +63,8 @@ handle_msg(Data = #data{round=R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin /= 
                     NewData = init(Data#data.secret_key, Data#data.n, Data#data.f),
                     input(NewData#data{round=Data#data.round + 1}, B)
             end;
-        {NewCoin, {send, Messages}} ->
-            {Data#data{coin=NewCoin}, {send, wrap({coin, Data#data.round}, Messages)}};
+        %{NewCoin, {send, Messages}} ->
+            %{Data#data{coin=NewCoin}, {send, wrap({coin, Data#data.round}, Messages)}};
         {NewCoin, ok} ->
             {Data#data{coin=NewCoin}, ok}
     end;
@@ -131,9 +131,9 @@ aux(Data = #data{n=N, f=F}, Id, V) ->
 wrap(_, []) ->
     [];
 wrap(Id, [{multicast, Msg}|T]) ->
-    [{multicast, {Id, Msg}}|wrap(Id, T)];
-wrap(Id, [{unicast, Dest, Msg}|T]) ->
-    [{unicast, Dest, {Id, Msg}}|wrap(Id, T)].
+    [{multicast, {Id, Msg}}|wrap(Id, T)].
+%wrap(Id, [{unicast, Dest, Msg}|T]) ->
+    %[{unicast, Dest, {Id, Msg}}|wrap(Id, T)].
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
