@@ -8,7 +8,7 @@
           f :: pos_integer(),
           msg = undefined :: binary() | undefined,
           h = undefined :: binary() | undefined,
-          shares = [] :: [{merkerl:proof(), binary()}],
+          shares = [] :: [{merkerl:proof(), {pos_integer(), binary()}}],
           num_echoes = sets:new() :: sets:set(non_neg_integer()),
           num_readies = sets:new() :: sets:set(non_neg_integer()),
           ready_sent = false :: boolean()

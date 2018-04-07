@@ -42,7 +42,6 @@ handle_msg(Data = #data{n=N, f=F, secret_key=SK}, J, {{rbc, I}, RBCMsg}) ->
             end;
         error ->
             %% instanciate RBC and pass the message to it
-            %% TODO make RBC message size part of the RBC messages so it can be variable
             {NewRBC, Response} = reliable_broadcast:handle_msg(reliable_broadcast:init(N, F), J, RBCMsg),
             Reply = case Response of
                         {send, ToSend} ->
