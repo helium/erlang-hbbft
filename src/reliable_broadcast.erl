@@ -81,12 +81,13 @@ echo(Data = #data{n=N, f=F}, J, H, Bj, Sj) ->
                 true ->
                     %% interpolate Sj from any N-2f leaves received
                     Threshold = N - 2*F,
-                    {_, Shards} = lists:unzip(NewData#data.shares),
-                    case leo_erasure:decode({Threshold, N - Threshold}, Shards, element(1, hd(Shards))) of
+                    {_, ShardsWithSize} = lists:unzip(NewData#data.shares),
+                    {_, Shards} = lists:unzip(ShardsWithSize),
+                    case leo_erasure:decode({Threshold, N - Threshold}, Shards, element(1, hd(ShardsWithSize))) of
                         {ok, Msg} ->
                             %% recompute merkle root H
                             MsgSize = byte_size(Msg),
-                            {ok, AllShards} = leo_erasure:encode({Threshold, N - Threshold}, Msg, MsgSize),
+                            {ok, AllShards} = leo_erasure:encode({Threshold, N - Threshold}, Msg),
                             AllShardsWithSize = [{MsgSize, Shard} || Shard <- AllShards],
                             Merkle = merkerl:new(AllShardsWithSize, fun merkerl:hash_value/1),
                             MerkleRootHash = merkerl:root_hash(Merkle),
