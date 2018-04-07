@@ -1,6 +1,6 @@
 -module(acs).
 
--export([init/3, input/2, handle_msg/3]).
+-export([init/3, input/3, handle_msg/3]).
 
 -record(data, {
           secret_key,
@@ -16,13 +16,13 @@
 init(SK, N, F) ->
     #data{secret_key=SK, n=N, f=F}.
 
-input(Data = #data{n=N, f=F}, Inputs) ->
+input(Data = #data{n=N, f=F}, J, Input) ->
     %% init the RBCs and input the message to them
-    RBCsWithResponses = [reliable_broadcast:input(reliable_broadcast:init(N, F, byte_size(Input)), Input) || Input <- Inputs],
-    {RBCs, Responses} = lists:unzip(RBCsWithResponses),
-    RBCMap = maps:from_list(lists:zip(lists:seq(0, length(Inputs) - 1), RBCs)),
-    WrappedResponses = [ wrap({rbc, I}, Response) || {I, {send, Response}} <- lists:zip(lists:seq(0, length(Inputs) - 1), Responses) ],
-    {Data#data{rbc=RBCMap}, {send, lists:flatten(WrappedResponses)}}.
+    RBCs = [{I, reliable_broadcast:init(N, F, 512)} || I <- lists:seq(0, N-1)],
+    {J, MyRBC0} = lists:keyfind(J, 1, RBCs),
+    {MyRBC, {send, Responses}} = reliable_broadcast:input(MyRBC0, Input),
+    RBCMap = maps:from_list(lists:keyreplace(J, 1, RBCs, {J, MyRBC})),
+    {Data#data{rbc=RBCMap}, {send, wrap({rbc, J}, Responses)}}.
 
 handle_msg(Data = #data{n=N, f=F, secret_key=SK}, J, {{rbc, I}, RBCMsg}) ->
     case maps:find(I, Data#data.rbc) of
@@ -112,13 +112,16 @@ init_test_() ->
                            dealer:start_link(N, F+1, 'SS512'),
                            {ok, _PubKey, PrivateKeys} = dealer:deal(),
                            gen_server:stop(dealer),
-                           [S0|T] = [acs:init(Sk, N, F) || Sk <- PrivateKeys],
-                           Msgs = [ crypto:strong_rand_bytes(512) || _ <- lists:seq(1, 5)],
-                           {NewS0, {send, MsgsToSend}} = acs:input(S0, Msgs),
-                           States = [NewS0|T],
+                           Msgs = [ crypto:strong_rand_bytes(512) || _ <- lists:seq(1, N)],
+                           States = [acs:init(Sk, N, F) || Sk <- PrivateKeys],
                            StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
-                           ConvergedResults = do_send_outer([{0, {send, MsgsToSend}}], StatesWithId, sets:new()),
-                           %% everyone should converge
+                           MixedList = lists:zip(Msgs, StatesWithId),
+                           Res = lists:map(fun({Msg, {J, State}}) ->
+                                                   {NewState, Result} = input(State, J, Msg),
+                                                   {{J, NewState}, {J, Result}}
+                                           end, MixedList),
+                           {NewStates, Results} = lists:unzip(Res),
+                           ConvergedResults = do_send_outer(Results, NewStates, sets:new()),
                            ?assertEqual(N, sets:size(ConvergedResults)),
                            DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
                            ?assertEqual(1, sets:size(DistinctResults)),
