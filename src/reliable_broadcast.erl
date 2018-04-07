@@ -1,6 +1,6 @@
 -module(reliable_broadcast).
 
--export([init/3, input/2, handle_msg/3]).
+-export([init/2, input/2, handle_msg/3]).
 
 -record(data, {
           state = init :: init | waiting | aborted | done,
@@ -24,9 +24,9 @@
 -type send_commands() :: [unicast() | multicast()].
 
 %% API.
--spec init(pos_integer(), pos_integer(), pos_integer()) -> #data{}.
-init(N, F, Size) ->
-    #data{n=N, f=F, size=Size}.
+-spec init(pos_integer(), pos_integer()) -> #data{}.
+init(N, F) ->
+    #data{n=N, f=F}.
 
 -spec input(#data{}, binary()) -> {#data{}, {send, send_commands()} | {error, already_initialized}}.
 input(Data = #data{state=init, n=N, f=F}, Msg) ->
@@ -38,15 +38,17 @@ input(Data = #data{state=init, n=N, f=F}, Msg) ->
     %%%% Merkle tree branch
     Threshold = N - 2*F,
     {ok, Shards} = leo_erasure:encode({Threshold, N - Threshold}, Msg),
-    Merkle = merkerl:new(Shards, fun merkerl:hash_value/1),
+    MsgSize = byte_size(Msg),
+    ShardsWithSize = [{MsgSize, Shard} || Shard <- Shards],
+    Merkle = merkerl:new(ShardsWithSize, fun merkerl:hash_value/1),
     MerkleRootHash = merkerl:root_hash(Merkle),
     %% gen_proof = branches for each merkle node (Hash(shard))
     BranchesForShards = [merkerl:gen_proof(Hash, Merkle) || {Hash, _} <- merkerl:leaves(Merkle)],
     %% TODO add our identity to the ready/echo sets?
     NewData = Data#data{msg=Msg, h=MerkleRootHash},
-    Result = [ {unicast, J, {val, MerkleRootHash, lists:nth(J+1, BranchesForShards), lists:nth(J+1, Shards)}} || J <- lists:seq(1, N-1)],
+    Result = [ {unicast, J, {val, MerkleRootHash, lists:nth(J+1, BranchesForShards), lists:nth(J+1, ShardsWithSize)}} || J <- lists:seq(1, N-1)],
     %% unicast all the VAL packets and multicast the ECHO for our own share
-    {NewData#data{state=waiting}, {send, Result ++ [{multicast, {echo, MerkleRootHash, hd(BranchesForShards), hd(Shards)}}]}};
+    {NewData#data{state=waiting, size=MsgSize}, {send, Result ++ [{multicast, {echo, MerkleRootHash, hd(BranchesForShards), hd(ShardsWithSize)}}]}};
 input(Data, _Msg) ->
     %% can't init twice
     {Data, {error, already_initialized}}.
@@ -158,11 +160,11 @@ init_test() ->
     N = 5,
     F = 1,
     Msg = crypto:strong_rand_bytes(512),
-    S0 = reliable_broadcast:init(N, F, 512),
-    S1 = reliable_broadcast:init(N, F, 512),
-    S2 = reliable_broadcast:init(N, F, 512),
-    S3 = reliable_broadcast:init(N, F, 512),
-    S4 = reliable_broadcast:init(N, F, 512),
+    S0 = reliable_broadcast:init(N, F),
+    S1 = reliable_broadcast:init(N, F),
+    S2 = reliable_broadcast:init(N, F),
+    S3 = reliable_broadcast:init(N, F),
+    S4 = reliable_broadcast:init(N, F),
     {NewS0, {send, MsgsToSend}} = reliable_broadcast:input(S0, Msg),
     States = [NewS0, S1, S2, S3, S4],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
@@ -176,11 +178,11 @@ pid_dying_test() ->
     N = 5,
     F = 1,
     Msg = crypto:strong_rand_bytes(512),
-    S0 = reliable_broadcast:init(N, F, 512),
-    S1 = reliable_broadcast:init(N, F, 512),
-    S2 = reliable_broadcast:init(N, F, 512),
-    S3 = reliable_broadcast:init(N, F, 512),
-    S4 = reliable_broadcast:init(N, F, 512),
+    S0 = reliable_broadcast:init(N, F),
+    S1 = reliable_broadcast:init(N, F),
+    S2 = reliable_broadcast:init(N, F),
+    S3 = reliable_broadcast:init(N, F),
+    S4 = reliable_broadcast:init(N, F),
     {NewS0, {send, MsgsToSend}} = reliable_broadcast:input(S0, Msg),
     States = [NewS0, S1, kill(S2), S3, S4],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
@@ -193,11 +195,11 @@ two_pid_dying_test() ->
     N = 5,
     F = 1,
     Msg = crypto:strong_rand_bytes(512),
-    S0 = reliable_broadcast:init(N, F, 512),
-    S1 = reliable_broadcast:init(N, F, 512),
-    S2 = reliable_broadcast:init(N, F, 512),
-    S3 = reliable_broadcast:init(N, F, 512),
-    S4 = reliable_broadcast:init(N, F, 512),
+    S0 = reliable_broadcast:init(N, F),
+    S1 = reliable_broadcast:init(N, F),
+    S2 = reliable_broadcast:init(N, F),
+    S3 = reliable_broadcast:init(N, F),
+    S4 = reliable_broadcast:init(N, F),
     {NewS0, {send, MsgsToSend}} = reliable_broadcast:input(S0, Msg),
     States = [NewS0, S1, kill(S2), S3, kill(S4)],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
