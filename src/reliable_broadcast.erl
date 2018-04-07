@@ -82,7 +82,7 @@ echo(Data = #data{n=N, f=F}, J, H, Bj, Sj) ->
                     %% interpolate Sj from any N-2f leaves received
                     Threshold = N - 2*F,
                     {_, Shards} = lists:unzip(NewData#data.shares),
-                    case leo_erasure:decode({Threshold, N - Threshold}, Shards) of
+                    case leo_erasure:decode({Threshold, N - Threshold}, Shards, element(1, hd(Shards))) of
                         {ok, Msg} ->
                             %% recompute merkle root H
                             MsgSize = byte_size(Msg),
