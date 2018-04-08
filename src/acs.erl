@@ -82,7 +82,7 @@ handle_msg(Data = #data{n=N, f=F, secret_key=SK}, J, {{bba, I}, BBAMsg}) ->
                                        %% construct the list of which BBAs have succeeded
                                        BBAVector = [ X || {_, X} <- lists:keysort(1, maps:to_list(NewBBAResults))],
                                        %% return all the RBC values for which BBA has succeeded
-                                       {result, [ Res || {true, {_, Res}} <- lists:zip(BBAVector, maps:to_list(Data#data.rbc_results))]};
+                                       {result, [ Res || {true, Res} <- lists:zip(BBAVector, maps:to_list(Data#data.rbc_results))]};
                                    false ->
                                        ok
                                end,
@@ -124,7 +124,7 @@ init_test_() ->
                            ?assertEqual(N, sets:size(ConvergedResults)),
                            DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
                            ?assertEqual(1, sets:size(DistinctResults)),
-                           ?assertEqual(Msgs, lists:flatten(sets:to_list(DistinctResults))),
+                           ?assertEqual(Msgs, [ X || {_, X} <- lists:flatten(sets:to_list(DistinctResults))]),
                            ok
                    end]}.
 

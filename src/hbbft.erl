@@ -12,7 +12,9 @@
           buf = queue:new(),
           acs,
           acs_init = false,
-          acs_results :: undefined | [binary()]
+          acs_results :: undefined | [binary()],
+          dec_shares = #{},
+          decrypted = #{}
          }).
 
 -define(BATCH_SIZE, 5).
@@ -50,11 +52,46 @@ handle_msg(Data = #data{round=R}, J, {{acs, R}, ACSMsg}) ->
             {Data#data{acs=NewACS}, ok};
         {NewACS, {send, ACSResponse}} ->
             {Data#data{acs=NewACS}, {send, wrap({acs, Data#data.round}, ACSResponse)}};
-        {NewACS, {result, Result}} ->
+        {NewACS, {result, Results}} ->
             %% ACS[r] has returned, time to move on to the decrypt phase
-            io:format("~b ACS[~b] result ~p~n", [Data#data.j, Data#data.round, Result]),
-            %% TODO start decrypt phase
-            {Data#data{acs=NewACS, acs_results=Result}, ok}
+            io:format("~b ACS[~b] result ~p~n", [Data#data.j, Data#data.round, hd(Results)]),
+            %% start decrypt phase
+            Replies = lists:map(fun({I, Result}) ->
+                              EncKey = get_encrypted_key(Data#data.secret_key, Result),
+                              Share = tpke_privkey:decrypt_share(Data#data.secret_key, EncKey),
+                              {multicast, {dec, Data#data.round, I, Share}}
+                      end, Results),
+            {Data#data{acs=NewACS, acs_results=Results}, {send, Replies}}
+    end;
+handle_msg(Data = #data{round=R}, J, {dec, R, I, Share}) ->
+    NewShares = maps:put({I, J}, Share, Data#data.dec_shares),
+    %% check if we have enough to decode the bundle
+    SharesForThisBundle = [ S || {{Idx, _}, S} <- maps:to_list(NewShares), I == Idx],
+    case length(SharesForThisBundle) > Data#data.f of
+        true ->
+            io:format("~p got enough shares to decrypt bundle ~n", [Data#data.j]),
+            {I, Enc} = lists:keyfind(I, 1, Data#data.acs_results),
+            EncKey = get_encrypted_key(Data#data.secret_key, Enc),
+            %% TODO verify the shares with verify_share/3
+            DecKey = tpke_pubkey:combine_shares(tpke_privkey:public_key(Data#data.secret_key), EncKey, SharesForThisBundle),
+            case decrypt(DecKey, Enc) of
+                error ->
+                    io:format("failed to decrypt bundle!~n"),
+                    {Data#data{dec_shares=NewShares}, ok};
+                Decrypted ->
+                    NewDecrypted = maps:put(I, binary_to_term(Decrypted), Data#data.decrypted),
+                    case maps:size(NewDecrypted) == length(Data#data.acs_results) of
+                        true ->
+                            %% we did it!
+                            io:format("~p finished decryption phase!~n", [Data#data.j]),
+                            {Data#data{dec_shares=NewShares, decrypted=NewDecrypted}, {result, maps:to_list(NewDecrypted)}};
+                        false ->
+                            {Data#data{dec_shares=NewShares, decrypted=NewDecrypted}, ok}
+                    end
+            end;
+        false ->
+            %% not enough shares yet
+            {Data#data{dec_shares=NewShares}, ok}
     end;
 handle_msg(_, _, Msg) ->
     io:format("ignoring message ~p~n", [Msg]),
@@ -126,32 +163,41 @@ merge_replies(N, NewReplies, Replies) ->
             merge_replies(N-1, lists:keydelete(N, 1, NewReplies), lists:keystore(N, 1, Replies, NewSend))
     end.
 
-hbbft_init_test() ->
-    N = 5,
-    F = 1,
-    dealer:start_link(N, F+1, 'SS512'),
-    {ok, _PubKey, PrivateKeys} = dealer:deal(),
-    gen_server:stop(dealer),
-    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
-    Msgs = [ crypto:strong_rand_bytes(512) || _ <- lists:seq(1, N*4)],
-    %% send each message to a random subset of the HBBFT actors
-    {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
-                                               Destinations = random_n(rand:uniform(N), States),
-                                               {NewStates, NewReplies} = lists:unzip(lists:map(fun({J, Data}) ->
-                                                                                                       {NewData, Reply} = hbbft:input(Data, Msg),
-                                                                                                       {{J, NewData}, {J, Reply}}
-                                                                                               end, lists:keysort(1, Destinations))),
-                                               {lists:ukeymerge(1, NewStates, States), merge_replies(N, NewReplies, Replies)}
-                                       end, {StatesWithIndex, []}, Msgs),
-    %% check that at least N-F actors have started ACS:
-    ?assert(length(Replies) >= N - F),
-    %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
-    ?assert(lists:all(fun(E) -> E end, [ length(R) == 5 || {_, {send, R}} <- Replies ])),
-    %% start it on runnin'
-    ConvergedResults = do_send_outer(Replies, NewStates, sets:new()),
-    io:format("Converged Results ~p~n", [ConvergedResults]),
-    ?assert(false),
-    ok.
+hbbft_init_test_() ->
+    {timeout, 60, [
+                   fun() ->
+                           N = 5,
+                           F = 1,
+                           dealer:start_link(N, F+1, 'SS512'),
+                           {ok, _PubKey, PrivateKeys} = dealer:deal(),
+                           gen_server:stop(dealer),
+                           StatesWithIndex = [{J, hbbft:init(Sk, N, F, J)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
+                           Msgs = [ crypto:strong_rand_bytes(512) || _ <- lists:seq(1, N*4)],
+                           %% send each message to a random subset of the HBBFT actors
+                           {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
+                                                                      Destinations = random_n(rand:uniform(N), States),
+                                                                      {NewStates, NewReplies} = lists:unzip(lists:map(fun({J, Data}) ->
+                                                                                                                              {NewData, Reply} = hbbft:input(Data, Msg),
+                                                                                                                              {{J, NewData}, {J, Reply}}
+                                                                                                                      end, lists:keysort(1, Destinations))),
+                                                                      {lists:ukeymerge(1, NewStates, States), merge_replies(N, NewReplies, Replies)}
+                                                              end, {StatesWithIndex, []}, Msgs),
+                           %% check that at least N-F actors have started ACS:
+                           ?assert(length(Replies) >= N - F),
+                           %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
+                           ?assert(lists:all(fun(E) -> E end, [ length(R) == 5 || {_, {send, R}} <- Replies ])),
+                           %% start it on runnin'
+                           ConvergedResults = do_send_outer(Replies, NewStates, sets:new()),
+                           %io:format("Converged Results ~p~n", [ConvergedResults]),
+                           %% check all N actors returned a result
+                           ?assertEqual(N, sets:size(ConvergedResults)),
+                           DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
+                           %% check all N actors returned the same result
+                           ?assertEqual(1, sets:size(DistinctResults)),
+                           %?assert(false),
+                           ok
+                   end
+                  ]}.
 
 encrypt_decrypt_test() ->
     N = 5,
