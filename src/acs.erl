@@ -66,14 +66,14 @@ handle_msg(Data = #data{n=N, f=F, secret_key=SK}, J, {{bba, I}, BBAMsg}) ->
                     NewBBAsAndReplies = lists:foldl(fun(E, Acc) ->
                                                             case maps:is_key(E, Data#data.bba) of
                                                                 false ->
-                                                                    {BBA, {send, ToSend}} = bba:input(bba:init(SK, N, F), 0),
-                                                                    [{{E, BBA}, wrap({bba, I}, ToSend)}|Acc];
+                                                                    {FailedBBA, {send, ToSend}} = bba:input(bba:init(SK, N, F), 0),
+                                                                    [{{E, FailedBBA}, wrap({bba, I}, ToSend)}|Acc];
                                                                 true ->
                                                                     Acc
                                                             end
                                                     end, [], lists:seq(0, maps:size(Data#data.rbc) - 1)),
                     {NewBBAs, Replies} = lists:unzip(NewBBAsAndReplies),
-                    {Data#data{bba=maps:merge(Data#data.bba, maps:from_list(NewBBAs)), bba_results=NewBBAResults, done=true}, {send, Replies}};
+                    {Data#data{bba=maps:merge(Data#data.bba, maps:from_list(NewBBAs)), bba_results=NewBBAResults, done=true}, {send, lists:flatten(Replies)}};
                 false ->
                     %% check if all the BBA protocols have completed and all the RBC protocols have finished
                     Response = case sets:size(sets:from_list([maps:size(NewBBAResults), maps:size(Data#data.bba),

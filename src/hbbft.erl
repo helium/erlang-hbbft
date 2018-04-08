@@ -17,7 +17,7 @@
           decrypted = #{}
          }).
 
--define(BATCH_SIZE, 5).
+-define(BATCH_SIZE, 20).
 
 init(SK, N, F, J) ->
     #data{secret_key=SK, n=N, f=F, j=J, acs=acs:init(SK, N, F)}.
@@ -172,7 +172,7 @@ hbbft_init_test_() ->
                            {ok, _PubKey, PrivateKeys} = dealer:deal(),
                            gen_server:stop(dealer),
                            StatesWithIndex = [{J, hbbft:init(Sk, N, F, J)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
-                           Msgs = [ crypto:strong_rand_bytes(512) || _ <- lists:seq(1, N*4)],
+                           Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*10)],
                            %% send each message to a random subset of the HBBFT actors
                            {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
                                                                       Destinations = random_n(rand:uniform(N), States),
@@ -183,6 +183,7 @@ hbbft_init_test_() ->
                                                                       {lists:ukeymerge(1, NewStates, States), merge_replies(N, NewReplies, Replies)}
                                                               end, {StatesWithIndex, []}, Msgs),
                            %% check that at least N-F actors have started ACS:
+                           io:format("~p replies~n", [length(Replies)]),
                            ?assert(length(Replies) >= N - F),
                            %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
                            ?assert(lists:all(fun(E) -> E end, [ length(R) == 5 || {_, {send, R}} <- Replies ])),
@@ -194,6 +195,10 @@ hbbft_init_test_() ->
                            DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
                            %% check all N actors returned the same result
                            ?assertEqual(1, sets:size(DistinctResults)),
+                           {_, AcceptedMsgs} = lists:unzip(lists:flatten(sets:to_list(DistinctResults))),
+                           io:format("~p~n", [AcceptedMsgs]),
+                           %% check all the Msgs are actually from the original set
+                           ?assert(sets:is_subset(sets:from_list(lists:flatten(AcceptedMsgs)), sets:from_list(Msgs))),
                            %?assert(false),
                            ok
                    end
