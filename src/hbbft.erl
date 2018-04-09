@@ -109,6 +109,8 @@ handle_msg(Data = #data{round=R}, J, {dec, R, I, Share}) ->
             {Data#data{dec_shares=NewShares}, ok}
     end;
 handle_msg(Data = #data{round=R}, J, {sign, R, BinShare}) ->
+    %% messages related to signing the final block for this round, see finalize_round for more information
+    %% this is an extension to the HoneyBadger BFT specification
     Share = binary_to_share(BinShare, Data#data.secret_key),
     %% verify the share
     case tpke_pubkey:verify_signature_share(tpke_privkey:public_key(Data#data.secret_key), Share, Data#data.thingtosign) of
@@ -249,7 +251,6 @@ hbbft_init_test_() ->
                                                                       {lists:ukeymerge(1, NewStates, States), merge_replies(N, NewReplies, Replies)}
                                                               end, {StatesWithIndex, []}, Msgs),
                            %% check that at least N-F actors have started ACS:
-                           io:format("~p replies~n", [length(Replies)]),
                            ?assert(length(Replies) >= N - F),
                            %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
                            ?assert(lists:all(fun(E) -> E end, [ length(R) == N+1 || {_, {send, R}} <- Replies ])),
@@ -269,15 +270,12 @@ hbbft_init_test_() ->
                            Block = term_to_binary({block, AcceptedMsgs}),
                            {EvenNewerStates, NewReplies} = lists:foldl(fun({J, S}, {States, Replies2}) ->
                                                                                {NewS, Res}= hbbft:finalize_round(S, AcceptedMsgs, Block),
-                                                                               io:format("RES ~p~n", [Res]),
                                                                                {lists:keyreplace(J, 1, States, {J, NewS}), merge_replies(N, [{J, Res}], Replies2)}
                                                                        end, {NextStates, []}, NextStates),
                            %% ok, run the rest of the round to completion
-                           io:format("New replies ~p~n", [NewReplies]),
                            {NextStates2, ConvergedResults2} = do_send_outer(NewReplies, EvenNewerStates, sets:new()),
                            %?assertEqual(N, sets:size(ConvergedResults2)),
                            DistinctResults2 = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults2)]),
-                           io:format("DistinctResults2 ~p~n", [sets:to_list(DistinctResults2)]),
                            [{signature, Sig}] = sets:to_list(DistinctResults2),
                            %% XXX we don't have a great way to deserialize the elements yet, this is a hack
                            Ugh = tpke_pubkey:hash_message(PubKey, <<"ugh">>),
@@ -286,11 +284,9 @@ hbbft_init_test_() ->
                            ?assertEqual(1, sets:size(DistinctResults)),
                            HM = tpke_pubkey:hash_message(PubKey, Block),
                            ?assert(tpke_pubkey:verify_signature(PubKey, Signature, HM)),
-                           io:format("signature is ok!~n"),
                            %% ok, now we need to go onto the next round
                            {PenultimateStates, PenultimateReplies} = lists:foldl(fun({J, S}, {States, Replies2}) ->
                                                                                          {NewS, Res}= hbbft:next_round(S),
-                                                                                         io:format("RES ~p~n", [Res]),
                                                                                          {lists:keyreplace(J, 1, States, {J, NewS}), merge_replies(N, [{J, Res}], Replies2)}
                                                                                  end, {NextStates2, []}, NextStates2),
                            {NextStates3, ConvergedResults3} = do_send_outer(PenultimateReplies, PenultimateStates, sets:new()),
