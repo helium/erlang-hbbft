@@ -45,7 +45,7 @@ input(Data = #data{state=init, n=N, f=F}, Msg) ->
     BranchesForShards = [merkerl:gen_proof(Hash, Merkle) || {Hash, _} <- merkerl:leaves(Merkle)],
     %% TODO add our identity to the ready/echo sets?
     NewData = Data#data{msg=Msg, h=MerkleRootHash},
-    Result = [ {unicast, J, {val, MerkleRootHash, lists:nth(J+1, BranchesForShards), lists:nth(J+1, ShardsWithSize)}} || J <- lists:seq(1, N-1)],
+    Result = [ {unicast, J, {val, MerkleRootHash, lists:nth(J+1, BranchesForShards), lists:nth(J+1, ShardsWithSize)}} || J <- lists:seq(0, N-1)],
     %% unicast all the VAL packets and multicast the ECHO for our own share
     {NewData#data{state=waiting}, {send, Result ++ [{multicast, {echo, MerkleRootHash, hd(BranchesForShards), hd(ShardsWithSize)}}]}};
 input(Data, _Msg) ->
@@ -102,6 +102,7 @@ echo(Data = #data{n=N, f=F}, J, H, Bj, Sj) ->
                                             case sets:size(NewData#data.num_echoes) >= Threshold andalso sets:size(NewData#data.num_readies) >= (2*F + 1) of
                                                 true ->
                                                     %% decode V. Done
+                                                    io:format("RBC finished~n"),
                                                     {NewData#data{state=done}, {result, Msg}};
                                                 false ->
                                                     %% wait for enough echoes and readies?
@@ -113,6 +114,7 @@ echo(Data = #data{n=N, f=F}, J, H, Bj, Sj) ->
                                     end;
                                 false ->
                                     %% abort
+                                    io:format("RBC aborted~n"),
                                     {NewData#data{state=aborted}, abort}
                             end;
                         {error, _Reason} ->
@@ -138,6 +140,7 @@ ready(Data = #data{state=waiting, n=N, f=F}, J, H) ->
             case sets:size(NewData#data.num_echoes) >= Threshold andalso sets:size(NewData#data.num_readies) >= 2*F + 1 of
                 true ->
                     %% done
+                    io:format("RBC finished, second case~n"),
                     {NewData#data{state=done}, {result, NewData#data.msg}};
                 false when not NewData#data.ready_sent ->
                     %% multicast ready
