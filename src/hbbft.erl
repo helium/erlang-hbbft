@@ -1,9 +1,8 @@
 -module(hbbft). %% big kahuna
 
--export([init/4, input/2, get_encrypted_key/2, decrypt/2, handle_msg/3]).
+-export([init/4, input/2, finalize_round/3, next_round/1, get_encrypted_key/2, decrypt/2, handle_msg/3]).
 
 -record(data, {
-          state = waiting :: waiting | done,
           secret_key,
           n :: pos_integer(),
           f :: pos_integer(),
@@ -14,7 +13,9 @@
           acs_init = false,
           acs_results :: undefined | [binary()],
           dec_shares = #{},
-          decrypted = #{}
+          decrypted = #{},
+          sig_shares = #{},
+          thingtosign
          }).
 
 -define(BATCH_SIZE, 20).
@@ -23,27 +24,34 @@ init(SK, N, F, J) ->
     #data{secret_key=SK, n=N, f=F, j=J, acs=acs:init(SK, N, F, J)}.
 
 %% someone submitting a transaction to the replica set
-input(Data = #data{secret_key=SK, n=N}, Txn) ->
-    io:format("~p got message, queue is ~p~n", [Data#data.j, queue:len(Data#data.buf) + 1]),
-    case queue:len(Data#data.buf) > ?BATCH_SIZE andalso Data#data.acs_init == false of
-        true ->
-            %% compose a transaction bundle
-            %% get the top b elements from buf
-            %% pick a random B/N selection of them
-            Proposed = random_n(?BATCH_SIZE div N, lists:sublist(queue:to_list(Data#data.buf), ?BATCH_SIZE)),
-            %% encrypt x -> tpke.enc(pk, proposed)
-            EncX = encrypt(tpke_privkey:public_key(SK), term_to_binary(Proposed)),
-            %% time to kick off a round
-            {NewACSState, {send, ACSResponse}} = acs:input(Data#data.acs, EncX),
-            io:format("~p has initiated ACS~n", [Data#data.j]),
-            %% add this to acs set in data and send out the ACS response(s)
-            {Data#data{state=waiting, acs=NewACSState, acs_init=true, buf=queue:in(Txn, Data#data.buf)},
-             {send, wrap({acs, Data#data.round}, ACSResponse)}};
-        false ->
-            %% not enough transactions for this round yet
-            %% add this txn to the the buffer
-            {Data#data{state=waiting, buf=queue:in(Txn, Data#data.buf)}, ok}
-    end.
+input(Data = #data{buf=Buf}, Txn) ->
+    %% add this txn to the the buffer
+    NewBuf = queue:in(Txn, Buf),
+    io:format("~p got message, queue is ~p~n", [Data#data.j, queue:len(NewBuf)]),
+    maybe_start_acs(Data#data{buf=NewBuf}).
+
+%% The user has constructed something that looks like a block and is telling us which transactions
+%% to remove from the buffer (accepted or invalid). Transactions missing causal context
+%% (eg. a missing monotonic nonce prior to the current nonce) should remain in the buffer and thus
+%% should not be placed in TransactionsToRemove. Once this returns, the user should call next_round/1.
+finalize_round(Data, TransactionsToRemove, ThingToSign) ->
+    NewBuf = queue:filter(fun(Item) ->
+                                  not lists:member(Item, TransactionsToRemove)
+                          end, Data#data.buf),
+    io:format("~b finalizing round, removed ~p elements from buf~n", [Data#data.j, queue:len(Data#data.buf) - queue:len(NewBuf)]),
+    HashThing = tpke_pubkey:hash_message(tpke_privkey:public_key(Data#data.secret_key), ThingToSign),
+    BinShare = share_to_binary(tpke_privkey:sign(Data#data.secret_key, HashThing)),
+    %% multicast the signature to everyone
+    {Data#data{thingtosign=HashThing, buf=NewBuf}, {send, [{multicast, {sign, Data#data.round, BinShare}}]}}.
+
+%% The user has obtained a signature and is ready to go to the next round
+next_round(Data = #data{secret_key=SK, n=N, f=F, j=J}) ->
+    %% reset all the round-dependant bits of the state and increment the round
+    NewData = Data#data{round=Data#data.round + 1, acs=acs:init(SK, N, F, J),
+                        acs_init=false, acs_results=undefined,
+                        dec_shares=#{}, decrypted=#{},
+                        sig_shares=#{}, thingtosign=undefined},
+    maybe_start_acs(NewData).
 
 handle_msg(Data = #data{round=R}, J, {{acs, R}, ACSMsg}) ->
     %% ACS message for this round
@@ -84,7 +92,14 @@ handle_msg(Data = #data{round=R}, J, {dec, R, I, Share}) ->
                         true ->
                             %% we did it!
                             io:format("~p finished decryption phase!~n", [Data#data.j]),
-                            {Data#data{dec_shares=NewShares, decrypted=NewDecrypted}, {result, maps:to_list(NewDecrypted)}};
+                            %% Combine all unique messages into a single list
+                            TransactionsThisRound = lists:usort(lists:flatten(maps:values(NewDecrypted))),
+                            %% return the transactions we agreed on to the user
+                            %% we have no idea which transactions are valid, invalid, out of order or missing
+                            %% causal context (eg. a nonce is not monotonic) so we return them to the user to let them
+                            %% figure it out. We expect the user to call finalize_round/3 once they've decided what they want to accept
+                            %% from this set of transactions.
+                            {Data#data{dec_shares=NewShares, decrypted=NewDecrypted}, {result, {transactions, TransactionsThisRound}}};
                         false ->
                             {Data#data{dec_shares=NewShares, decrypted=NewDecrypted}, ok}
                     end
@@ -93,9 +108,60 @@ handle_msg(Data = #data{round=R}, J, {dec, R, I, Share}) ->
             %% not enough shares yet
             {Data#data{dec_shares=NewShares}, ok}
     end;
+handle_msg(Data = #data{round=R}, J, {sign, R, BinShare}) ->
+    Share = binary_to_share(BinShare, Data#data.secret_key),
+    %% verify the share
+    case tpke_pubkey:verify_signature_share(tpke_privkey:public_key(Data#data.secret_key), Share, Data#data.thingtosign) of
+        true ->
+            io:format("~b got valid signature share~n", [Data#data.j]),
+            NewSigShares = maps:put(J, Share, Data#data.sig_shares),
+            %% check if we have at least f+1 shares
+            case maps:size(NewSigShares) > Data#data.f of
+                true ->
+                    %% ok, we have enough people agreeing with us we can return the signature
+                    Sig = tpke_pubkey:combine_signature_shares(tpke_privkey:public_key(Data#data.secret_key), maps:values(NewSigShares)),
+                    {Data#data{sig_shares=NewSigShares}, {result, {signature, erlang_pbc:element_to_binary(Sig)}}};
+                false ->
+                    {Data#data{sig_shares=NewSigShares}, ok}
+            end;
+        false ->
+            io:format("~p got bad signature share from ~p~n", [Data#data.j, J]),
+            {Data, ok}
+    end;
 handle_msg(_, _, Msg) ->
     io:format("ignoring message ~p~n", [Msg]),
     ok.
+
+maybe_start_acs(Data = #data{n=N, secret_key=SK}) ->
+    case queue:len(Data#data.buf) > ?BATCH_SIZE andalso Data#data.acs_init == false of
+        true ->
+            %% compose a transaction bundle
+            %% get the top b elements from buf
+            %% pick a random B/N selection of them
+            Proposed = random_n(?BATCH_SIZE div N, lists:sublist(queue:to_list(Data#data.buf), ?BATCH_SIZE)),
+            %% encrypt x -> tpke.enc(pk, proposed)
+            EncX = encrypt(tpke_privkey:public_key(SK), term_to_binary(Proposed)),
+            %% time to kick off a round
+            {NewACSState, {send, ACSResponse}} = acs:input(Data#data.acs, EncX),
+            io:format("~p has initiated ACS~n", [Data#data.j]),
+            %% add this to acs set in data and send out the ACS response(s)
+            {Data#data{acs=NewACSState, acs_init=true},
+             {send, wrap({acs, Data#data.round}, ACSResponse)}};
+        false ->
+            %% not enough transactions for this round yet
+            {Data, ok}
+    end.
+
+share_to_binary({ShareIdx, ShareElement}) ->
+    %% Assume less than 256 members in the consensus group
+    ShareBinary = erlang_pbc:element_to_binary(ShareElement),
+    <<ShareIdx:8/integer-unsigned, ShareBinary/binary>>.
+
+binary_to_share(<<ShareIdx:8/integer-unsigned, ShareBinary/binary>>, SK) ->
+    %% XXX we don't have a great way to deserialize the elements yet, this is a hack
+    Ugh = tpke_pubkey:hash_message(tpke_privkey:public_key(SK), <<"ugh">>),
+    ShareElement = erlang_pbc:binary_to_element(Ugh, ShareBinary),
+    {ShareIdx, ShareElement}.
 
 %% wrap a subprotocol's outbound messages with a protocol identifier
 wrap(_, []) ->
@@ -169,10 +235,10 @@ hbbft_init_test_() ->
                            N = 5,
                            F = 1,
                            dealer:start_link(N, F+1, 'SS512'),
-                           {ok, _PubKey, PrivateKeys} = dealer:deal(),
+                           {ok, PubKey, PrivateKeys} = dealer:deal(),
                            gen_server:stop(dealer),
                            StatesWithIndex = [{J, hbbft:init(Sk, N, F, J)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
-                           Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*10)],
+                           Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*20)],
                            %% send each message to a random subset of the HBBFT actors
                            {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
                                                                       Destinations = random_n(rand:uniform(N), States),
@@ -188,17 +254,50 @@ hbbft_init_test_() ->
                            %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
                            ?assert(lists:all(fun(E) -> E end, [ length(R) == N+1 || {_, {send, R}} <- Replies ])),
                            %% start it on runnin'
-                           ConvergedResults = do_send_outer(Replies, NewStates, sets:new()),
+                           {NextStates, ConvergedResults} = do_send_outer(Replies, NewStates, sets:new()),
                            %io:format("Converged Results ~p~n", [ConvergedResults]),
                            %% check all N actors returned a result
                            ?assertEqual(N, sets:size(ConvergedResults)),
                            DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
                            %% check all N actors returned the same result
                            ?assertEqual(1, sets:size(DistinctResults)),
-                           {_, AcceptedMsgs} = lists:unzip(lists:flatten(sets:to_list(DistinctResults))),
-                           %io:format("~p~n", [AcceptedMsgs]),
+                           %io:format("DistinctResults ~p~n", [sets:to_list(DistinctResults)]),
+                           {_, [AcceptedMsgs]} = lists:unzip(lists:flatten(sets:to_list(DistinctResults))),
                            %% check all the Msgs are actually from the original set
-                           ?assert(sets:is_subset(sets:from_list(lists:flatten(AcceptedMsgs)), sets:from_list(Msgs))),
+                           ?assert(sets:is_subset(sets:from_list(AcceptedMsgs), sets:from_list(Msgs))),
+                           %% ok, tell HBBFT we like all its transactions and give it a block to sign
+                           Block = term_to_binary({block, AcceptedMsgs}),
+                           {EvenNewerStates, NewReplies} = lists:foldl(fun({J, S}, {States, Replies2}) ->
+                                                                               {NewS, Res}= hbbft:finalize_round(S, AcceptedMsgs, Block),
+                                                                               io:format("RES ~p~n", [Res]),
+                                                                               {lists:keyreplace(J, 1, States, {J, NewS}), merge_replies(N, [{J, Res}], Replies2)}
+                                                                       end, {NextStates, []}, NextStates),
+                           %% ok, run the rest of the round to completion
+                           io:format("New replies ~p~n", [NewReplies]),
+                           {NextStates2, ConvergedResults2} = do_send_outer(NewReplies, EvenNewerStates, sets:new()),
+                           %?assertEqual(N, sets:size(ConvergedResults2)),
+                           DistinctResults2 = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults2)]),
+                           io:format("DistinctResults2 ~p~n", [sets:to_list(DistinctResults2)]),
+                           [{signature, Sig}] = sets:to_list(DistinctResults2),
+                           %% XXX we don't have a great way to deserialize the elements yet, this is a hack
+                           Ugh = tpke_pubkey:hash_message(PubKey, <<"ugh">>),
+                           Signature = erlang_pbc:binary_to_element(Ugh, Sig),
+                           %% everyone should have converged to the same signature
+                           ?assertEqual(1, sets:size(DistinctResults)),
+                           HM = tpke_pubkey:hash_message(PubKey, Block),
+                           ?assert(tpke_pubkey:verify_signature(PubKey, Signature, HM)),
+                           io:format("signature is ok!~n"),
+                           %% ok, now we need to go onto the next round
+                           {PenultimateStates, PenultimateReplies} = lists:foldl(fun({J, S}, {States, Replies2}) ->
+                                                                                         {NewS, Res}= hbbft:next_round(S),
+                                                                                         io:format("RES ~p~n", [Res]),
+                                                                                         {lists:keyreplace(J, 1, States, {J, NewS}), merge_replies(N, [{J, Res}], Replies2)}
+                                                                                 end, {NextStates2, []}, NextStates2),
+                           {NextStates3, ConvergedResults3} = do_send_outer(PenultimateReplies, PenultimateStates, sets:new()),
+                           DistinctResults3 = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults2)]),
+                           {_, [AcceptedMsgs2]} = lists:unzip(lists:flatten(sets:to_list(DistinctResults))),
+                           %% check all the Msgs are actually from the original set
+                           ?assert(sets:is_subset(sets:from_list(AcceptedMsgs2), sets:from_list(Msgs))),
                            ok
                    end
                   ]}.
@@ -228,7 +327,7 @@ hbbft_one_actor_no_txns_test_() ->
                            %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
                            ?assert(lists:all(fun(E) -> E end, [ length(R) == N+1 || {_, {send, R}} <- Replies ])),
                            %% start it on runnin'
-                           ConvergedResults = do_send_outer(Replies, NewStates, sets:new()),
+                           {_, ConvergedResults} = do_send_outer(Replies, NewStates, sets:new()),
                            %io:format("Converged Results ~p~n", [ConvergedResults]),
                            %% check all N actors returned a result
                            ?assertEqual(N, sets:size(ConvergedResults)),
@@ -268,7 +367,7 @@ hbbft_two_actors_no_txns_test_() ->
                            %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
                            ?assert(lists:all(fun(E) -> E end, [ length(R) == N+1 || {_, {send, R}} <- Replies ])),
                            %% start it on runnin'
-                           ConvergedResults = do_send_outer(Replies, NewStates, sets:new()),
+                           {_, ConvergedResults} = do_send_outer(Replies, NewStates, sets:new()),
                            %% check no actors returned a result
                            ?assertEqual(0, sets:size(ConvergedResults)),
                            ok
@@ -300,7 +399,7 @@ hbbft_one_actor_missing_test_() ->
                            %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
                            ?assert(lists:all(fun(E) -> E end, [ length(R) == N+1 || {_, {send, R}} <- Replies ])),
                            %% start it on runnin'
-                           ConvergedResults = do_send_outer(Replies, NewStates, sets:new()),
+                           {_, ConvergedResults} = do_send_outer(Replies, NewStates, sets:new()),
                            %% check no actors returned a result
                            ?assertEqual(4, sets:size(ConvergedResults)),
                            DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
@@ -338,7 +437,7 @@ hbbft_two_actor_missing_test_() ->
                            %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
                            ?assert(lists:all(fun(E) -> E end, [ length(R) == N+1 || {_, {send, R}} <- Replies ])),
                            %% start it on runnin'
-                           ConvergedResults = do_send_outer(Replies, NewStates, sets:new()),
+                           {_, ConvergedResults} = do_send_outer(Replies, NewStates, sets:new()),
                            %% check no actors returned a result
                            ?assertEqual(0, sets:size(ConvergedResults)),
                            ok
@@ -360,8 +459,8 @@ encrypt_decrypt_test() ->
     ?assertEqual(PlainText, decrypt(DecKey, Enc)),
     ok.
 
-do_send_outer([], _, Acc) ->
-    Acc;
+do_send_outer([], States, Acc) ->
+    {States, Acc};
 do_send_outer([{result, {Id, Result}} | T], Pids, Acc) ->
     do_send_outer(T, Pids, sets:add_element({result, {Id, Result}}, Acc));
 do_send_outer([H|T], States, Acc) ->
