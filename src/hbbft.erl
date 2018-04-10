@@ -11,6 +11,8 @@
           buf = queue:new(),
           acs,
           acs_init = false,
+          sent_txns = false,
+          sent_sig = false,
           acs_results :: undefined | [binary()],
           dec_shares = #{},
           decrypted = #{},
@@ -49,6 +51,7 @@ next_round(Data = #data{secret_key=SK, n=N, f=F, j=J}) ->
     %% reset all the round-dependant bits of the state and increment the round
     NewData = Data#data{round=Data#data.round + 1, acs=acs:init(SK, N, F, J),
                         acs_init=false, acs_results=undefined,
+                        sent_txns=false, sent_sig=false,
                         dec_shares=#{}, decrypted=#{},
                         sig_shares=#{}, thingtosign=undefined},
     maybe_start_acs(NewData).
@@ -88,7 +91,7 @@ handle_msg(Data = #data{round=R}, J, {dec, R, I, Share}) ->
                     {Data#data{dec_shares=NewShares}, ok};
                 Decrypted ->
                     NewDecrypted = maps:put(I, binary_to_term(Decrypted), Data#data.decrypted),
-                    case maps:size(NewDecrypted) == length(Data#data.acs_results) of
+                    case maps:size(NewDecrypted) == length(Data#data.acs_results) andalso not Data#data.sent_txns of
                         true ->
                             %% we did it!
                             io:format("~p finished decryption phase!~n", [Data#data.j]),
@@ -99,7 +102,7 @@ handle_msg(Data = #data{round=R}, J, {dec, R, I, Share}) ->
                             %% causal context (eg. a nonce is not monotonic) so we return them to the user to let them
                             %% figure it out. We expect the user to call finalize_round/3 once they've decided what they want to accept
                             %% from this set of transactions.
-                            {Data#data{dec_shares=NewShares, decrypted=NewDecrypted}, {result, {transactions, TransactionsThisRound}}};
+                            {Data#data{dec_shares=NewShares, decrypted=NewDecrypted, sent_txns=true}, {result, {transactions, TransactionsThisRound}}};
                         false ->
                             {Data#data{dec_shares=NewShares, decrypted=NewDecrypted}, ok}
                     end
@@ -118,11 +121,11 @@ handle_msg(Data = #data{round=R}, J, {sign, R, BinShare}) ->
             io:format("~b got valid signature share~n", [Data#data.j]),
             NewSigShares = maps:put(J, Share, Data#data.sig_shares),
             %% check if we have at least f+1 shares
-            case maps:size(NewSigShares) > Data#data.f of
+            case maps:size(NewSigShares) > Data#data.f andalso not Data#data.sent_sig of
                 true ->
                     %% ok, we have enough people agreeing with us we can return the signature
                     Sig = tpke_pubkey:combine_signature_shares(tpke_privkey:public_key(Data#data.secret_key), maps:values(NewSigShares)),
-                    {Data#data{sig_shares=NewSigShares}, {result, {signature, erlang_pbc:element_to_binary(Sig)}}};
+                    {Data#data{sig_shares=NewSigShares, sent_sig=true}, {result, {signature, erlang_pbc:element_to_binary(Sig)}}};
                 false ->
                     {Data#data{sig_shares=NewSigShares}, ok}
             end;
@@ -130,9 +133,9 @@ handle_msg(Data = #data{round=R}, J, {sign, R, BinShare}) ->
             io:format("~p got bad signature share from ~p~n", [Data#data.j, J]),
             {Data, ok}
     end;
-handle_msg(_, _, Msg) ->
+handle_msg(Data, _, Msg) ->
     io:format("ignoring message ~p~n", [Msg]),
-    ok.
+    {Data, ok}.
 
 maybe_start_acs(Data = #data{n=N, secret_key=SK}) ->
     case queue:len(Data#data.buf) > ?BATCH_SIZE andalso Data#data.acs_init == false of
