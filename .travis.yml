@@ -5,6 +5,11 @@ language: erlang
 otp_release:
   - 20.1
 
+addons:
+  apt:
+    packages:
+    - yasm
+
 cache:
   directories:
   - $HOME/.cache/rebar3
