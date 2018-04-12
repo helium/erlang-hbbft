@@ -35,8 +35,7 @@ verify_chain([G], PubKey) ->
     true = G#block.prev_hash == <<>>,
     %% genesis block should have a valid signature
     HM = tpke_pubkey:hash_message(PubKey, term_to_binary(G#block{signature= <<>>})),
-    Ugh = tpke_pubkey:hash_message(PubKey, <<"ugh">>),
-    Signature = erlang_pbc:binary_to_element(Ugh, G#block.signature),
+    Signature = tpke_pubkey:deserialize_element(PubKey, G#block.signature),
     true = tpke_pubkey:verify_signature(PubKey, Signature, HM);
 verify_chain([A, B|_]=Chain, PubKey) ->
     io:format("Chain verification depth ~p~n", [length(Chain)]),
@@ -44,8 +43,7 @@ verify_chain([A, B|_]=Chain, PubKey) ->
     true = A#block.prev_hash == hash_block(B),
     %% A should have a valid signature
     HM = tpke_pubkey:hash_message(PubKey, term_to_binary(A#block{signature= <<>>})),
-    Ugh = tpke_pubkey:hash_message(PubKey, <<"ugh">>),
-    Signature = erlang_pbc:binary_to_element(Ugh, A#block.signature),
+    Signature = tpke_pubkey:deserialize_element(PubKey, A#block.signature),
     true = tpke_pubkey:verify_signature(PubKey, Signature, HM),
     verify_chain(tl(Chain), PubKey).
 

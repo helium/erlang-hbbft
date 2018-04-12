@@ -78,7 +78,7 @@ handle_msg(Data = #data{round=R}, J, {dec, R, I, Share}) ->
     NewShares = maps:put({I, J}, Share, Data#data.dec_shares),
     %% check if we have enough to decode the bundle
     SharesForThisBundle = [ S || {{Idx, _}, S} <- maps:to_list(NewShares), I == Idx],
-    case length(SharesForThisBundle) > Data#data.f of
+    case length(SharesForThisBundle) > Data#data.f andalso not maps:is_key({I, J}, Data#data.dec_shares) of
         true ->
             io:format("~p got enough shares to decrypt bundle ~n", [Data#data.j]),
             {I, Enc} = lists:keyfind(I, 1, Data#data.acs_results),
@@ -163,9 +163,7 @@ share_to_binary({ShareIdx, ShareElement}) ->
     <<ShareIdx:8/integer-unsigned, ShareBinary/binary>>.
 
 binary_to_share(<<ShareIdx:8/integer-unsigned, ShareBinary/binary>>, SK) ->
-    %% XXX we don't have a great way to deserialize the elements yet, this is a hack
-    Ugh = tpke_pubkey:hash_message(tpke_privkey:public_key(SK), <<"ugh">>),
-    ShareElement = erlang_pbc:binary_to_element(Ugh, ShareBinary),
+    ShareElement = tpke_pubkey:deserialize_element(tpke_privkey:public_key(SK), ShareBinary),
     {ShareIdx, ShareElement}.
 
 %% wrap a subprotocol's outbound messages with a protocol identifier
@@ -196,10 +194,9 @@ encrypt(PK, Bin) ->
 
 get_encrypted_key(SK, <<_IV:16/binary, EncKeySize:16/integer-unsigned, EncKey:EncKeySize/binary, _/binary>>) ->
     <<USize:8/integer-unsigned, UBin:USize/binary, V:32/binary, WSize:8/integer-unsigned, WBin:WSize/binary>> = EncKey,
-    %% XXX we don't have a great way to deserialize the elements yet, this is a hack
-    Ugh = tpke_pubkey:hash_message(tpke_privkey:public_key(SK), <<"ugh">>),
-    U = erlang_pbc:binary_to_element(Ugh, UBin),
-    W = erlang_pbc:binary_to_element(Ugh, WBin),
+    PubKey = tpke_privkey:public_key(SK),
+    U = tpke_pubkey:deserialize_element(PubKey, UBin),
+    W = tpke_pubkey:deserialize_element(PubKey, WBin),
     {U, V, W}.
 
 decrypt(Key, Bin) ->
@@ -280,9 +277,7 @@ hbbft_init_test_() ->
                            %?assertEqual(N, sets:size(ConvergedResults2)),
                            DistinctResults2 = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults2)]),
                            [{signature, Sig}] = sets:to_list(DistinctResults2),
-                           %% XXX we don't have a great way to deserialize the elements yet, this is a hack
-                           Ugh = tpke_pubkey:hash_message(PubKey, <<"ugh">>),
-                           Signature = erlang_pbc:binary_to_element(Ugh, Sig),
+                           Signature = tpke_pubkey:deserialize_element(PubKey, Sig),
                            %% everyone should have converged to the same signature
                            ?assertEqual(1, sets:size(DistinctResults)),
                            HM = tpke_pubkey:hash_message(PubKey, Block),
