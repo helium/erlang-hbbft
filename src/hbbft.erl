@@ -194,8 +194,9 @@ encrypt(PK, Bin) ->
 
 get_encrypted_key(SK, <<_IV:16/binary, EncKeySize:16/integer-unsigned, EncKey:EncKeySize/binary, _/binary>>) ->
     <<USize:8/integer-unsigned, UBin:USize/binary, V:32/binary, WSize:8/integer-unsigned, WBin:WSize/binary>> = EncKey,
-    U = tpke_pubkey:deserialize_element(tpke_privkey:public_key(SK), UBin),
-    W = tpke_pubkey:deserialize_element(tpke_privkey:public_key(SK), WBin),
+    PubKey = tpke_privkey:public_key(SK),
+    U = tpke_pubkey:deserialize_element(PubKey, UBin),
+    W = tpke_pubkey:deserialize_element(PubKey, WBin),
     {U, V, W}.
 
 decrypt(Key, Bin) ->
