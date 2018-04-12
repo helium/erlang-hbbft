@@ -29,28 +29,33 @@ handle_msg(Data, J, {share, Share}) ->
 share(Data = #data{state=done}, _J, _Share) ->
     {Data, ok};
 share(Data, _J, Share) ->
-    case tpke_pubkey:verify_signature_share(tpke_privkey:public_key(Data#data.sk), Share, Data#data.sid) of
-        true ->
-            NewData = Data#data{shares=sets:add_element(Share, Data#data.shares)},
-            %% check if we have at least f+1 shares
-            case sets:size(NewData#data.shares) > Data#data.f of
+    case sets:is_element(Share, Data#data.shares) of
+        false ->
+            case tpke_pubkey:verify_signature_share(tpke_privkey:public_key(Data#data.sk), Share, Data#data.sid) of
                 true ->
-                    %% combine shares
-                    Sig = tpke_pubkey:combine_signature_shares(tpke_privkey:public_key(NewData#data.sk), sets:to_list(NewData#data.shares)),
-                    %% check if the signature is valid
-                    case tpke_pubkey:verify_signature(tpke_privkey:public_key(NewData#data.sk), Sig, NewData#data.sid) of
+                    NewData = Data#data{shares=sets:add_element(Share, Data#data.shares)},
+                    %% check if we have at least f+1 shares
+                    case sets:size(NewData#data.shares) > Data#data.f of
                         true ->
-                            %% TODO do something better here!
-                            <<Val:32/integer, _/binary>> = erlang_pbc:element_to_binary(Sig),
-                            {NewData#data{state=done}, {result, Val}};
+                            %% combine shares
+                            Sig = tpke_pubkey:combine_signature_shares(tpke_privkey:public_key(NewData#data.sk), sets:to_list(NewData#data.shares)),
+                            %% check if the signature is valid
+                            case tpke_pubkey:verify_signature(tpke_privkey:public_key(NewData#data.sk), Sig, NewData#data.sid) of
+                                true ->
+                                    %% TODO do something better here!
+                                    <<Val:32/integer, _/binary>> = erlang_pbc:element_to_binary(Sig),
+                                    {NewData#data{state=done}, {result, Val}};
+                                false ->
+                                    {NewData, ok}
+                            end;
                         false ->
                             {NewData, ok}
                     end;
                 false ->
-                    {NewData, ok}
+                    %% XXX bad share can be proof of malfeasance
+                    {Data, ok}
             end;
-        false ->
-            %% XXX bad share can be proof of malfeasance
+        true ->
             {Data, ok}
     end.
 
