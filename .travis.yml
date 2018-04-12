@@ -9,4 +9,11 @@ cache:
   directories:
   - $HOME/.cache/rebar3
 
+before_script:
+    git clone https://github.com/blynn/pbc
+    cd pbc
+    autoreconf -fvi
+    make
+    make install
+
 script: ./rebar3 as test do eunit,ct && ./rebar3 dialyzer && ./rebar3 coveralls send
