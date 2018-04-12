@@ -145,7 +145,7 @@ init_test() ->
                             {{J, NewState}, {J, Result}}
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
-    {_, ConvergedResults} = do_send_outer(Results, NewStates, sets:new()),
+    {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
     io:format("ConvergedResults ~p~n", [ConvergedResults]),
     %% everyone should converge
     ?assertEqual(N, sets:size(ConvergedResults)),
@@ -166,7 +166,7 @@ init_with_zeroes_test() ->
                             {{J, NewState}, {J, Result}}
                     end, ZeroList),
     {NewStates, Results} = lists:unzip(Res),
-    {_, ConvergedResults} = do_send_outer(Results, NewStates, sets:new()),
+    {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
     DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
     io:format("DistinctResults: ~p~n", [sets:to_list(DistinctResults)]),
     ?assertEqual(N, sets:size(ConvergedResults)),
@@ -188,7 +188,7 @@ init_with_ones_test() ->
                             {{J, NewState}, {J, Result}}
                     end, OneList),
     {NewStates, Results} = lists:unzip(Res),
-    {_, ConvergedResults} = do_send_outer(Results, NewStates, sets:new()),
+    {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
     DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
     io:format("DistinctResults: ~p~n", [sets:to_list(DistinctResults)]),
     %% io:format("ConvergedResults ~p~n", [ConvergedResults]),
@@ -211,7 +211,7 @@ init_with_mixed_zeros_and_ones_test() ->
                             {{J, NewState}, {J, Result}}
                     end, MixedList),
     {NewStates, Results} = lists:unzip(Res),
-    {_, ConvergedResults} = do_send_outer(Results, NewStates, sets:new()),
+    {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
     DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
     io:format("DistinctResults: ~p~n", [sets:to_list(DistinctResults)]),
     io:format("ConvergedResults ~p~n", [sets:to_list(ConvergedResults)]),
@@ -233,7 +233,7 @@ one_dead_test() ->
                             {{J, NewState}, {J, Result}}
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
-    {_, ConvergedResults} = do_send_outer(Results, NewStates, sets:new()),
+    {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
     %% everyone but one should converge
     ?assertEqual(N - 1, sets:size(ConvergedResults)),
     ok.
@@ -252,34 +252,8 @@ two_dead_test() ->
                             {{J, NewState}, {J, Result}}
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
-    {_, ConvergedResults} = do_send_outer(Results, NewStates, sets:new()),
+    {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
     %% should not converge
     ?assertEqual(0, sets:size(ConvergedResults)),
     ok.
-
-do_send_outer([], States, Acc) ->
-    {States, Acc};
-do_send_outer([{result, {Id, Result}} | T], Pids, Acc) ->
-    do_send_outer(T, Pids, sets:add_element({result, {Id, Result}}, Acc));
-do_send_outer([H|T], States, Acc) ->
-    {R, NewStates} = do_send(H, [], States),
-    do_send_outer(T++R, NewStates, Acc).
-
-do_send({Id, {result, Result}}, Acc, States) ->
-    {[{result, {Id, Result}} | Acc], States};
-do_send({_, ok}, Acc, States) ->
-    {Acc, States};
-do_send({_, {send, []}}, Acc, States) ->
-    {Acc, States};
-do_send({Id, {send, [{unicast, J, Msg}|T]}}, Acc, States) ->
-    {J, State} = lists:keyfind(J, 1, States),
-    {NewState, Result} = handle_msg(State, Id, Msg),
-    do_send({Id, {send, T}}, [{J, Result}|Acc], lists:keyreplace(J, 1, States, {J, NewState}));
-do_send({Id, {send, [{multicast, Msg}|T]}}, Acc, States) ->
-    Res = lists:map(fun({J, State}) ->
-                            {NewState, Result} = handle_msg(State, Id, Msg),
-                            {{J, NewState}, {J, Result}}
-                    end, States),
-    {NewStates, Results} = lists:unzip(Res),
-    do_send({Id, {send, T}}, Results ++ Acc, lists:ukeymerge(1, NewStates, States)).
 -endif.
