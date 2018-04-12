@@ -16,6 +16,7 @@ before_script:
     autoreconf -fvi &&
     ./configure --prefix $HOME/.cache/pbc &&
     make &&
-    make install
+    make install &&
+    cd ..
 
 script: CFLAGS="-I $HOME/.cache/pbc/include" LDFLAGS="-L $HOME/.cache/pbc/lib" ./rebar3 as test do eunit,ct && ./rebar3 dialyzer && ./rebar3 coveralls send
