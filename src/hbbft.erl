@@ -238,7 +238,7 @@ hbbft_init_test_() ->
                            %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
                            ?assert(lists:all(fun(E) -> E end, [ length(R) == N+1 || {_, {send, R}} <- Replies ])),
                            %% start it on runnin'
-                           {NextStates, ConvergedResults} = do_send_outer(Replies, NewStates, sets:new()),
+                           {NextStates, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Replies, NewStates, sets:new()),
                            %io:format("Converged Results ~p~n", [ConvergedResults]),
                            %% check all N actors returned a result
                            ?assertEqual(N, sets:size(ConvergedResults)),
@@ -256,7 +256,7 @@ hbbft_init_test_() ->
                                                                                {lists:keyreplace(J, 1, States, {J, NewS}), merge_replies(N, [{J, Res}], Replies2)}
                                                                        end, {NextStates, []}, NextStates),
                            %% ok, run the rest of the round to completion
-                           {NextStates2, ConvergedResults2} = do_send_outer(NewReplies, EvenNewerStates, sets:new()),
+                           {NextStates2, ConvergedResults2} = hbbft_test_utils:do_send_outer(?MODULE, NewReplies, EvenNewerStates, sets:new()),
                            %?assertEqual(N, sets:size(ConvergedResults2)),
                            DistinctResults2 = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults2)]),
                            [{signature, Sig}] = sets:to_list(DistinctResults2),
@@ -270,7 +270,7 @@ hbbft_init_test_() ->
                                                                                          {NewS, Res}= hbbft:next_round(S),
                                                                                          {lists:keyreplace(J, 1, States, {J, NewS}), merge_replies(N, [{J, Res}], Replies2)}
                                                                                  end, {NextStates2, []}, NextStates2),
-                           {_NextStates3, _ConvergedResults3} = do_send_outer(PenultimateReplies, PenultimateStates, sets:new()),
+                           {_NextStates3, _ConvergedResults3} = hbbft_test_utils:do_send_outer(?MODULE, PenultimateReplies, PenultimateStates, sets:new()),
                            _DistinctResults3 = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults2)]),
                            {_, [AcceptedMsgs2]} = lists:unzip(lists:flatten(sets:to_list(DistinctResults))),
                            %% check all the Msgs are actually from the original set
@@ -304,7 +304,7 @@ hbbft_one_actor_no_txns_test_() ->
                            %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
                            ?assert(lists:all(fun(E) -> E end, [ length(R) == N+1 || {_, {send, R}} <- Replies ])),
                            %% start it on runnin'
-                           {_, ConvergedResults} = do_send_outer(Replies, NewStates, sets:new()),
+                           {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Replies, NewStates, sets:new()),
                            %io:format("Converged Results ~p~n", [ConvergedResults]),
                            %% check all N actors returned a result
                            ?assertEqual(N, sets:size(ConvergedResults)),
@@ -344,7 +344,7 @@ hbbft_two_actors_no_txns_test_() ->
                            %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
                            ?assert(lists:all(fun(E) -> E end, [ length(R) == N+1 || {_, {send, R}} <- Replies ])),
                            %% start it on runnin'
-                           {_, ConvergedResults} = do_send_outer(Replies, NewStates, sets:new()),
+                           {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Replies, NewStates, sets:new()),
                            %% check no actors returned a result
                            ?assertEqual(0, sets:size(ConvergedResults)),
                            ok
@@ -376,7 +376,7 @@ hbbft_one_actor_missing_test_() ->
                            %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
                            ?assert(lists:all(fun(E) -> E end, [ length(R) == N+1 || {_, {send, R}} <- Replies ])),
                            %% start it on runnin'
-                           {_, ConvergedResults} = do_send_outer(Replies, NewStates, sets:new()),
+                           {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Replies, NewStates, sets:new()),
                            %% check no actors returned a result
                            ?assertEqual(4, sets:size(ConvergedResults)),
                            DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
@@ -414,7 +414,7 @@ hbbft_two_actor_missing_test_() ->
                            %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
                            ?assert(lists:all(fun(E) -> E end, [ length(R) == N+1 || {_, {send, R}} <- Replies ])),
                            %% start it on runnin'
-                           {_, ConvergedResults} = do_send_outer(Replies, NewStates, sets:new()),
+                           {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Replies, NewStates, sets:new()),
                            %% check no actors returned a result
                            ?assertEqual(0, sets:size(ConvergedResults)),
                            ok
@@ -435,36 +435,6 @@ encrypt_decrypt_test() ->
     DecKey = tpke_pubkey:combine_shares(PubKey, EncKey, [ tpke_privkey:decrypt_share(SK, EncKey) || SK <- PrivateKeys]),
     ?assertEqual(PlainText, decrypt(DecKey, Enc)),
     ok.
-
-do_send_outer([], States, Acc) ->
-    {States, Acc};
-do_send_outer([{result, {Id, Result}} | T], Pids, Acc) ->
-    do_send_outer(T, Pids, sets:add_element({result, {Id, Result}}, Acc));
-do_send_outer([H|T], States, Acc) ->
-    {R, NewStates} = do_send(H, [], States),
-    do_send_outer(T++R, NewStates, Acc).
-
-do_send({Id, {result, Result}}, Acc, States) ->
-    {[{result, {Id, Result}} | Acc], States};
-do_send({_, ok}, Acc, States) ->
-    {Acc, States};
-do_send({_, {send, []}}, Acc, States) ->
-    {Acc, States};
-do_send({Id, {send, [{unicast, J, Msg}|T]}}, Acc, States) ->
-    case lists:keyfind(J, 1, States) of
-        false ->
-            do_send({Id, {send, T}}, Acc, States);
-    {J, State} ->
-            {NewState, Result} = handle_msg(State, Id, Msg),
-            do_send({Id, {send, T}}, [{J, Result}|Acc], lists:keyreplace(J, 1, States, {J, NewState}))
-    end;
-do_send({Id, {send, [{multicast, Msg}|T]}}, Acc, States) ->
-    Res = lists:map(fun({J, State}) ->
-                            {NewState, Result} = handle_msg(State, Id, Msg),
-                            {{J, NewState}, {J, Result}}
-                    end, States),
-    {NewStates, Results} = lists:unzip(Res),
-    do_send({Id, {send, T}}, Results ++ Acc, lists:ukeymerge(1, NewStates, States)).
 
 -endif.
 
