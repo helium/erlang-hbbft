@@ -1,4 +1,4 @@
--module(bba).
+-module(hbbft_bba).
 
 -export([init/3, input/2, handle_msg/3]).
 
@@ -34,7 +34,7 @@ handle_msg(Data = #data{round=_R}, J, {aux, _R, V}) ->
     aux(Data, J, V);
 handle_msg(Data = #data{round=R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin /= undefined ->
     %% dispatch the message to the nested coin protocol
-    case common_coin:handle_msg(Data#data.coin, J, CMsg) of
+    case hbbft_cc:handle_msg(Data#data.coin, J, CMsg) of
         {_NewCoin, {result, Result}} ->
             %% ok, we've obtained the common coin
             case sets:size(Data#data.bin_values) == 1 of
@@ -63,8 +63,6 @@ handle_msg(Data = #data{round=R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin /= 
                     NewData = init(Data#data.secret_key, Data#data.n, Data#data.f),
                     input(NewData#data{round=Data#data.round + 1}, B)
             end;
-        %{NewCoin, {send, Messages}} ->
-            %{Data#data{coin=NewCoin}, {send, wrap({coin, Data#data.round}, Messages)}};
         {NewCoin, ok} ->
             {Data#data{coin=NewCoin}, ok}
     end;
@@ -104,8 +102,8 @@ bval(Data=#data{n=N, f=F}, Id, V) ->
                 true when NewData3#data.coin == undefined ->
                     %% instanciate the common coin
                     %% TODO need more entropy for the SID
-                    {CoinData, {send, CoinSend}} = common_coin:get_coin(common_coin:init(NewData3#data.secret_key, term_to_binary({NewData3#data.round}), N, F)),
-                    {NewData3#data{coin=CoinData}, {send, [wrap({coin, Data#data.round}, CoinSend)|ToSend2]}};
+                    {CoinData, {send, CoinSend}} = hbbft_cc:get_coin(hbbft_cc:init(NewData3#data.secret_key, term_to_binary({NewData3#data.round}), N, F)),
+                    {NewData3#data{coin=CoinData}, {send, [hbbft_utils:wrap({coin, Data#data.round}, CoinSend)|ToSend2]}};
                 _ ->
                     {NewData3, {send, ToSend2}}
             end;
@@ -121,19 +119,11 @@ aux(Data = #data{n=N, f=F}, Id, V) ->
         true when NewData#data.coin == undefined ->
             %% instanciate the common coin
             %% TODO need more entropy for the SID
-            {CoinData, {send, ToSend}} = common_coin:get_coin(common_coin:init(NewData#data.secret_key, term_to_binary({NewData#data.round}), N, F)),
-            {NewData#data{coin=CoinData}, {send, wrap({coin, Data#data.round}, ToSend)}};
+            {CoinData, {send, ToSend}} = hbbft_cc:get_coin(hbbft_cc:init(NewData#data.secret_key, term_to_binary({NewData#data.round}), N, F)),
+            {NewData#data{coin=CoinData}, {send, hbbft_utils:wrap({coin, Data#data.round}, ToSend)}};
         _ ->
             {NewData, ok}
     end.
-
-%% wrap a subprotocol's outbound messages with a protocol identifier
-wrap(_, []) ->
-    [];
-wrap(Id, [{multicast, Msg}|T]) ->
-    [{multicast, {Id, Msg}}|wrap(Id, T)].
-%wrap(Id, [{unicast, Dest, Msg}|T]) ->
-    %[{unicast, Dest, {Id, Msg}}|wrap(Id, T)].
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -145,9 +135,9 @@ init_test() ->
     N = 5,
     F = 1,
     dealer:start_link(N, F+1, 'SS512'),
-    {ok, PubKey, PrivateKeys} = dealer:deal(),
+    {ok, _PubKey, PrivateKeys} = dealer:deal(),
     gen_server:stop(dealer),
-    States = [bba:init(Sk, N, F) || Sk <- PrivateKeys],
+    States = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
     %% all valid members should call get_coin
     Res = lists:map(fun({J, State}) ->
@@ -155,8 +145,7 @@ init_test() ->
                             {{J, NewState}, {J, Result}}
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
-    %% ConvergedResults = do_send_outer(Results, NewStates, []),
-    ConvergedResults = do_send_outer(Results, NewStates, sets:new()),
+    {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
     io:format("ConvergedResults ~p~n", [ConvergedResults]),
     %% everyone should converge
     ?assertEqual(N, sets:size(ConvergedResults)),
@@ -166,9 +155,9 @@ init_with_zeroes_test() ->
     N = 5,
     F = 1,
     dealer:start_link(N, F+1, 'SS512'),
-    {ok, PubKey, PrivateKeys} = dealer:deal(),
+    {ok, _PubKey, PrivateKeys} = dealer:deal(),
     gen_server:stop(dealer),
-    States = [bba:init(Sk, N, F) || Sk <- PrivateKeys],
+    States = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
     ZeroList = lists:zip([1, 0, 0, 0, 0], StatesWithId),
     %% all valid members should call get_coin
@@ -177,10 +166,9 @@ init_with_zeroes_test() ->
                             {{J, NewState}, {J, Result}}
                     end, ZeroList),
     {NewStates, Results} = lists:unzip(Res),
-    ConvergedResults = do_send_outer(Results, NewStates, sets:new()),
+    {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
     DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
     io:format("DistinctResults: ~p~n", [sets:to_list(DistinctResults)]),
-    %% io:format("ConvergedResults ~p~n", [ConvergedResults]),
     ?assertEqual(N, sets:size(ConvergedResults)),
     ?assertEqual([0], sets:to_list(DistinctResults)),
     ok.
@@ -189,9 +177,9 @@ init_with_ones_test() ->
     N = 5,
     F = 1,
     dealer:start_link(N, F+1, 'SS512'),
-    {ok, PubKey, PrivateKeys} = dealer:deal(),
+    {ok, _PubKey, PrivateKeys} = dealer:deal(),
     gen_server:stop(dealer),
-    States = [bba:init(Sk, N, F) || Sk <- PrivateKeys],
+    States = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
     OneList = lists:zip([1, 1, 1, 1, 0], StatesWithId),
     %% all valid members should call get_coin
@@ -200,7 +188,7 @@ init_with_ones_test() ->
                             {{J, NewState}, {J, Result}}
                     end, OneList),
     {NewStates, Results} = lists:unzip(Res),
-    ConvergedResults = do_send_outer(Results, NewStates, sets:new()),
+    {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
     DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
     io:format("DistinctResults: ~p~n", [sets:to_list(DistinctResults)]),
     %% io:format("ConvergedResults ~p~n", [ConvergedResults]),
@@ -212,9 +200,9 @@ init_with_mixed_zeros_and_ones_test() ->
     N = 10,
     F = 2,
     dealer:start_link(N, F+1, 'SS512'),
-    {ok, PubKey, PrivateKeys} = dealer:deal(),
+    {ok, _PubKey, PrivateKeys} = dealer:deal(),
     gen_server:stop(dealer),
-    States = [bba:init(Sk, N, F) || Sk <- PrivateKeys],
+    States = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
     MixedList = lists:zip([1, 1, 1, 0, 1, 0, 0, 0, 0, 0], StatesWithId),
     %% all valid members should call get_coin
@@ -223,7 +211,7 @@ init_with_mixed_zeros_and_ones_test() ->
                             {{J, NewState}, {J, Result}}
                     end, MixedList),
     {NewStates, Results} = lists:unzip(Res),
-    ConvergedResults = do_send_outer(Results, NewStates, sets:new()),
+    {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
     DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
     io:format("DistinctResults: ~p~n", [sets:to_list(DistinctResults)]),
     io:format("ConvergedResults ~p~n", [sets:to_list(ConvergedResults)]),
@@ -235,9 +223,9 @@ one_dead_test() ->
     N = 5,
     F = 1,
     dealer:start_link(N, F+1, 'SS512'),
-    {ok, PubKey, PrivateKeys} = dealer:deal(),
+    {ok, _PubKey, PrivateKeys} = dealer:deal(),
     gen_server:stop(dealer),
-    [S0, S1, S2, S3, S4] = [bba:init(Sk, N, F) || Sk <- PrivateKeys],
+    [S0, S1, S2, S3, S4] = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
     StatesWithId = lists:zip(lists:seq(0, N - 1), [S0, S1, kill(S2), S3, S4]),
     %% all valid members should call get_coin
     Res = lists:map(fun({J, State}) ->
@@ -245,7 +233,7 @@ one_dead_test() ->
                             {{J, NewState}, {J, Result}}
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
-    ConvergedResults = do_send_outer(Results, NewStates, sets:new()),
+    {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
     %% everyone but one should converge
     ?assertEqual(N - 1, sets:size(ConvergedResults)),
     ok.
@@ -254,9 +242,9 @@ two_dead_test() ->
     N = 5,
     F = 1,
     dealer:start_link(N, F+1, 'SS512'),
-    {ok, PubKey, PrivateKeys} = dealer:deal(),
+    {ok, _PubKey, PrivateKeys} = dealer:deal(),
     gen_server:stop(dealer),
-    [S0, S1, S2, S3, S4] = [bba:init(Sk, N, F) || Sk <- PrivateKeys],
+    [S0, S1, S2, S3, S4] = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
     StatesWithId = lists:zip(lists:seq(0, N - 1), [S0, S1, kill(S2), S3, kill(S4)]),
     %% all valid members should call get_coin
     Res = lists:map(fun({J, State}) ->
@@ -264,34 +252,8 @@ two_dead_test() ->
                             {{J, NewState}, {J, Result}}
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
-    ConvergedResults = do_send_outer(Results, NewStates, sets:new()),
+    {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
     %% should not converge
     ?assertEqual(0, sets:size(ConvergedResults)),
     ok.
-
-do_send_outer([], _, Acc) ->
-    Acc;
-do_send_outer([{result, {Id, Result}} | T], Pids, Acc) ->
-    do_send_outer(T, Pids, sets:add_element({result, {Id, Result}}, Acc));
-do_send_outer([H|T], States, Acc) ->
-    {R, NewStates} = do_send(H, [], States),
-    do_send_outer(T++R, NewStates, Acc).
-
-do_send({Id, {result, Result}}, Acc, States) ->
-    {[{result, {Id, Result}} | Acc], States};
-do_send({_, ok}, Acc, States) ->
-    {Acc, States};
-do_send({_, {send, []}}, Acc, States) ->
-    {Acc, States};
-do_send({Id, {send, [{unicast, J, Msg}|T]}}, Acc, States) ->
-    {J, State} = lists:keyfind(J, 1, States),
-    {NewState, Result} = handle_msg(State, Id, Msg),
-    do_send({Id, {send, T}}, [{J, Result}|Acc], lists:keyreplace(J, 1, States, {J, NewState}));
-do_send({Id, {send, [{multicast, Msg}|T]}}, Acc, States) ->
-    Res = lists:map(fun({J, State}) ->
-                            {NewState, Result} = handle_msg(State, Id, Msg),
-                            {{J, NewState}, {J, Result}}
-                    end, States),
-    {NewStates, Results} = lists:unzip(Res),
-    do_send({Id, {send, T}}, Results ++ Acc, lists:ukeymerge(1, NewStates, States)).
 -endif.

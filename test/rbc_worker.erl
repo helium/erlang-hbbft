@@ -24,7 +24,7 @@ get_results(Pid) ->
 %% callbacks
 
 init([N, F, Id]) ->
-    RBC = reliable_broadcast:init(N, F),
+    RBC = hbbft_rbc:init(N, F),
     {ok, #state{rbc=RBC, n=N, id=Id}}.
 
 handle_call(get_results, _From, State) ->
@@ -35,10 +35,10 @@ handle_call(Msg, _from, State) ->
 
 
 handle_cast({input, Msg}, State = #state{rbc=RBC}) ->
-    NewState = dispatch(reliable_broadcast:input(RBC, Msg), State),
+    NewState = dispatch(hbbft_rbc:input(RBC, Msg), State),
     {noreply, NewState};
 handle_cast({rbc, PeerID, Msg}, State = #state{rbc=RBC}) ->
-    NewState = dispatch(reliable_broadcast:handle_msg(RBC, PeerID, Msg), State),
+    NewState = dispatch(hbbft_rbc:handle_msg(RBC, PeerID, Msg), State),
     {noreply, NewState};
 handle_cast(Msg, State) ->
     io:format("unhandled msg ~p~n", [Msg]),

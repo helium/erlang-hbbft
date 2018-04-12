@@ -1,4 +1,4 @@
--module(reliable_broadcast).
+-module(hbbft_rbc).
 
 -export([init/2, input/2, handle_msg/3]).
 
@@ -162,15 +162,15 @@ init_test() ->
     N = 5,
     F = 1,
     Msg = crypto:strong_rand_bytes(512),
-    S0 = reliable_broadcast:init(N, F),
-    S1 = reliable_broadcast:init(N, F),
-    S2 = reliable_broadcast:init(N, F),
-    S3 = reliable_broadcast:init(N, F),
-    S4 = reliable_broadcast:init(N, F),
-    {NewS0, {send, MsgsToSend}} = reliable_broadcast:input(S0, Msg),
+    S0 = hbbft_rbc:init(N, F),
+    S1 = hbbft_rbc:init(N, F),
+    S2 = hbbft_rbc:init(N, F),
+    S3 = hbbft_rbc:init(N, F),
+    S4 = hbbft_rbc:init(N, F),
+    {NewS0, {send, MsgsToSend}} = hbbft_rbc:input(S0, Msg),
     States = [NewS0, S1, S2, S3, S4],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
-    ConvergedResults = do_send_outer([{0, {send, MsgsToSend}}], StatesWithId, sets:new()),
+    {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, [{0, {send, MsgsToSend}}], StatesWithId, sets:new()),
     %% everyone should converge
     ?assertEqual(N, sets:size(ConvergedResults)),
     ok.
@@ -180,15 +180,15 @@ pid_dying_test() ->
     N = 5,
     F = 1,
     Msg = crypto:strong_rand_bytes(512),
-    S0 = reliable_broadcast:init(N, F),
-    S1 = reliable_broadcast:init(N, F),
-    S2 = reliable_broadcast:init(N, F),
-    S3 = reliable_broadcast:init(N, F),
-    S4 = reliable_broadcast:init(N, F),
-    {NewS0, {send, MsgsToSend}} = reliable_broadcast:input(S0, Msg),
+    S0 = hbbft_rbc:init(N, F),
+    S1 = hbbft_rbc:init(N, F),
+    S2 = hbbft_rbc:init(N, F),
+    S3 = hbbft_rbc:init(N, F),
+    S4 = hbbft_rbc:init(N, F),
+    {NewS0, {send, MsgsToSend}} = hbbft_rbc:input(S0, Msg),
     States = [NewS0, S1, kill(S2), S3, S4],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
-    ConvergedResults = do_send_outer([{0, {send, MsgsToSend}}], StatesWithId, sets:new()),
+    {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, [{0, {send, MsgsToSend}}], StatesWithId, sets:new()),
     %% everyone but the dead node should converge
     ?assertEqual(N - 1, sets:size(ConvergedResults)),
     ok.
@@ -197,42 +197,16 @@ two_pid_dying_test() ->
     N = 5,
     F = 1,
     Msg = crypto:strong_rand_bytes(512),
-    S0 = reliable_broadcast:init(N, F),
-    S1 = reliable_broadcast:init(N, F),
-    S2 = reliable_broadcast:init(N, F),
-    S3 = reliable_broadcast:init(N, F),
-    S4 = reliable_broadcast:init(N, F),
-    {NewS0, {send, MsgsToSend}} = reliable_broadcast:input(S0, Msg),
+    S0 = hbbft_rbc:init(N, F),
+    S1 = hbbft_rbc:init(N, F),
+    S2 = hbbft_rbc:init(N, F),
+    S3 = hbbft_rbc:init(N, F),
+    S4 = hbbft_rbc:init(N, F),
+    {NewS0, {send, MsgsToSend}} = hbbft_rbc:input(S0, Msg),
     States = [NewS0, S1, kill(S2), S3, kill(S4)],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
-    ConvergedResults = do_send_outer([{0, {send, MsgsToSend}}], StatesWithId, sets:new()),
+    {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, [{0, {send, MsgsToSend}}], StatesWithId, sets:new()),
     %% nobody should converge
     ?assertEqual(0, sets:size(ConvergedResults)),
     ok.
-
-do_send_outer([], _, Acc) ->
-    Acc;
-do_send_outer([{result, {Id, Result}} | T], Pids, Acc) ->
-    do_send_outer(T, Pids, sets:add_element({result, {Id, Result}}, Acc));
-do_send_outer([H|T], States, Acc) ->
-    {R, NewStates} = do_send(H, [], States),
-    do_send_outer(T++R, NewStates, Acc).
-
-do_send({Id, {result, Result}}, Acc, States) ->
-    {[{result, {Id, Result}} | Acc], States};
-do_send({_, ok}, Acc, States) ->
-    {Acc, States};
-do_send({_, {send, []}}, Acc, States) ->
-    {Acc, States};
-do_send({Id, {send, [{unicast, J, Msg}|T]}}, Acc, States) ->
-    {J, State} = lists:keyfind(J, 1, States),
-    {NewState, Result} = handle_msg(State, Id, Msg),
-    do_send({Id, {send, T}}, [{J, Result}|Acc], lists:keyreplace(J, 1, States, {J, NewState}));
-do_send({Id, {send, [{multicast, Msg}|T]}}, Acc, States) ->
-    Res = lists:map(fun({J, State}) ->
-                            {NewState, Result} = handle_msg(State, Id, Msg),
-                            {{J, NewState}, {J, Result}}
-                    end, States),
-    {NewStates, Results} = lists:unzip(Res),
-    do_send({Id, {send, T}}, Results ++ Acc, lists:ukeymerge(1, NewStates, States)).
 -endif.
