@@ -2,7 +2,7 @@
 
 -export([do_send_outer/4]).
 
-do_send_outer(Mod, [], States, Acc) ->
+do_send_outer(_Mod, [], States, Acc) ->
     {States, Acc};
 do_send_outer(Mod, [{result, {Id, Result}} | T], Pids, Acc) ->
     do_send_outer(Mod, T, Pids, sets:add_element({result, {Id, Result}}, Acc));
