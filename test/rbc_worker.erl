@@ -6,33 +6,37 @@
           rbc,
           n,
           id,
-          results
+          result
          }).
 
--export([start_link/3, get_results/2]).
+-export([start_link/3, get_results/1, input/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
 start_link(N, F, Id) ->
     gen_server:start_link({local, name(Id)}, ?MODULE, [N, F, Id], []).
 
+input(Msg, Pid) ->
+    gen_server:cast(Pid, {input, Msg}).
 
-get_results(Msg, Pid) ->
-    gen_server:call(Pid, {get_results, Msg}, infinity).
-
+get_results(Pid) ->
+    gen_server:call(Pid, get_results, infinity).
 
 %% callbacks
 
 init([N, F, Id]) ->
     RBC = reliable_broadcast:init(N, F),
-    {ok, #state{rbc=RBC, results=[], n=N, id=Id}}.
+    {ok, #state{rbc=RBC, n=N, id=Id}}.
 
-handle_call({get_results, Msg}, _From, State=#state{rbc=RBC}) ->
-    NewState = dispatch(reliable_broadcast:input(RBC, Msg), State),
-    {reply, ok, NewState};
+handle_call(get_results, _From, State) ->
+    {reply, State#state.result, State};
 handle_call(Msg, _from, State) ->
     io:format("unhandled msg ~p~n", [Msg]),
     {reply, ok, State}.
 
+
+handle_cast({input, Msg}, State = #state{rbc=RBC}) ->
+    NewState = dispatch(reliable_broadcast:input(RBC, Msg), State),
+    {noreply, NewState};
 handle_cast({rbc, PeerID, Msg}, State = #state{rbc=RBC}) ->
     NewState = dispatch(reliable_broadcast:handle_msg(RBC, PeerID, Msg), State),
     {noreply, NewState};
@@ -59,8 +63,8 @@ do_send([{multicast, Msg}|T], State) ->
 dispatch({NewRBC, {send, ToSend}}, State) ->
     do_send(ToSend, State),
     State#state{rbc=NewRBC};
-dispatch({_NewRBC, {result, Result}}, State) ->
-    State#state{results=[Result | State#state.results]};
+dispatch({NewRBC, {result, Result}}, State) ->
+    State#state{result=Result, rbc=NewRBC};
 dispatch({NewRBC, ok}, State) ->
     State#state{rbc=NewRBC};
 dispatch({NewRBC, Other}, State) ->
