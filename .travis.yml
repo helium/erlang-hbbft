@@ -13,6 +13,7 @@ before_script:
     git clone https://github.com/blynn/pbc &&
     cd pbc &&
     autoreconf -fvi &&
+    ./configure &&
     make &&
     make install
 
