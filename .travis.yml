@@ -8,13 +8,14 @@ otp_release:
 cache:
   directories:
   - $HOME/.cache/rebar3
+  - $HOME/.cache/pbc
 
 before_script:
     git clone https://github.com/blynn/pbc &&
     cd pbc &&
     autoreconf -fvi &&
-    ./configure &&
+    ./configure --prefix $HOME/.cache/pbc &&
     make &&
     make install
 
-script: ./rebar3 as test do eunit,ct && ./rebar3 dialyzer && ./rebar3 coveralls send
+script: CFLAGS="-I $HOME/.cache/pbc/include" LDFLAGS="-L $HOME/.cache/pbc/lib" ./rebar3 as test do eunit,ct && ./rebar3 dialyzer && ./rebar3 coveralls send
