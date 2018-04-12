@@ -1,8 +1,7 @@
-{application, erlang_hbbft,
+{application, hbbft,
  [{description, "Erlang implementation of HoneyBadgerBFT"},
   {vsn, "0.1.0"},
   {registered, []},
-  {mod, { erlang_hbbft, []}},
   {applications,
    [kernel,
     stdlib

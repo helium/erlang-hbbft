@@ -23,7 +23,7 @@
 -define(BATCH_SIZE, 20).
 
 init(SK, N, F, J) ->
-    #data{secret_key=SK, n=N, f=F, j=J, acs=acs:init(SK, N, F, J)}.
+    #data{secret_key=SK, n=N, f=F, j=J, acs=hbbft_acs:init(SK, N, F, J)}.
 
 %% someone submitting a transaction to the replica set
 input(Data = #data{buf=Buf}, Txn) ->
@@ -42,14 +42,14 @@ finalize_round(Data, TransactionsToRemove, ThingToSign) ->
                           end, Data#data.buf),
     io:format("~b finalizing round, removed ~p elements from buf~n", [Data#data.j, queue:len(Data#data.buf) - queue:len(NewBuf)]),
     HashThing = tpke_pubkey:hash_message(tpke_privkey:public_key(Data#data.secret_key), ThingToSign),
-    BinShare = share_to_binary(tpke_privkey:sign(Data#data.secret_key, HashThing)),
+    BinShare = hbbft_utils:share_to_binary(tpke_privkey:sign(Data#data.secret_key, HashThing)),
     %% multicast the signature to everyone
     {Data#data{thingtosign=HashThing, buf=NewBuf}, {send, [{multicast, {sign, Data#data.round, BinShare}}]}}.
 
 %% The user has obtained a signature and is ready to go to the next round
 next_round(Data = #data{secret_key=SK, n=N, f=F, j=J}) ->
     %% reset all the round-dependant bits of the state and increment the round
-    NewData = Data#data{round=Data#data.round + 1, acs=acs:init(SK, N, F, J),
+    NewData = Data#data{round=Data#data.round + 1, acs=hbbft_acs:init(SK, N, F, J),
                         acs_init=false, acs_results=undefined,
                         sent_txns=false, sent_sig=false,
                         dec_shares=#{}, decrypted=#{},
@@ -58,11 +58,11 @@ next_round(Data = #data{secret_key=SK, n=N, f=F, j=J}) ->
 
 handle_msg(Data = #data{round=R}, J, {{acs, R}, ACSMsg}) ->
     %% ACS message for this round
-    case acs:handle_msg(Data#data.acs, J, ACSMsg) of
+    case hbbft_acs:handle_msg(Data#data.acs, J, ACSMsg) of
         {NewACS, ok} ->
             {Data#data{acs=NewACS}, ok};
         {NewACS, {send, ACSResponse}} ->
-            {Data#data{acs=NewACS}, {send, wrap({acs, Data#data.round}, ACSResponse)}};
+            {Data#data{acs=NewACS}, {send, hbbft_utils:wrap({acs, Data#data.round}, ACSResponse)}};
         {NewACS, {result, Results}} ->
             %% ACS[r] has returned, time to move on to the decrypt phase
             io:format("~b ACS[~b] result ~p~n", [Data#data.j, Data#data.round, hd(Results)]),
@@ -114,7 +114,7 @@ handle_msg(Data = #data{round=R}, J, {dec, R, I, Share}) ->
 handle_msg(Data = #data{round=R}, J, {sign, R, BinShare}) ->
     %% messages related to signing the final block for this round, see finalize_round for more information
     %% this is an extension to the HoneyBadger BFT specification
-    Share = binary_to_share(BinShare, Data#data.secret_key),
+    Share = hbbft_utils:binary_to_share(BinShare, Data#data.secret_key),
     %% verify the share
     case tpke_pubkey:verify_signature_share(tpke_privkey:public_key(Data#data.secret_key), Share, Data#data.thingtosign) of
         true ->
@@ -147,32 +147,15 @@ maybe_start_acs(Data = #data{n=N, secret_key=SK}) ->
             %% encrypt x -> tpke.enc(pk, proposed)
             EncX = encrypt(tpke_privkey:public_key(SK), term_to_binary(Proposed)),
             %% time to kick off a round
-            {NewACSState, {send, ACSResponse}} = acs:input(Data#data.acs, EncX),
+            {NewACSState, {send, ACSResponse}} = hbbft_acs:input(Data#data.acs, EncX),
             io:format("~p has initiated ACS~n", [Data#data.j]),
             %% add this to acs set in data and send out the ACS response(s)
             {Data#data{acs=NewACSState, acs_init=true},
-             {send, wrap({acs, Data#data.round}, ACSResponse)}};
+             {send, hbbft_utils:wrap({acs, Data#data.round}, ACSResponse)}};
         false ->
             %% not enough transactions for this round yet
             {Data, ok}
     end.
-
-share_to_binary({ShareIdx, ShareElement}) ->
-    %% Assume less than 256 members in the consensus group
-    ShareBinary = erlang_pbc:element_to_binary(ShareElement),
-    <<ShareIdx:8/integer-unsigned, ShareBinary/binary>>.
-
-binary_to_share(<<ShareIdx:8/integer-unsigned, ShareBinary/binary>>, SK) ->
-    ShareElement = tpke_pubkey:deserialize_element(tpke_privkey:public_key(SK), ShareBinary),
-    {ShareIdx, ShareElement}.
-
-%% wrap a subprotocol's outbound messages with a protocol identifier
-wrap(_, []) ->
-    [];
-wrap(Id, [{multicast, Msg}|T]) ->
-    [{multicast, {Id, Msg}}|wrap(Id, T)];
-wrap(Id, [{unicast, Dest, Msg}|T]) ->
-    [{unicast, Dest, {Id, Msg}}|wrap(Id, T)].
 
 encrypt(PK, Bin) ->
     %% generate a random AES key and IV
@@ -287,8 +270,8 @@ hbbft_init_test_() ->
                                                                                          {NewS, Res}= hbbft:next_round(S),
                                                                                          {lists:keyreplace(J, 1, States, {J, NewS}), merge_replies(N, [{J, Res}], Replies2)}
                                                                                  end, {NextStates2, []}, NextStates2),
-                           {NextStates3, ConvergedResults3} = do_send_outer(PenultimateReplies, PenultimateStates, sets:new()),
-                           DistinctResults3 = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults2)]),
+                           {_NextStates3, _ConvergedResults3} = do_send_outer(PenultimateReplies, PenultimateStates, sets:new()),
+                           _DistinctResults3 = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults2)]),
                            {_, [AcceptedMsgs2]} = lists:unzip(lists:flatten(sets:to_list(DistinctResults))),
                            %% check all the Msgs are actually from the original set
                            ?assert(sets:is_subset(sets:from_list(AcceptedMsgs2), sets:from_list(Msgs))),
