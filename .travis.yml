@@ -19,4 +19,4 @@ before_script:
     make install &&
     cd ..
 
-script: CFLAGS="-I $HOME/.cache/pbc/include" LDFLAGS="-L $HOME/.cache/pbc/lib" ./rebar3 as test do eunit,ct && ./rebar3 dialyzer && ./rebar3 coveralls send
+script: CFLAGS="-I $HOME/.cache/pbc/include" LDFLAGS="-L$HOME/.cache/pbc/lib" ./rebar3 as test do eunit,ct && ./rebar3 dialyzer && ./rebar3 coveralls send
