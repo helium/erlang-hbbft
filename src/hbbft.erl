@@ -13,7 +13,7 @@
           acs_init = false,
           sent_txns = false,
           sent_sig = false,
-          acs_results :: undefined | [binary()],
+          acs_results = [] :: [{non_neg_integer(), binary()}],
           dec_shares = #{},
           decrypted = #{},
           sig_shares = #{},
@@ -50,7 +50,7 @@ finalize_round(Data, TransactionsToRemove, ThingToSign) ->
 next_round(Data = #data{secret_key=SK, n=N, f=F, j=J}) ->
     %% reset all the round-dependant bits of the state and increment the round
     NewData = Data#data{round=Data#data.round + 1, acs=hbbft_acs:init(SK, N, F, J),
-                        acs_init=false, acs_results=undefined,
+                        acs_init=false, acs_results=[],
                         sent_txns=false, sent_sig=false,
                         dec_shares=#{}, decrypted=#{},
                         sig_shares=#{}, thingtosign=undefined},
