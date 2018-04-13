@@ -1,6 +1,8 @@
 erlang_hbbft
 =====
 
+[![Build Status](https://travis-ci.org/helium/erlang-hbbft.svg?branch=master)](https://travis-ci.org/helium/erlang-hbbft)
+
 Erlang implementation of HoneyBadgerBFT's protocols.
 
 The HoneyBadgerBFT paper defines 5 protocols:
@@ -36,6 +38,18 @@ Test
 -----
 
     $ make test
+
+
+TypeCheck
+-----
+
+    $ make typecheck
+
+
+Coverage
+-----
+
+    $ make cover
 
 References
 -----
