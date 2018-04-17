@@ -5,7 +5,7 @@
 -record(data, {
           state = init :: init | waiting | done,
           round = 0,
-          secret_key,
+          secret_key :: tpke_privkey:privkey(),
           coin,
           est :: undefined | 0 | 1,
           output,
@@ -13,14 +13,18 @@
           n :: pos_integer(),
           witness = sets:new() :: sets:set({non_neg_integer(), 0 | 1}),
           aux_witness = sets:new() :: sets:set({non_neg_integer(), 0 | 1}),
-          aux_sent = false,
+          aux_sent = false :: boolean(),
           broadcasted = sets:new() :: sets:set(0 | 1),
           bin_values = sets:new() :: set:set(0 | 1)
          }).
 
+-type data() :: #data{}.
+
+-spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer()) -> data().
 init(SK, N, F) ->
     #data{secret_key=SK, n=N, f=F}.
 
+-spec input(data(), undefined | 0 | 1) -> {data(), ok | {send, [{multicast, {bval, non_neg_integer(), undefined | 0 | 1}}]}}.
 input(Data = #data{state=init}, BInput) ->
     {Data#data{est = BInput}, {send, [{multicast, {bval, Data#data.round, BInput}}]}};
 input(Data = #data{state=done}, _BInput) ->
@@ -69,7 +73,8 @@ handle_msg(Data = #data{round=R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin /= 
 handle_msg(Data, _J, _Msg) ->
     {Data, ok}.
 
-%-spec bv_broadcast(#data{}, sets:set({non_neg_integer(), 0 | 1})) -> {#data{}, {send, broadcast()} | {error, not_enough_witnesses}}.
+-spec bval(data(), non_neg_integer(), 0 | 1) -> {data(), {send, [{multicast, {aux, non_neg_integer(), 0 | 1}}, ... ]}} |
+                                                {data(), {send, [{multicast, {coin, non_neg_integer(), 0 | 1 }}, ...]}}.
 bval(Data=#data{n=N, f=F}, Id, V) ->
     %% add to witnesses
     Witness = sets:add_element({Id, V}, Data#data.witness),
@@ -102,8 +107,9 @@ bval(Data=#data{n=N, f=F}, Id, V) ->
                 true when NewData3#data.coin == undefined ->
                     %% instanciate the common coin
                     %% TODO need more entropy for the SID
+                    %% XXX: is there a bug here?
                     {CoinData, {send, CoinSend}} = hbbft_cc:get_coin(hbbft_cc:init(NewData3#data.secret_key, term_to_binary({NewData3#data.round}), N, F)),
-                    {NewData3#data{coin=CoinData}, {send, [hbbft_utils:wrap({coin, Data#data.round}, CoinSend)|ToSend2]}};
+                    {NewData3#data{coin=CoinData}, {send, [hbbft_utils:wrap({coin, Data#data.round}, CoinSend) | ToSend2]}};
                 _ ->
                     {NewData3, {send, ToSend2}}
             end;
@@ -111,6 +117,8 @@ bval(Data=#data{n=N, f=F}, Id, V) ->
             {NewData, {send, ToSend}}
     end.
 
+%% TODO: fix this.
+-spec aux(data(), non_neg_integer(), 0 | 1) -> {data(), any()}.
 aux(Data = #data{n=N, f=F}, Id, V) ->
     Witness = sets:add_element({Id, V}, Data#data.aux_witness),
     NewData = Data#data{aux_witness = Witness},

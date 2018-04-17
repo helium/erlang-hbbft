@@ -7,16 +7,20 @@
           sk :: tpke_privkey:privkey(),
           sid :: undefined | binary(),
           n :: pos_integer(),
-          f :: pos_integer(),
+          f :: non_neg_integer(),
           shares = sets:new()
          }).
 
+-type data() :: #data{}.
+
+-spec init(tpke_privkey:privkey(), binary(), pos_integer(), non_neg_integer()) -> data().
 init(SecretKeyShard, Bin, N, F) when is_binary(Bin) ->
     Sid = tpke_pubkey:hash_message(tpke_privkey:public_key(SecretKeyShard), Bin),
     init(SecretKeyShard, Sid, N, F);
 init(SecretKeyShard, Sid, N, F) ->
     #data{sk=SecretKeyShard, n=N, f=F, sid=Sid}.
 
+-spec get_coin(data()) -> {Data, ok} | {Data, {send, [{multicast, {share, tpke_privkey:share()}}]}}.
 get_coin(Data = #data{state=done}) ->
     {Data, ok};
 get_coin(Data) ->
@@ -26,6 +30,9 @@ get_coin(Data) ->
 handle_msg(Data, J, {share, Share}) ->
     share(Data, J, Share).
 
+%% TODO: fix this any type.
+%% TODO: more specific return type than binary perhaps?
+-spec share(data(), non_neg_integer(), any()) -> {data(), ok} | {data(), {result, binary()}}.
 share(Data = #data{state=done}, _J, _Share) ->
     {Data, ok};
 share(Data, _J, Share) ->
