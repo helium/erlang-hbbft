@@ -2,7 +2,7 @@
 
 -export([init/4, input/2, finalize_round/3, next_round/1, get_encrypted_key/2, decrypt/2, handle_msg/3]).
 
--record(data, {
+-record(hbbft_data, {
           secret_key,
           n :: pos_integer(),
           f :: pos_integer(),
@@ -22,79 +22,85 @@
 
 -define(BATCH_SIZE, 20).
 
+-type hbbft_data() :: #hbbft_data{}.
+
+-spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer(), non_neg_integer()) -> hbbft_data().
 init(SK, N, F, J) ->
-    #data{secret_key=SK, n=N, f=F, j=J, acs=hbbft_acs:init(SK, N, F, J)}.
+    #hbbft_data{secret_key=SK, n=N, f=F, j=J, acs=hbbft_acs:init(SK, N, F, J)}.
 
 %% someone submitting a transaction to the replica set
-input(Data = #data{buf=Buf}, Txn) ->
+-spec input(hbbft_data(), binary()) -> {hbbft_data(), ok | {send, []}}.
+input(Data = #hbbft_data{buf=Buf}, Txn) ->
     %% add this txn to the the buffer
     NewBuf = queue:in(Txn, Buf),
-    io:format("~p got message, queue is ~p~n", [Data#data.j, queue:len(NewBuf)]),
-    maybe_start_acs(Data#data{buf=NewBuf}).
+    io:format("~p got message, queue is ~p~n", [Data#hbbft_data.j, queue:len(NewBuf)]),
+    maybe_start_acs(Data#hbbft_data{buf=NewBuf}).
 
 %% The user has constructed something that looks like a block and is telling us which transactions
 %% to remove from the buffer (accepted or invalid). Transactions missing causal context
 %% (eg. a missing monotonic nonce prior to the current nonce) should remain in the buffer and thus
 %% should not be placed in TransactionsToRemove. Once this returns, the user should call next_round/1.
+-spec finalize_round(hbbft_data(), [binary()], binary()) -> {hbbft_data(), {send, [{multicast, {sign, non_neg_integer(), binary()}}]}}.
 finalize_round(Data, TransactionsToRemove, ThingToSign) ->
     NewBuf = queue:filter(fun(Item) ->
                                   not lists:member(Item, TransactionsToRemove)
-                          end, Data#data.buf),
-    io:format("~b finalizing round, removed ~p elements from buf~n", [Data#data.j, queue:len(Data#data.buf) - queue:len(NewBuf)]),
-    HashThing = tpke_pubkey:hash_message(tpke_privkey:public_key(Data#data.secret_key), ThingToSign),
-    BinShare = hbbft_utils:share_to_binary(tpke_privkey:sign(Data#data.secret_key, HashThing)),
+                          end, Data#hbbft_data.buf),
+    io:format("~b finalizing round, removed ~p elements from buf~n", [Data#hbbft_data.j, queue:len(Data#hbbft_data.buf) - queue:len(NewBuf)]),
+    HashThing = tpke_pubkey:hash_message(tpke_privkey:public_key(Data#hbbft_data.secret_key), ThingToSign),
+    BinShare = hbbft_utils:share_to_binary(tpke_privkey:sign(Data#hbbft_data.secret_key, HashThing)),
     %% multicast the signature to everyone
-    {Data#data{thingtosign=HashThing, buf=NewBuf}, {send, [{multicast, {sign, Data#data.round, BinShare}}]}}.
+    {Data#hbbft_data{thingtosign=HashThing, buf=NewBuf}, {send, [{multicast, {sign, Data#hbbft_data.round, BinShare}}]}}.
 
 %% The user has obtained a signature and is ready to go to the next round
-next_round(Data = #data{secret_key=SK, n=N, f=F, j=J}) ->
+-spec next_round(hbbft_data()) -> {hbbft_data(), ok | {send, []}}.
+next_round(Data = #hbbft_data{secret_key=SK, n=N, f=F, j=J}) ->
     %% reset all the round-dependant bits of the state and increment the round
-    NewData = Data#data{round=Data#data.round + 1, acs=hbbft_acs:init(SK, N, F, J),
+    NewData = Data#hbbft_data{round=Data#hbbft_data.round + 1, acs=hbbft_acs:init(SK, N, F, J),
                         acs_init=false, acs_results=[],
                         sent_txns=false, sent_sig=false,
                         dec_shares=#{}, decrypted=#{},
                         sig_shares=#{}, thingtosign=undefined},
     maybe_start_acs(NewData).
 
-handle_msg(Data = #data{round=R}, J, {{acs, R}, ACSMsg}) ->
+handle_msg(Data = #hbbft_data{round=R}, J, {{acs, R}, ACSMsg}) ->
     %% ACS message for this round
-    case hbbft_acs:handle_msg(Data#data.acs, J, ACSMsg) of
+    case hbbft_acs:handle_msg(Data#hbbft_data.acs, J, ACSMsg) of
         {NewACS, ok} ->
-            {Data#data{acs=NewACS}, ok};
+            {Data#hbbft_data{acs=NewACS}, ok};
         {NewACS, {send, ACSResponse}} ->
-            {Data#data{acs=NewACS}, {send, hbbft_utils:wrap({acs, Data#data.round}, ACSResponse)}};
+            {Data#hbbft_data{acs=NewACS}, {send, hbbft_utils:wrap({acs, Data#hbbft_data.round}, ACSResponse)}};
         {NewACS, {result, Results}} ->
             %% ACS[r] has returned, time to move on to the decrypt phase
-            io:format("~b ACS[~b] result ~p~n", [Data#data.j, Data#data.round, hd(Results)]),
+            io:format("~b ACS[~b] result ~p~n", [Data#hbbft_data.j, Data#hbbft_data.round, hd(Results)]),
             %% start decrypt phase
             Replies = lists:map(fun({I, Result}) ->
-                              EncKey = get_encrypted_key(Data#data.secret_key, Result),
-                              Share = tpke_privkey:decrypt_share(Data#data.secret_key, EncKey),
-                              {multicast, {dec, Data#data.round, I, Share}}
+                              EncKey = get_encrypted_key(Data#hbbft_data.secret_key, Result),
+                              Share = tpke_privkey:decrypt_share(Data#hbbft_data.secret_key, EncKey),
+                              {multicast, {dec, Data#hbbft_data.round, I, Share}}
                       end, Results),
-            {Data#data{acs=NewACS, acs_results=Results}, {send, Replies}}
+            {Data#hbbft_data{acs=NewACS, acs_results=Results}, {send, Replies}}
     end;
-handle_msg(Data = #data{round=R}, J, {dec, R, I, Share}) ->
-    NewShares = maps:put({I, J}, Share, Data#data.dec_shares),
+handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
+    NewShares = maps:put({I, J}, Share, Data#hbbft_data.dec_shares),
     %% check if we have enough to decode the bundle
     SharesForThisBundle = [ S || {{Idx, _}, S} <- maps:to_list(NewShares), I == Idx],
-    case length(SharesForThisBundle) > Data#data.f andalso not maps:is_key({I, J}, Data#data.dec_shares) of
+    case length(SharesForThisBundle) > Data#hbbft_data.f andalso not maps:is_key({I, J}, Data#hbbft_data.dec_shares) of
         true ->
-            io:format("~p got enough shares to decrypt bundle ~n", [Data#data.j]),
-            {I, Enc} = lists:keyfind(I, 1, Data#data.acs_results),
-            EncKey = get_encrypted_key(Data#data.secret_key, Enc),
+            io:format("~p got enough shares to decrypt bundle ~n", [Data#hbbft_data.j]),
+            {I, Enc} = lists:keyfind(I, 1, Data#hbbft_data.acs_results),
+            EncKey = get_encrypted_key(Data#hbbft_data.secret_key, Enc),
             %% TODO verify the shares with verify_share/3
-            DecKey = tpke_pubkey:combine_shares(tpke_privkey:public_key(Data#data.secret_key), EncKey, SharesForThisBundle),
+            DecKey = tpke_pubkey:combine_shares(tpke_privkey:public_key(Data#hbbft_data.secret_key), EncKey, SharesForThisBundle),
             case decrypt(DecKey, Enc) of
                 error ->
                     io:format("failed to decrypt bundle!~n"),
-                    {Data#data{dec_shares=NewShares}, ok};
+                    {Data#hbbft_data{dec_shares=NewShares}, ok};
                 Decrypted ->
-                    NewDecrypted = maps:put(I, binary_to_term(Decrypted), Data#data.decrypted),
-                    case maps:size(NewDecrypted) == length(Data#data.acs_results) andalso not Data#data.sent_txns of
+                    NewDecrypted = maps:put(I, binary_to_term(Decrypted), Data#hbbft_data.decrypted),
+                    case maps:size(NewDecrypted) == length(Data#hbbft_data.acs_results) andalso not Data#hbbft_data.sent_txns of
                         true ->
                             %% we did it!
-                            io:format("~p finished decryption phase!~n", [Data#data.j]),
+                            io:format("~p finished decryption phase!~n", [Data#hbbft_data.j]),
                             %% Combine all unique messages into a single list
                             TransactionsThisRound = lists:usort(lists:flatten(maps:values(NewDecrypted))),
                             %% return the transactions we agreed on to the user
@@ -102,61 +108,63 @@ handle_msg(Data = #data{round=R}, J, {dec, R, I, Share}) ->
                             %% causal context (eg. a nonce is not monotonic) so we return them to the user to let them
                             %% figure it out. We expect the user to call finalize_round/3 once they've decided what they want to accept
                             %% from this set of transactions.
-                            {Data#data{dec_shares=NewShares, decrypted=NewDecrypted, sent_txns=true}, {result, {transactions, TransactionsThisRound}}};
+                            {Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted, sent_txns=true}, {result, {transactions, TransactionsThisRound}}};
                         false ->
-                            {Data#data{dec_shares=NewShares, decrypted=NewDecrypted}, ok}
+                            {Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted}, ok}
                     end
             end;
         false ->
             %% not enough shares yet
-            {Data#data{dec_shares=NewShares}, ok}
+            {Data#hbbft_data{dec_shares=NewShares}, ok}
     end;
-handle_msg(Data = #data{round=R}, J, {sign, R, BinShare}) ->
+handle_msg(Data = #hbbft_data{round=R}, J, {sign, R, BinShare}) ->
     %% messages related to signing the final block for this round, see finalize_round for more information
     %% this is an extension to the HoneyBadger BFT specification
-    Share = hbbft_utils:binary_to_share(BinShare, Data#data.secret_key),
+    Share = hbbft_utils:binary_to_share(BinShare, Data#hbbft_data.secret_key),
     %% verify the share
-    case tpke_pubkey:verify_signature_share(tpke_privkey:public_key(Data#data.secret_key), Share, Data#data.thingtosign) of
+    case tpke_pubkey:verify_signature_share(tpke_privkey:public_key(Data#hbbft_data.secret_key), Share, Data#hbbft_data.thingtosign) of
         true ->
-            io:format("~b got valid signature share~n", [Data#data.j]),
-            NewSigShares = maps:put(J, Share, Data#data.sig_shares),
+            io:format("~b got valid signature share~n", [Data#hbbft_data.j]),
+            NewSigShares = maps:put(J, Share, Data#hbbft_data.sig_shares),
             %% check if we have at least f+1 shares
-            case maps:size(NewSigShares) > Data#data.f andalso not Data#data.sent_sig of
+            case maps:size(NewSigShares) > Data#hbbft_data.f andalso not Data#hbbft_data.sent_sig of
                 true ->
                     %% ok, we have enough people agreeing with us we can return the signature
-                    Sig = tpke_pubkey:combine_signature_shares(tpke_privkey:public_key(Data#data.secret_key), maps:values(NewSigShares)),
-                    {Data#data{sig_shares=NewSigShares, sent_sig=true}, {result, {signature, erlang_pbc:element_to_binary(Sig)}}};
+                    Sig = tpke_pubkey:combine_signature_shares(tpke_privkey:public_key(Data#hbbft_data.secret_key), maps:values(NewSigShares)),
+                    {Data#hbbft_data{sig_shares=NewSigShares, sent_sig=true}, {result, {signature, erlang_pbc:element_to_binary(Sig)}}};
                 false ->
-                    {Data#data{sig_shares=NewSigShares}, ok}
+                    {Data#hbbft_data{sig_shares=NewSigShares}, ok}
             end;
         false ->
-            io:format("~p got bad signature share from ~p~n", [Data#data.j, J]),
+            io:format("~p got bad signature share from ~p~n", [Data#hbbft_data.j, J]),
             {Data, ok}
     end;
 handle_msg(Data, _, Msg) ->
     io:format("ignoring message ~p~n", [Msg]),
     {Data, ok}.
 
-maybe_start_acs(Data = #data{n=N, secret_key=SK}) ->
-    case queue:len(Data#data.buf) > ?BATCH_SIZE andalso Data#data.acs_init == false of
+-spec maybe_start_acs(hbbft_data()) -> {hbbft_data(), ok | {send, []}}.
+maybe_start_acs(Data = #hbbft_data{n=N, secret_key=SK}) ->
+    case queue:len(Data#hbbft_data.buf) > ?BATCH_SIZE andalso Data#hbbft_data.acs_init == false of
         true ->
             %% compose a transaction bundle
             %% get the top b elements from buf
             %% pick a random B/N selection of them
-            Proposed = random_n(?BATCH_SIZE div N, lists:sublist(queue:to_list(Data#data.buf), ?BATCH_SIZE)),
+            Proposed = hbbft_utils:random_n(?BATCH_SIZE div N, lists:sublist(queue:to_list(Data#hbbft_data.buf), ?BATCH_SIZE)),
             %% encrypt x -> tpke.enc(pk, proposed)
             EncX = encrypt(tpke_privkey:public_key(SK), term_to_binary(Proposed)),
             %% time to kick off a round
-            {NewACSState, {send, ACSResponse}} = hbbft_acs:input(Data#data.acs, EncX),
-            io:format("~p has initiated ACS~n", [Data#data.j]),
+            {NewACSState, {send, ACSResponse}} = hbbft_acs:input(Data#hbbft_data.acs, EncX),
+            io:format("~p has initiated ACS~n", [Data#hbbft_data.j]),
             %% add this to acs set in data and send out the ACS response(s)
-            {Data#data{acs=NewACSState, acs_init=true},
-             {send, hbbft_utils:wrap({acs, Data#data.round}, ACSResponse)}};
+            {Data#hbbft_data{acs=NewACSState, acs_init=true},
+             {send, hbbft_utils:wrap({acs, Data#hbbft_data.round}, ACSResponse)}};
         false ->
             %% not enough transactions for this round yet
             {Data, ok}
     end.
 
+-spec encrypt(tpke_pubkey:pubkey(), binary()) -> binary().
 encrypt(PK, Bin) ->
     %% generate a random AES key and IV
     Key = crypto:strong_rand_bytes(32),
@@ -175,6 +183,7 @@ encrypt(PK, Bin) ->
     %% assemble a final binary packet
     <<AAD/binary, CipherTag:16/binary, CipherText/binary>>.
 
+-spec get_encrypted_key(tpke_privkey:privkey(), binary()) -> tpke_pubkey:ciphertext().
 get_encrypted_key(SK, <<_IV:16/binary, EncKeySize:16/integer-unsigned, EncKey:EncKeySize/binary, _/binary>>) ->
     <<USize:8/integer-unsigned, UBin:USize/binary, V:32/binary, WSize:8/integer-unsigned, WBin:WSize/binary>> = EncKey,
     PubKey = tpke_privkey:public_key(SK),
@@ -182,16 +191,10 @@ get_encrypted_key(SK, <<_IV:16/binary, EncKeySize:16/integer-unsigned, EncKey:En
     W = tpke_pubkey:deserialize_element(PubKey, WBin),
     {U, V, W}.
 
+-spec decrypt(binary(), binary()) -> binary() | error.
 decrypt(Key, Bin) ->
     <<IV:16/binary, EncKeySize:16/integer-unsigned, EncKey:EncKeySize/binary, Tag:16/binary, CipherText/binary>> = Bin,
     crypto:block_decrypt(aes_gcm, Key, IV, {<<IV:16/binary, EncKeySize:16/integer-unsigned, EncKey:(EncKeySize)/binary>>, CipherText, Tag}).
-
-%% helpers
-random_n(N, List) ->
-    lists:sublist(shuffle(List), N).
-
-shuffle(List) ->
-    [X || {_,X} <- lists:sort([{rand:uniform(), N} || N <- List])].
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -226,7 +229,7 @@ hbbft_init_test_() ->
                            Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*20)],
                            %% send each message to a random subset of the HBBFT actors
                            {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
-                                                                      Destinations = random_n(rand:uniform(N), States),
+                                                                      Destinations = hbbft_utils:random_n(rand:uniform(N), States),
                                                                       {NewStates, NewReplies} = lists:unzip(lists:map(fun({J, Data}) ->
                                                                                                                               {NewData, Reply} = hbbft:input(Data, Msg),
                                                                                                                               {{J, NewData}, {J, Reply}}
@@ -291,7 +294,7 @@ hbbft_one_actor_no_txns_test_() ->
                            Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*10)],
                            %% send each message to a random subset of the HBBFT actors
                            {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
-                                                                      Destinations = random_n(rand:uniform(N-1), lists:sublist(States, N-1)),
+                                                                      Destinations = hbbft_utils:random_n(rand:uniform(N-1), lists:sublist(States, N-1)),
                                                                       {NewStates, NewReplies} = lists:unzip(lists:map(fun({J, Data}) ->
                                                                                                                               {NewData, Reply} = hbbft:input(Data, Msg),
                                                                                                                               {{J, NewData}, {J, Reply}}
@@ -331,7 +334,7 @@ hbbft_two_actors_no_txns_test_() ->
                            Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*10)],
                            %% send each message to a random subset of the HBBFT actors
                            {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
-                                                                      Destinations = random_n(rand:uniform(N-2), lists:sublist(States, N-2)),
+                                                                      Destinations = hbbft_utils:random_n(rand:uniform(N-2), lists:sublist(States, N-2)),
                                                                       {NewStates, NewReplies} = lists:unzip(lists:map(fun({J, Data}) ->
                                                                                                                               {NewData, Reply} = hbbft:input(Data, Msg),
                                                                                                                               {{J, NewData}, {J, Reply}}
@@ -363,7 +366,7 @@ hbbft_one_actor_missing_test_() ->
                            Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*10)],
                            %% send each message to a random subset of the HBBFT actors
                            {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
-                                                                      Destinations = random_n(rand:uniform(N-1), States),
+                                                                      Destinations = hbbft_utils:random_n(rand:uniform(N-1), States),
                                                                       {NewStates, NewReplies} = lists:unzip(lists:map(fun({J, Data}) ->
                                                                                                                               {NewData, Reply} = hbbft:input(Data, Msg),
                                                                                                                               {{J, NewData}, {J, Reply}}
@@ -401,7 +404,7 @@ hbbft_two_actor_missing_test_() ->
                            Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*10)],
                            %% send each message to a random subset of the HBBFT actors
                            {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
-                                                                      Destinations = random_n(rand:uniform(N-2), States),
+                                                                      Destinations = hbbft_utils:random_n(rand:uniform(N-2), States),
                                                                       {NewStates, NewReplies} = lists:unzip(lists:map(fun({J, Data}) ->
                                                                                                                               {NewData, Reply} = hbbft:input(Data, Msg),
                                                                                                                               {{J, NewData}, {J, Reply}}
