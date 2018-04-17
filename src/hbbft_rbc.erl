@@ -53,6 +53,10 @@ input(Data = #rbc_data{state=init, n=N, f=F}, Msg) ->
     %% unicast all the VAL packets and multicast the ECHO for our own share
     {NewData#rbc_data{state=waiting}, {send, Result ++ [{multicast, {echo, MerkleRootHash, hd(BranchesForShards), hd(ShardsWithSize)}}]}}.
 
+-spec handle_msg(rbc_data(), non_neg_integer(), val_msg() | echo_msg() | ready_msg()) -> {rbc_data(), ok | {send, send_commands()}} |
+                                                                                         {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()} | abort} |
+                                                                                         {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()}}.
+
 handle_msg(Data, _J, {val, H, Bj, Sj}) ->
     val(Data, H, Bj, Sj);
 handle_msg(Data, J, {echo, H, Bj, Sj}) ->

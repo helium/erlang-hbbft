@@ -30,6 +30,7 @@ input(Data, Input) ->
     {MyRBC, {send, Responses}} = hbbft_rbc:input(MyRBC0, Input),
     {Data#acs_data{rbc=maps:put(Data#acs_data.j, MyRBC, Data#acs_data.rbc)}, {send, hbbft_utils:wrap({rbc, Data#acs_data.j}, Responses)}}.
 
+%% TODO: add specs for this, painful.
 handle_msg(Data, J, {{rbc, I}, RBCMsg}) ->
     RBC = maps:get(I, Data#acs_data.rbc),
     io:format("~p RBC message for ~p ~p~n", [Data#acs_data.j, I, element(1, RBCMsg)]),

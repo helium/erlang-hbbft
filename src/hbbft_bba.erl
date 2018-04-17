@@ -32,6 +32,14 @@ input(Data = #bba_data{state=init}, BInput) ->
 input(Data = #bba_data{state=done}, _BInput) ->
     {Data, ok}.
 
+-spec handle_msg(bba_data(), non_neg_integer(),
+                 {{coin, non_neg_integer()}, hbbft_cc:share_msg()} |
+                 {bval, non_neg_integer(), 0 | 1} |
+                 {aux, non_neg_integer(), 0 | 1}) -> {bba_data(), ok} |
+                                                     {bba_data(), {send, [{multicast, {aux, non_neg_integer(), 0 | 1}}, ... ]}} |
+                                                     {bba_data(), {send, [{multicast, {coin, non_neg_integer(), 0 | 1 }}, ...]}} |
+                                                     {bba_data(), {send, [{multicast, {coin, non_neg_integer()}}]}} |
+                                                     {bba_data(), {result, 0 | 1}}.
 handle_msg(Data = #bba_data{state=done}, _J, _BInput) ->
     {Data, ok};
 handle_msg(Data = #bba_data{round=R}, J, {bval, R, V}) ->
@@ -75,6 +83,7 @@ handle_msg(Data = #bba_data{round=R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin
 handle_msg(Data, _J, _Msg) ->
     {Data, ok}.
 
+%% TODO: the coin return type is most likely incorrect here.
 -spec bval(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), {send, [{multicast, {aux, non_neg_integer(), 0 | 1}}, ... ]}} |
                                                     {bba_data(), {send, [{multicast, {coin, non_neg_integer(), 0 | 1 }}, ...]}}.
 bval(Data=#bba_data{n=N, f=F}, Id, V) ->

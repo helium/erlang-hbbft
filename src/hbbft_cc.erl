@@ -12,6 +12,9 @@
          }).
 
 -type cc_data() :: #cc_data{}.
+-type share_msg() :: {share, tpke_privkey:share()}.
+
+-export_type([share_msg/0]).
 
 -spec init(tpke_privkey:privkey(), binary(), pos_integer(), non_neg_integer()) -> cc_data().
 init(SecretKeyShard, Bin, N, F) when is_binary(Bin) ->
@@ -20,13 +23,15 @@ init(SecretKeyShard, Bin, N, F) when is_binary(Bin) ->
 init(SecretKeyShard, Sid, N, F) ->
     #cc_data{sk=SecretKeyShard, n=N, f=F, sid=Sid}.
 
--spec get_coin(cc_data()) -> {cc_data(), ok | {send, [{multicast, {share, tpke_privkey:share()}}]}}.
+-spec get_coin(cc_data()) -> {cc_data(), ok | {send, [{multicast, share_msg()}]}}.
 get_coin(Data = #cc_data{state=done}) ->
     {Data, ok};
 get_coin(Data) ->
     Share = tpke_privkey:sign(Data#cc_data.sk, Data#cc_data.sid),
     {Data, {send, [{multicast, {share, Share}}]}}.
 
+%% TODO: more specific return type than an integer?
+-spec handle_msg(cc_data(), non_neg_integer(), share_msg()) -> {cc_data(), ok | {result, integer()}}.
 handle_msg(Data, J, {share, Share}) ->
     share(Data, J, Share).
 
