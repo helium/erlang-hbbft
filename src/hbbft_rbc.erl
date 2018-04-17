@@ -5,7 +5,7 @@
 -record(rbc_data, {
           state = init :: init | waiting | aborted | done,
           n :: pos_integer(),
-          f :: pos_integer(),
+          f :: non_neg_integer(),
           msg = undefined :: binary() | undefined,
           h = undefined :: binary() | undefined,
           shares = [] :: [{merkerl:proof(), {pos_integer(), binary()}}],
@@ -14,8 +14,8 @@
           ready_sent = false :: boolean()
          }).
 
--type val_msg() :: {val, merkerl:hash(), merkerl:proof(), binary()}.
--type echo_msg() :: {echo, merkerl:hash(), merkerl:proof(), binary()}.
+-type val_msg() :: {val, merkerl:hash(), merkerl:proof(), {non_neg_integer(), binary()}}.
+-type echo_msg() :: {echo, merkerl:hash(), merkerl:proof(), {non_neg_integer(), binary()}}.
 -type ready_msg() :: {ready, merkerl:hash()}.
 
 -type multicast() :: {multicast, echo_msg() | ready_msg()}.
@@ -24,12 +24,14 @@
 
 -type rbc_data() :: #rbc_data{}.
 
+-export_type([rbc_data/0]).
+
 %% API.
--spec init(pos_integer(), pos_integer()) -> rbc_data().
+-spec init(pos_integer(), non_neg_integer()) -> rbc_data().
 init(N, F) ->
     #rbc_data{n=N, f=F}.
 
--spec input(rbc_data(), binary()) -> {rbc_data(), {send, send_commands()} | {error, already_initialized}}.
+-spec input(rbc_data(), binary()) -> {rbc_data(), {send, send_commands()}}.
 input(Data = #rbc_data{state=init, n=N, f=F}, Msg) ->
     %% Figure2 from honeybadger WP
     %%%% let {Sj} j∈[N] be the blocks of an (N − 2 f , N)-erasure coding
@@ -49,10 +51,7 @@ input(Data = #rbc_data{state=init, n=N, f=F}, Msg) ->
     NewData = Data#rbc_data{msg=Msg, h=MerkleRootHash},
     Result = [ {unicast, J, {val, MerkleRootHash, lists:nth(J+1, BranchesForShards), lists:nth(J+1, ShardsWithSize)}} || J <- lists:seq(0, N-1)],
     %% unicast all the VAL packets and multicast the ECHO for our own share
-    {NewData#rbc_data{state=waiting}, {send, Result ++ [{multicast, {echo, MerkleRootHash, hd(BranchesForShards), hd(ShardsWithSize)}}]}};
-input(Data, _Msg) ->
-    %% can't init twice
-    {Data, {error, already_initialized}}.
+    {NewData#rbc_data{state=waiting}, {send, Result ++ [{multicast, {echo, MerkleRootHash, hd(BranchesForShards), hd(ShardsWithSize)}}]}}.
 
 handle_msg(Data, _J, {val, H, Bj, Sj}) ->
     val(Data, H, Bj, Sj);
