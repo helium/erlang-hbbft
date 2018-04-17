@@ -23,7 +23,6 @@ init(SK, N, F, J) ->
     BBAs = [{I, hbbft_bba:init(SK, N, F)} || I <- lists:seq(0, N-1)],
     #acs_data{secret_key=SK, n=N, f=F, j=J, rbc=maps:from_list(RBCs), bba=maps:from_list(BBAs)}.
 
-%% TODO: fix this any type.
 -spec input(acs_data(), binary()) -> {acs_data(), {send, [{multicast, {{rbc, non_neg_integer()}, binary()}}]}}.
 input(Data, Input) ->
     %% input the message to our RBC

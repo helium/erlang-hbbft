@@ -20,6 +20,8 @@
 
 -type bba_data() :: #bba_data{}.
 
+-export_type([bba_data/0]).
+
 -spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer()) -> bba_data().
 init(SK, N, F) ->
     #bba_data{secret_key=SK, n=N, f=F}.
@@ -74,7 +76,7 @@ handle_msg(Data, _J, _Msg) ->
     {Data, ok}.
 
 -spec bval(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), {send, [{multicast, {aux, non_neg_integer(), 0 | 1}}, ... ]}} |
-                                                {bba_data(), {send, [{multicast, {coin, non_neg_integer(), 0 | 1 }}, ...]}}.
+                                                    {bba_data(), {send, [{multicast, {coin, non_neg_integer(), 0 | 1 }}, ...]}}.
 bval(Data=#bba_data{n=N, f=F}, Id, V) ->
     %% add to witnesses
     Witness = sets:add_element({Id, V}, Data#bba_data.witness),
@@ -83,7 +85,7 @@ bval(Data=#bba_data{n=N, f=F}, Id, V) ->
                             true ->
                                 %% add to broadcasted
                                 NewData0 = Data#bba_data{witness=Witness,
-                                                    broadcasted=sets:add_element(V, Data#bba_data.broadcasted)},
+                                                         broadcasted=sets:add_element(V, Data#bba_data.broadcasted)},
                                 {NewData0, [{multicast, {bval, Data#bba_data.round, V}}]};
                             false ->
                                 {Data#bba_data{witness=Witness}, []}
@@ -93,23 +95,23 @@ bval(Data=#bba_data{n=N, f=F}, Id, V) ->
         true ->
             %% add to binvalues
             NewData2 = Data#bba_data{witness=Witness,
-                                 bin_values=sets:add_element(V, NewData#bba_data.bin_values)},
+                                     bin_values=sets:add_element(V, NewData#bba_data.bin_values)},
             {NewData3, ToSend2} = case NewData2#bba_data.aux_sent == false of
-                          true ->
-                              %% XXX How many times do we send AUX per round? I think just once
-                              Random = lists:nth(rand:uniform(sets:size(NewData2#bba_data.bin_values)), sets:to_list(NewData2#bba_data.bin_values)),
-                              {NewData2#bba_data{aux_sent = true}, [{multicast, {aux, NewData2#bba_data.round, Random}}|ToSend]};
-                          false ->
-                              {NewData2, ToSend}
-                      end,
+                                      true ->
+                                          %% XXX How many times do we send AUX per round? I think just once
+                                          Random = lists:nth(rand:uniform(sets:size(NewData2#bba_data.bin_values)), sets:to_list(NewData2#bba_data.bin_values)),
+                                          {NewData2#bba_data{aux_sent = true}, [{multicast, {aux, NewData2#bba_data.round, Random}}|ToSend]};
+                                      false ->
+                                          {NewData2, ToSend}
+                                  end,
             %% check if we've received at least N - F AUX messages where the values in the AUX messages are member of bin_values
             case sets:size(sets:filter(fun({_, X}) -> sets:is_element(X, NewData3#bba_data.bin_values) end, NewData3#bba_data.aux_witness)) >= N - F of
                 true when NewData3#bba_data.coin == undefined ->
                     %% instanciate the common coin
                     %% TODO need more entropy for the SID
-                    %% XXX: is there a bug here?
+                    %% Note: is there a bug here? maybe?
                     {CoinData, {send, CoinSend}} = hbbft_cc:get_coin(hbbft_cc:init(NewData3#bba_data.secret_key, term_to_binary({NewData3#bba_data.round}), N, F)),
-                    {NewData3#bba_data{coin=CoinData}, {send, [hbbft_utils:wrap({coin, Data#bba_data.round}, CoinSend) | ToSend2]}};
+                    {NewData3#bba_data{coin=CoinData}, {send, hbbft_utils:wrap({coin, Data#bba_data.round}, CoinSend) ++ ToSend2}};
                 _ ->
                     {NewData3, {send, ToSend2}}
             end;
@@ -117,8 +119,7 @@ bval(Data=#bba_data{n=N, f=F}, Id, V) ->
             {NewData, {send, ToSend}}
     end.
 
-%% TODO: fix this.
--spec aux(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), any()}.
+-spec aux(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), ok | {send, [{multicast, {coin, non_neg_integer()}}]}}.
 aux(Data = #bba_data{n=N, f=F}, Id, V) ->
     Witness = sets:add_element({Id, V}, Data#bba_data.aux_witness),
     NewData = Data#bba_data{aux_witness = Witness},
