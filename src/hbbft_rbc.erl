@@ -2,7 +2,7 @@
 
 -export([init/2, input/2, handle_msg/3]).
 
--record(data, {
+-record(rbc_data, {
           state = init :: init | waiting | aborted | done,
           n :: pos_integer(),
           f :: pos_integer(),
@@ -22,13 +22,15 @@
 -type unicast() :: {unicast, J :: non_neg_integer(), val_msg()}.
 -type send_commands() :: [unicast() | multicast()].
 
-%% API.
--spec init(pos_integer(), pos_integer()) -> #data{}.
-init(N, F) ->
-    #data{n=N, f=F}.
+-type rbc_data() :: #rbc_data{}.
 
--spec input(#data{}, binary()) -> {#data{}, {send, send_commands()} | {error, already_initialized}}.
-input(Data = #data{state=init, n=N, f=F}, Msg) ->
+%% API.
+-spec init(pos_integer(), pos_integer()) -> rbc_data().
+init(N, F) ->
+    #rbc_data{n=N, f=F}.
+
+-spec input(rbc_data(), binary()) -> {rbc_data(), {send, send_commands()} | {error, already_initialized}}.
+input(Data = #rbc_data{state=init, n=N, f=F}, Msg) ->
     %% Figure2 from honeybadger WP
     %%%% let {Sj} j∈[N] be the blocks of an (N − 2 f , N)-erasure coding
     %%%% scheme applied to v
@@ -44,10 +46,10 @@ input(Data = #data{state=init, n=N, f=F}, Msg) ->
     %% gen_proof = branches for each merkle node (Hash(shard))
     BranchesForShards = [merkerl:gen_proof(Hash, Merkle) || {Hash, _} <- merkerl:leaves(Merkle)],
     %% TODO add our identity to the ready/echo sets?
-    NewData = Data#data{msg=Msg, h=MerkleRootHash},
+    NewData = Data#rbc_data{msg=Msg, h=MerkleRootHash},
     Result = [ {unicast, J, {val, MerkleRootHash, lists:nth(J+1, BranchesForShards), lists:nth(J+1, ShardsWithSize)}} || J <- lists:seq(0, N-1)],
     %% unicast all the VAL packets and multicast the ECHO for our own share
-    {NewData#data{state=waiting}, {send, Result ++ [{multicast, {echo, MerkleRootHash, hd(BranchesForShards), hd(ShardsWithSize)}}]}};
+    {NewData#rbc_data{state=waiting}, {send, Result ++ [{multicast, {echo, MerkleRootHash, hd(BranchesForShards), hd(ShardsWithSize)}}]}};
 input(Data, _Msg) ->
     %% can't init twice
     {Data, {error, already_initialized}}.
@@ -59,29 +61,29 @@ handle_msg(Data, J, {echo, H, Bj, Sj}) ->
 handle_msg(Data, J, {ready, H}) ->
     ready(Data, J, H).
 
--spec val(#data{}, merkerl:hash(), merkerl:proof(), binary()) -> {#data{}, ok | {send, send_commands()}}.
-val(Data = #data{state=init}, H, Bj, Sj) ->
-    NewData = Data#data{h=H, shares=[{Bj, Sj}]},
+-spec val(rbc_data(), merkerl:hash(), merkerl:proof(), binary()) -> {rbc_data(), ok | {send, send_commands()}}.
+val(Data = #rbc_data{state=init}, H, Bj, Sj) ->
+    NewData = Data#rbc_data{h=H, shares=[{Bj, Sj}]},
     {NewData, {send, [{multicast, {echo, H, Bj, Sj}}]}};
 val(Data, _H, _Bi, _Si) ->
     %% we already had a val, just ignore this
     {Data, ok}.
 
--spec echo(#data{}, non_neg_integer(), merkerl:hash(), merkerl:proof(), binary()) -> {#data{}, ok | {send, send_commands()} | {result, V :: binary()} | abort}.
-echo(Data = #data{state=aborted}, _J, _H, _Bj, _Sj) ->
+-spec echo(rbc_data(), non_neg_integer(), merkerl:hash(), merkerl:proof(), binary()) -> {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()} | abort}.
+echo(Data = #rbc_data{state=aborted}, _J, _H, _Bj, _Sj) ->
     {Data, ok};
-echo(Data = #data{state=done}, _J, _H, _Bj, _Sj) ->
+echo(Data = #rbc_data{state=done}, _J, _H, _Bj, _Sj) ->
     {Data, ok};
-echo(Data = #data{n=N, f=F}, J, H, Bj, Sj) ->
+echo(Data = #rbc_data{n=N, f=F}, J, H, Bj, Sj) ->
     %% Check that Bj is a valid merkle branch for root h and and leaf Sj
     case merkerl:verify_proof(merkerl:hash_value(Sj), H, Bj) of
         ok ->
-            NewData = Data#data{h=H, shares=lists:usort([{Bj, Sj}|Data#data.shares]), num_echoes=sets:add_element(J, Data#data.num_echoes)},
-            case sets:size(NewData#data.num_echoes) >= (N - F) of
+            NewData = Data#rbc_data{h=H, shares=lists:usort([{Bj, Sj}|Data#rbc_data.shares]), num_echoes=sets:add_element(J, Data#rbc_data.num_echoes)},
+            case sets:size(NewData#rbc_data.num_echoes) >= (N - F) of
                 true ->
                     %% interpolate Sj from any N-2f leaves received
                     Threshold = N - 2*F,
-                    {_, ShardsWithSize} = lists:unzip(NewData#data.shares),
+                    {_, ShardsWithSize} = lists:unzip(NewData#rbc_data.shares),
                     {_, Shards} = lists:unzip(ShardsWithSize),
                     case leo_erasure:decode({Threshold, N - Threshold}, Shards, element(1, hd(ShardsWithSize))) of
                         {ok, Msg} ->
@@ -95,31 +97,31 @@ echo(Data = #data{n=N, f=F}, J, H, Bj, Sj) ->
                                 true ->
                                     %% root hashes match
                                     %% check if ready already sent
-                                    case NewData#data.ready_sent of
+                                    case NewData#rbc_data.ready_sent of
                                         true ->
                                             %% check if we have enough readies and enough echoes
                                             %% N-2F echoes and 2F + 1 readies
-                                            case sets:size(NewData#data.num_echoes) >= Threshold andalso sets:size(NewData#data.num_readies) >= (2*F + 1) of
+                                            case sets:size(NewData#rbc_data.num_echoes) >= Threshold andalso sets:size(NewData#rbc_data.num_readies) >= (2*F + 1) of
                                                 true ->
                                                     %% decode V. Done
-                                                    {NewData#data{state=done}, {result, Msg}};
+                                                    {NewData#rbc_data{state=done}, {result, Msg}};
                                                 false ->
                                                     %% wait for enough echoes and readies?
-                                                    {NewData#data{state=waiting, msg=Msg}, ok}
+                                                    {NewData#rbc_data{state=waiting, msg=Msg}, ok}
                                             end;
                                         false ->
                                             %% send ready(h)
-                                            {NewData#data{state=waiting, msg=Msg, ready_sent=true}, {send, [{multicast, {ready, H}}]}}
+                                            {NewData#rbc_data{state=waiting, msg=Msg, ready_sent=true}, {send, [{multicast, {ready, H}}]}}
                                     end;
                                 false ->
                                     %% abort
-                                    {NewData#data{state=aborted}, abort}
+                                    {NewData#rbc_data{state=aborted}, abort}
                             end;
                         {error, _Reason} ->
-                            {NewData#data{state=waiting}, ok}
+                            {NewData#rbc_data{state=waiting}, ok}
                     end;
                 false ->
-                    {NewData#data{state=waiting}, ok}
+                    {NewData#rbc_data{state=waiting}, ok}
             end;
         {error, _} ->
             %% otherwise discard
@@ -127,21 +129,21 @@ echo(Data = #data{n=N, f=F}, J, H, Bj, Sj) ->
     end.
 
 
--spec ready(#data{}, non_neg_integer(), merkerl:hash()) -> {#data{}, ok | {send, send_commands()} | {result, V :: binary()}}.
-ready(Data = #data{state=waiting, n=N, f=F}, J, H) ->
+-spec ready(rbc_data(), non_neg_integer(), merkerl:hash()) -> {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()}}.
+ready(Data = #rbc_data{state=waiting, n=N, f=F}, J, H) ->
     %% increment num_readies
-    NewData = Data#data{num_readies=sets:add_element(J, Data#data.num_readies)},
-    case sets:size(NewData#data.num_readies) >= F + 1 of
+    NewData = Data#rbc_data{num_readies=sets:add_element(J, Data#rbc_data.num_readies)},
+    case sets:size(NewData#rbc_data.num_readies) >= F + 1 of
         true ->
             Threshold = N - 2*F,
             %% check if we have 2*F + 1 readies and N - 2*F echoes
-            case sets:size(NewData#data.num_echoes) >= Threshold andalso sets:size(NewData#data.num_readies) >= 2*F + 1 of
+            case sets:size(NewData#rbc_data.num_echoes) >= Threshold andalso sets:size(NewData#rbc_data.num_readies) >= 2*F + 1 of
                 true ->
                     %% done
-                    {NewData#data{state=done}, {result, NewData#data.msg}};
-                false when not NewData#data.ready_sent ->
+                    {NewData#rbc_data{state=done}, {result, NewData#rbc_data.msg}};
+                false when not NewData#rbc_data.ready_sent ->
                     %% multicast ready
-                    {NewData#data{ready_sent=true}, {send, [{multicast, {ready, H}}]}};
+                    {NewData#rbc_data{ready_sent=true}, {send, [{multicast, {ready, H}}]}};
                 _ ->
                     {NewData, ok}
             end;
@@ -156,7 +158,7 @@ ready(Data, _J, _H) ->
 -include_lib("eunit/include/eunit.hrl").
 
 kill(Data) ->
-    Data#data{state=aborted}.
+    Data#rbc_data{state=aborted}.
 
 init_test() ->
     N = 5,

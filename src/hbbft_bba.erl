@@ -2,14 +2,14 @@
 
 -export([init/3, input/2, handle_msg/3]).
 
--record(data, {
+-record(bba_data, {
           state = init :: init | waiting | done,
           round = 0,
           secret_key :: tpke_privkey:privkey(),
           coin,
           est :: undefined | 0 | 1,
           output,
-          f :: pos_integer(),
+          f :: non_neg_integer(),
           n :: pos_integer(),
           witness = sets:new() :: sets:set({non_neg_integer(), 0 | 1}),
           aux_witness = sets:new() :: sets:set({non_neg_integer(), 0 | 1}),
@@ -18,33 +18,33 @@
           bin_values = sets:new() :: set:set(0 | 1)
          }).
 
--type data() :: #data{}.
+-type bba_data() :: #bba_data{}.
 
--spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer()) -> data().
+-spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer()) -> bba_data().
 init(SK, N, F) ->
-    #data{secret_key=SK, n=N, f=F}.
+    #bba_data{secret_key=SK, n=N, f=F}.
 
--spec input(data(), undefined | 0 | 1) -> {data(), ok | {send, [{multicast, {bval, non_neg_integer(), undefined | 0 | 1}}]}}.
-input(Data = #data{state=init}, BInput) ->
-    {Data#data{est = BInput}, {send, [{multicast, {bval, Data#data.round, BInput}}]}};
-input(Data = #data{state=done}, _BInput) ->
+-spec input(bba_data(), undefined | 0 | 1) -> {bba_data(), ok | {send, [{multicast, {bval, non_neg_integer(), undefined | 0 | 1}}]}}.
+input(Data = #bba_data{state=init}, BInput) ->
+    {Data#bba_data{est = BInput}, {send, [{multicast, {bval, Data#bba_data.round, BInput}}]}};
+input(Data = #bba_data{state=done}, _BInput) ->
     {Data, ok}.
 
-handle_msg(Data = #data{state=done}, _J, _BInput) ->
+handle_msg(Data = #bba_data{state=done}, _J, _BInput) ->
     {Data, ok};
-handle_msg(Data = #data{round=R}, J, {bval, R, V}) ->
+handle_msg(Data = #bba_data{round=R}, J, {bval, R, V}) ->
     bval(Data, J, V);
-handle_msg(Data = #data{round=_R}, J, {aux, _R, V}) ->
+handle_msg(Data = #bba_data{round=_R}, J, {aux, _R, V}) ->
     aux(Data, J, V);
-handle_msg(Data = #data{round=R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin /= undefined ->
+handle_msg(Data = #bba_data{round=R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin /= undefined ->
     %% dispatch the message to the nested coin protocol
-    case hbbft_cc:handle_msg(Data#data.coin, J, CMsg) of
+    case hbbft_cc:handle_msg(Data#bba_data.coin, J, CMsg) of
         {_NewCoin, {result, Result}} ->
             %% ok, we've obtained the common coin
-            case sets:size(Data#data.bin_values) == 1 of
+            case sets:size(Data#bba_data.bin_values) == 1 of
                 true ->
                     %% if vals = {b}, then
-                    [B] = sets:to_list(Data#data.bin_values),
+                    [B] = sets:to_list(Data#bba_data.bin_values),
                     Output = case Result rem 2 == B of
                                  true ->
                                      %% if (b = s%2) then output b
@@ -52,64 +52,64 @@ handle_msg(Data = #data{round=R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin /= 
                                  false ->
                                      undefined
                              end,
-                    case B == Result rem 2 andalso Data#data.output == B of
+                    case B == Result rem 2 andalso Data#bba_data.output == B of
                         true ->
                             %% we are done
                             {Data, {result, B}};
                         false ->
                             %% increment round and continue
-                            NewData = init(Data#data.secret_key, Data#data.n, Data#data.f),
-                            input(NewData#data{round=Data#data.round + 1, output=Output}, B)
+                            NewData = init(Data#bba_data.secret_key, Data#bba_data.n, Data#bba_data.f),
+                            input(NewData#bba_data{round=Data#bba_data.round + 1, output=Output}, B)
                     end;
                 false ->
                     %% else estr+1 := s%2
                     B = Result rem 2,
-                    NewData = init(Data#data.secret_key, Data#data.n, Data#data.f),
-                    input(NewData#data{round=Data#data.round + 1}, B)
+                    NewData = init(Data#bba_data.secret_key, Data#bba_data.n, Data#bba_data.f),
+                    input(NewData#bba_data{round=Data#bba_data.round + 1}, B)
             end;
         {NewCoin, ok} ->
-            {Data#data{coin=NewCoin}, ok}
+            {Data#bba_data{coin=NewCoin}, ok}
     end;
 handle_msg(Data, _J, _Msg) ->
     {Data, ok}.
 
--spec bval(data(), non_neg_integer(), 0 | 1) -> {data(), {send, [{multicast, {aux, non_neg_integer(), 0 | 1}}, ... ]}} |
-                                                {data(), {send, [{multicast, {coin, non_neg_integer(), 0 | 1 }}, ...]}}.
-bval(Data=#data{n=N, f=F}, Id, V) ->
+-spec bval(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), {send, [{multicast, {aux, non_neg_integer(), 0 | 1}}, ... ]}} |
+                                                {bba_data(), {send, [{multicast, {coin, non_neg_integer(), 0 | 1 }}, ...]}}.
+bval(Data=#bba_data{n=N, f=F}, Id, V) ->
     %% add to witnesses
-    Witness = sets:add_element({Id, V}, Data#data.witness),
+    Witness = sets:add_element({Id, V}, Data#bba_data.witness),
     WitnessCount = lists:sum([ 1 || {_, Val} <- sets:to_list(Witness), V == Val ]),
-    {NewData, ToSend} = case WitnessCount >= F+1 andalso sets:is_element(V, Data#data.broadcasted) == false of
+    {NewData, ToSend} = case WitnessCount >= F+1 andalso sets:is_element(V, Data#bba_data.broadcasted) == false of
                             true ->
                                 %% add to broadcasted
-                                NewData0 = Data#data{witness=Witness,
-                                                    broadcasted=sets:add_element(V, Data#data.broadcasted)},
-                                {NewData0, [{multicast, {bval, Data#data.round, V}}]};
+                                NewData0 = Data#bba_data{witness=Witness,
+                                                    broadcasted=sets:add_element(V, Data#bba_data.broadcasted)},
+                                {NewData0, [{multicast, {bval, Data#bba_data.round, V}}]};
                             false ->
-                                {Data#data{witness=Witness}, []}
+                                {Data#bba_data{witness=Witness}, []}
                         end,
 
     case WitnessCount >= 2*F+1 of
         true ->
             %% add to binvalues
-            NewData2 = Data#data{witness=Witness,
-                                 bin_values=sets:add_element(V, NewData#data.bin_values)},
-            {NewData3, ToSend2} = case NewData2#data.aux_sent == false of
+            NewData2 = Data#bba_data{witness=Witness,
+                                 bin_values=sets:add_element(V, NewData#bba_data.bin_values)},
+            {NewData3, ToSend2} = case NewData2#bba_data.aux_sent == false of
                           true ->
                               %% XXX How many times do we send AUX per round? I think just once
-                              Random = lists:nth(rand:uniform(sets:size(NewData2#data.bin_values)), sets:to_list(NewData2#data.bin_values)),
-                              {NewData2#data{aux_sent = true}, [{multicast, {aux, NewData2#data.round, Random}}|ToSend]};
+                              Random = lists:nth(rand:uniform(sets:size(NewData2#bba_data.bin_values)), sets:to_list(NewData2#bba_data.bin_values)),
+                              {NewData2#bba_data{aux_sent = true}, [{multicast, {aux, NewData2#bba_data.round, Random}}|ToSend]};
                           false ->
                               {NewData2, ToSend}
                       end,
             %% check if we've received at least N - F AUX messages where the values in the AUX messages are member of bin_values
-            case sets:size(sets:filter(fun({_, X}) -> sets:is_element(X, NewData3#data.bin_values) end, NewData3#data.aux_witness)) >= N - F of
-                true when NewData3#data.coin == undefined ->
+            case sets:size(sets:filter(fun({_, X}) -> sets:is_element(X, NewData3#bba_data.bin_values) end, NewData3#bba_data.aux_witness)) >= N - F of
+                true when NewData3#bba_data.coin == undefined ->
                     %% instanciate the common coin
                     %% TODO need more entropy for the SID
                     %% XXX: is there a bug here?
-                    {CoinData, {send, CoinSend}} = hbbft_cc:get_coin(hbbft_cc:init(NewData3#data.secret_key, term_to_binary({NewData3#data.round}), N, F)),
-                    {NewData3#data{coin=CoinData}, {send, [hbbft_utils:wrap({coin, Data#data.round}, CoinSend) | ToSend2]}};
+                    {CoinData, {send, CoinSend}} = hbbft_cc:get_coin(hbbft_cc:init(NewData3#bba_data.secret_key, term_to_binary({NewData3#bba_data.round}), N, F)),
+                    {NewData3#bba_data{coin=CoinData}, {send, [hbbft_utils:wrap({coin, Data#bba_data.round}, CoinSend) | ToSend2]}};
                 _ ->
                     {NewData3, {send, ToSend2}}
             end;
@@ -118,17 +118,17 @@ bval(Data=#data{n=N, f=F}, Id, V) ->
     end.
 
 %% TODO: fix this.
--spec aux(data(), non_neg_integer(), 0 | 1) -> {data(), any()}.
-aux(Data = #data{n=N, f=F}, Id, V) ->
-    Witness = sets:add_element({Id, V}, Data#data.aux_witness),
-    NewData = Data#data{aux_witness = Witness},
+-spec aux(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), any()}.
+aux(Data = #bba_data{n=N, f=F}, Id, V) ->
+    Witness = sets:add_element({Id, V}, Data#bba_data.aux_witness),
+    NewData = Data#bba_data{aux_witness = Witness},
     %% check if we've received at least N - F AUX messages where the values in the AUX messages are member of bin_values
-    case sets:size(sets:filter(fun({_, X}) -> sets:is_element(X, NewData#data.bin_values) end, NewData#data.aux_witness)) >= N - F of
-        true when NewData#data.coin == undefined ->
+    case sets:size(sets:filter(fun({_, X}) -> sets:is_element(X, NewData#bba_data.bin_values) end, NewData#bba_data.aux_witness)) >= N - F of
+        true when NewData#bba_data.coin == undefined ->
             %% instanciate the common coin
             %% TODO need more entropy for the SID
-            {CoinData, {send, ToSend}} = hbbft_cc:get_coin(hbbft_cc:init(NewData#data.secret_key, term_to_binary({NewData#data.round}), N, F)),
-            {NewData#data{coin=CoinData}, {send, hbbft_utils:wrap({coin, Data#data.round}, ToSend)}};
+            {CoinData, {send, ToSend}} = hbbft_cc:get_coin(hbbft_cc:init(NewData#bba_data.secret_key, term_to_binary({NewData#bba_data.round}), N, F)),
+            {NewData#bba_data{coin=CoinData}, {send, hbbft_utils:wrap({coin, Data#bba_data.round}, ToSend)}};
         _ ->
             {NewData, ok}
     end.
@@ -137,7 +137,7 @@ aux(Data = #data{n=N, f=F}, Id, V) ->
 -include_lib("eunit/include/eunit.hrl").
 
 kill(Data) ->
-    Data#data{state=done}.
+    Data#bba_data{state=done}.
 
 init_test() ->
     N = 5,
