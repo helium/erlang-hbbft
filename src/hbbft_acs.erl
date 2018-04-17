@@ -3,23 +3,28 @@
 -export([init/4, input/2, handle_msg/3]).
 
 -record(acs_data, {
-          secret_key,
+          secret_key :: tpke_privkey:privkey(),
           done = false :: boolean(),
           n :: pos_integer(),
           f :: non_neg_integer(),
           j :: non_neg_integer(),
-          rbc = #{} :: #{non_neg_integer() => term()},
-          bba = #{} :: #{non_neg_integer() => term()},
+          rbc = #{} :: #{non_neg_integer() => hbbft_rbc:rbc_data()},
+          bba = #{} :: #{non_neg_integer() => hbbft_bba:bba_data()},
           bba_results = #{} :: #{non_neg_integer() => boolean()},
           rbc_results = #{} :: #{non_neg_integer() => binary()}
          }).
 
+-type acs_data() :: #acs_data{}.
+
+-spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer(), non_neg_integer()) -> acs_data().
 init(SK, N, F, J) ->
     %% instanciate all the RBCs
     RBCs = [{I, hbbft_rbc:init(N, F)} || I <- lists:seq(0, N-1)],
     BBAs = [{I, hbbft_bba:init(SK, N, F)} || I <- lists:seq(0, N-1)],
     #acs_data{secret_key=SK, n=N, f=F, j=J, rbc=maps:from_list(RBCs), bba=maps:from_list(BBAs)}.
 
+%% TODO: fix this any type.
+-spec input(acs_data(), binary()) -> {acs_data(), {send, [{multicast, {{rbc, non_neg_integer()}, binary()}}]}}.
 input(Data, Input) ->
     %% input the message to our RBC
     MyRBC0 = maps:get(Data#acs_data.j, Data#acs_data.rbc),
