@@ -20,7 +20,7 @@ init(SecretKeyShard, Bin, N, F) when is_binary(Bin) ->
 init(SecretKeyShard, Sid, N, F) ->
     #data{sk=SecretKeyShard, n=N, f=F, sid=Sid}.
 
--spec get_coin(data()) -> {Data, ok} | {Data, {send, [{multicast, {share, tpke_privkey:share()}}]}}.
+-spec get_coin(data()) -> {data(), ok | {send, [{multicast, {share, tpke_privkey:share()}}]}}.
 get_coin(Data = #data{state=done}) ->
     {Data, ok};
 get_coin(Data) ->
@@ -30,9 +30,8 @@ get_coin(Data) ->
 handle_msg(Data, J, {share, Share}) ->
     share(Data, J, Share).
 
-%% TODO: fix this any type.
-%% TODO: more specific return type than binary perhaps?
--spec share(data(), non_neg_integer(), any()) -> {data(), ok} | {data(), {result, binary()}}.
+%% TODO: more specific return type than an integer?
+-spec share(data(), non_neg_integer(), tpke_privkey:share()) -> {data(), ok | {result, integer()}}.
 share(Data = #data{state=done}, _J, _Share) ->
     {Data, ok};
 share(Data, _J, Share) ->
