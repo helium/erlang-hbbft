@@ -1,5 +1,10 @@
 -module(hbbft_utils).
 
+-type multicast(Msg) :: {multicast, Msg}.
+-type unicast(Msg) :: {unicast, J :: non_neg_integer(), Msg}.
+
+-export_type([unicast/1, multicast/1]).
+
 -export([share_to_binary/1, binary_to_share/2, wrap/2, random_n/2, shuffle/1]).
 
 -spec share_to_binary({non_neg_integer(), erlang_pbc:element()}) -> binary().

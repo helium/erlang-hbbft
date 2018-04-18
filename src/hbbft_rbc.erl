@@ -17,14 +17,13 @@
 -type val_msg() :: {val, merkerl:hash(), merkerl:proof(), {non_neg_integer(), binary()}}.
 -type echo_msg() :: {echo, merkerl:hash(), merkerl:proof(), {non_neg_integer(), binary()}}.
 -type ready_msg() :: {ready, merkerl:hash()}.
+-type msgs() :: val_msg() | echo_msg() | ready_msg().
 
--type multicast() :: {multicast, echo_msg() | ready_msg()}.
--type unicast() :: {unicast, J :: non_neg_integer(), val_msg()}.
--type send_commands() :: [unicast() | multicast()].
+-type send_commands() :: [hbbft_utils:unicast(val_msg()) | hbbft_utils:multicast(echo_msg() | ready_msg())].
 
 -type rbc_data() :: #rbc_data{}.
 
--export_type([rbc_data/0]).
+-export_type([rbc_data/0, val_msg/0, echo_msg/0, ready_msg/0, msgs/0]).
 
 %% API.
 -spec init(pos_integer(), non_neg_integer()) -> rbc_data().

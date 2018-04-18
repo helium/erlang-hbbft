@@ -16,6 +16,13 @@
 
 -type acs_data() :: #acs_data{}.
 
+-type bba_msg() :: {{bba, non_neg_integer()}, hbbft_bba:msgs()}.
+-type rbc_msg() :: {{rbc, non_neg_integer()}, hbbft_rbc:msgs()}.
+-type rbc_wrapped_output() :: hbbft_utils:unicast({{rbc, non_neg_integer()}, hbbft_rbc:val_msg()}) | hbbft_utils:multicast({{rbc, non_neg_integer()}, hbbft_rbc:echo_msg() | hbbft_rbc:ready_msg()}).
+-type msgs() :: bba_msg() | rbc_msg().
+
+-export_type([acs_data/0, msgs/0, bba_msg/0]).
+
 -spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer(), non_neg_integer()) -> acs_data().
 init(SK, N, F, J) ->
     %% instanciate all the RBCs
@@ -23,14 +30,16 @@ init(SK, N, F, J) ->
     BBAs = [{I, hbbft_bba:init(SK, N, F)} || I <- lists:seq(0, N-1)],
     #acs_data{secret_key=SK, n=N, f=F, j=J, rbc=maps:from_list(RBCs), bba=maps:from_list(BBAs)}.
 
--spec input(acs_data(), binary()) -> {acs_data(), {send, [{multicast, {{rbc, non_neg_integer()}, binary()}}]}}.
+-spec input(acs_data(), binary()) -> {acs_data(), {send, [rbc_wrapped_output()]}}.
 input(Data, Input) ->
     %% input the message to our RBC
     MyRBC0 = maps:get(Data#acs_data.j, Data#acs_data.rbc),
     {MyRBC, {send, Responses}} = hbbft_rbc:input(MyRBC0, Input),
     {Data#acs_data{rbc=maps:put(Data#acs_data.j, MyRBC, Data#acs_data.rbc)}, {send, hbbft_utils:wrap({rbc, Data#acs_data.j}, Responses)}}.
 
-%% TODO: add specs for this, painful.
+-spec handle_msg(acs_data(), non_neg_integer(), rbc_msg() | bba_msg()) -> {acs_data(), ok |
+                                                                           {send, [rbc_wrapped_output() | hbbft_utils:multicast(bba_msg())]} |
+                                                                           {result, [{non_neg_integer(), binary()}]}}.
 handle_msg(Data, J, {{rbc, I}, RBCMsg}) ->
     RBC = maps:get(I, Data#acs_data.rbc),
     io:format("~p RBC message for ~p ~p~n", [Data#acs_data.j, I, element(1, RBCMsg)]),

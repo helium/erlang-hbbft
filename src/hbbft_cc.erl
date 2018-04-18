@@ -5,7 +5,7 @@
 -record(cc_data, {
           state = waiting :: waiting | done,
           sk :: tpke_privkey:privkey(),
-          sid :: undefined | binary(),
+          sid :: erlang_pbc:element(),
           n :: pos_integer(),
           f :: non_neg_integer(),
           shares = sets:new()
@@ -16,14 +16,14 @@
 
 -export_type([share_msg/0]).
 
--spec init(tpke_privkey:privkey(), binary(), pos_integer(), non_neg_integer()) -> cc_data().
+-spec init(tpke_privkey:privkey(), binary() | erlang_pbc:element(), pos_integer(), non_neg_integer()) -> cc_data().
 init(SecretKeyShard, Bin, N, F) when is_binary(Bin) ->
     Sid = tpke_pubkey:hash_message(tpke_privkey:public_key(SecretKeyShard), Bin),
     init(SecretKeyShard, Sid, N, F);
 init(SecretKeyShard, Sid, N, F) ->
     #cc_data{sk=SecretKeyShard, n=N, f=F, sid=Sid}.
 
--spec get_coin(cc_data()) -> {cc_data(), ok | {send, [{multicast, share_msg()}]}}.
+-spec get_coin(cc_data()) -> {cc_data(), ok | {send, [hbbft_utils:multicast(share_msg())]}}.
 get_coin(Data = #cc_data{state=done}) ->
     {Data, ok};
 get_coin(Data) ->

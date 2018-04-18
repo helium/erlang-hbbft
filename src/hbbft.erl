@@ -3,26 +3,31 @@
 -export([init/4, input/2, finalize_round/3, next_round/1, get_encrypted_key/2, decrypt/2, handle_msg/3]).
 
 -record(hbbft_data, {
-          secret_key,
+          secret_key :: tpke_privkey:privkey(),
           n :: pos_integer(),
           f :: pos_integer(),
           j :: non_neg_integer(),
           round = 0 :: non_neg_integer(),
           buf = queue:new(),
-          acs,
-          acs_init = false,
-          sent_txns = false,
-          sent_sig = false,
+          acs = hbbft_acs:acs_data(),
+          acs_init = false :: boolean(),
+          sent_txns = false :: boolean(),
+          sent_sig = false :: boolean(),
           acs_results = [] :: [{non_neg_integer(), binary()}],
-          dec_shares = #{},
-          decrypted = #{},
-          sig_shares = #{},
-          thingtosign
+          dec_shares = #{} :: #{non_neg_integer() => {non_neg_integer(), erlang_pbc:element()}},
+          decrypted = #{} :: #{non_neg_integer() => [binary()]},
+          sig_shares = #{} :: #{non_neg_integer() => {non_neg_integer(), erlang_pbc:element()}},
+          thingtosign :: undefined | erlang_pbc:element()
          }).
 
 -define(BATCH_SIZE, 20).
 
 -type hbbft_data() :: #hbbft_data{}.
+-type acs_msg() :: {{acs, non_neg_integer()}, hbbft_acs:msgs()}.
+-type dec_msg() :: {dec, non_neg_integer(), non_neg_integer(), {non_neg_integer(), erlang_pbc:element()}}.
+-type sign_msg() :: {sign, non_neg_integer(), binary()}.
+-type rbc_wrapped_output() :: hbbft_utils:unicast({{acs, non_neg_integer()}, {{rbc, non_neg_integer()}, hbbft_rbc:val_msg()}}) | hbbft_utils:multicast({{acs, non_neg_integer()}, {{rbc, non_neg_integer()}, hbbft_rbc:echo_msg() | hbbft_rbc:ready_msg()}}).
+-type bba_wrapped_output() :: hbbft_utils:multicast({{acs, non_neg_integer()}, hbbft_acs:bba_msg()}).
 
 -spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer(), non_neg_integer()) -> hbbft_data().
 init(SK, N, F, J) ->
@@ -40,7 +45,7 @@ input(Data = #hbbft_data{buf=Buf}, Txn) ->
 %% to remove from the buffer (accepted or invalid). Transactions missing causal context
 %% (eg. a missing monotonic nonce prior to the current nonce) should remain in the buffer and thus
 %% should not be placed in TransactionsToRemove. Once this returns, the user should call next_round/1.
--spec finalize_round(hbbft_data(), [binary()], binary()) -> {hbbft_data(), {send, [{multicast, {sign, non_neg_integer(), binary()}}]}}.
+-spec finalize_round(hbbft_data(), [binary()], binary()) -> {hbbft_data(), {send, [hbbft_utils:multicast(sign_msg())]}}.
 finalize_round(Data, TransactionsToRemove, ThingToSign) ->
     NewBuf = queue:filter(fun(Item) ->
                                   not lists:member(Item, TransactionsToRemove)
@@ -62,6 +67,10 @@ next_round(Data = #hbbft_data{secret_key=SK, n=N, f=F, j=J}) ->
                         sig_shares=#{}, thingtosign=undefined},
     maybe_start_acs(NewData).
 
+-spec handle_msg(hbbft_data(), non_neg_integer(), acs_msg() | dec_msg() | sign_msg()) -> {hbbft_data(), ok |
+                                                                                          {send, [hbbft_utils:multicast(dec_msg() | sign_msg()) | rbc_wrapped_output() | bba_wrapped_output()]} |
+                                                                                          {result, {transactions, [binary()]}} |
+                                                                                          {result, {signature, binary()}}}.
 handle_msg(Data = #hbbft_data{round=R}, J, {{acs, R}, ACSMsg}) ->
     %% ACS message for this round
     case hbbft_acs:handle_msg(Data#hbbft_data.acs, J, ACSMsg) of

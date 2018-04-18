@@ -4,42 +4,45 @@
 
 -record(bba_data, {
           state = init :: init | waiting | done,
-          round = 0,
+          round = 0 :: non_neg_integer(),
           secret_key :: tpke_privkey:privkey(),
-          coin,
+          coin :: hbbft_cc:cc_data(),
           est :: undefined | 0 | 1,
-          output,
+          output :: undefined | 0 | 1,
           f :: non_neg_integer(),
           n :: pos_integer(),
           witness = sets:new() :: sets:set({non_neg_integer(), 0 | 1}),
           aux_witness = sets:new() :: sets:set({non_neg_integer(), 0 | 1}),
           aux_sent = false :: boolean(),
           broadcasted = sets:new() :: sets:set(0 | 1),
-          bin_values = sets:new() :: set:set(0 | 1)
+          bin_values = sets:new() :: sets:set(0 | 1)
          }).
 
 -type bba_data() :: #bba_data{}.
 
--export_type([bba_data/0]).
+-type bval_msg() :: {bval, non_neg_integer(), 0 | 1}.
+-type aux_msg() :: {aux, non_neg_integer(), 0 | 1}.
+-type coin_msg() :: {{coin, non_neg_integer()}, hbbft_cc:share_msg()}.
+-type msgs() :: bval_msg() | aux_msg() | coin_msg().
+
+-export_type([bba_data/0, bval_msg/0, aux_msg/0, coin_msg/0, msgs/0]).
 
 -spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer()) -> bba_data().
 init(SK, N, F) ->
     #bba_data{secret_key=SK, n=N, f=F}.
 
--spec input(bba_data(), undefined | 0 | 1) -> {bba_data(), ok | {send, [{multicast, {bval, non_neg_integer(), undefined | 0 | 1}}]}}.
+-spec input(bba_data(), undefined | 0 | 1) -> {bba_data(), ok | {send, [hbbft_utils:multicast(bval_msg())]}}.
 input(Data = #bba_data{state=init}, BInput) ->
     {Data#bba_data{est = BInput}, {send, [{multicast, {bval, Data#bba_data.round, BInput}}]}};
 input(Data = #bba_data{state=done}, _BInput) ->
     {Data, ok}.
 
 -spec handle_msg(bba_data(), non_neg_integer(),
-                 {{coin, non_neg_integer()}, hbbft_cc:share_msg()} |
-                 {bval, non_neg_integer(), 0 | 1} |
-                 {aux, non_neg_integer(), 0 | 1}) -> {bba_data(), ok} |
-                                                     {bba_data(), {send, [{multicast, {aux, non_neg_integer(), 0 | 1}}, ... ]}} |
-                                                     {bba_data(), {send, [{multicast, {coin, non_neg_integer(), 0 | 1 }}, ...]}} |
-                                                     {bba_data(), {send, [{multicast, {coin, non_neg_integer()}}]}} |
-                                                     {bba_data(), {result, 0 | 1}}.
+                 coin_msg() |
+                 bval_msg() |
+                 aux_msg()) -> {bba_data(), ok} |
+                               {bba_data(), {send, [hbbft_utils:multicast(bval_msg() | aux_msg() | coin_msg())]}} |
+                               {bba_data(), {result, 0 | 1}}.
 handle_msg(Data = #bba_data{state=done}, _J, _BInput) ->
     {Data, ok};
 handle_msg(Data = #bba_data{round=R}, J, {bval, R, V}) ->
@@ -84,8 +87,7 @@ handle_msg(Data, _J, _Msg) ->
     {Data, ok}.
 
 %% TODO: the coin return type is most likely incorrect here.
--spec bval(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), {send, [{multicast, {aux, non_neg_integer(), 0 | 1}}, ... ]}} |
-                                                    {bba_data(), {send, [{multicast, {coin, non_neg_integer(), 0 | 1 }}, ...]}}.
+-spec bval(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), {send, [hbbft_utils:multicast(aux_msg() | coin_msg())]}}.
 bval(Data=#bba_data{n=N, f=F}, Id, V) ->
     %% add to witnesses
     Witness = sets:add_element({Id, V}, Data#bba_data.witness),
@@ -128,7 +130,7 @@ bval(Data=#bba_data{n=N, f=F}, Id, V) ->
             {NewData, {send, ToSend}}
     end.
 
--spec aux(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), ok | {send, [{multicast, {coin, non_neg_integer()}}]}}.
+-spec aux(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), ok | {send, [hbbft_utils:multicast(coin_msg())]}}.
 aux(Data = #bba_data{n=N, f=F}, Id, V) ->
     Witness = sets:add_element({Id, V}, Data#bba_data.aux_witness),
     NewData = Data#bba_data{aux_witness = Witness},
