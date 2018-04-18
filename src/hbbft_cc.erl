@@ -14,7 +14,7 @@
 -type cc_data() :: #cc_data{}.
 -type share_msg() :: {share, tpke_privkey:share()}.
 
--export_type([share_msg/0]).
+-export_type([cc_data/0, share_msg/0]).
 
 -spec init(tpke_privkey:privkey(), binary() | erlang_pbc:element(), pos_integer(), non_neg_integer()) -> cc_data().
 init(SecretKeyShard, Bin, N, F) when is_binary(Bin) ->

@@ -6,7 +6,7 @@
           state = init :: init | waiting | done,
           round = 0 :: non_neg_integer(),
           secret_key :: tpke_privkey:privkey(),
-          coin :: hbbft_cc:cc_data(),
+          coin :: undefined | hbbft_cc:cc_data(),
           est :: undefined | 0 | 1,
           output :: undefined | 0 | 1,
           f :: non_neg_integer(),
