@@ -84,7 +84,7 @@ handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
     NewShares = maps:put({I, J}, Share, Data#hbbft_data.dec_shares),
     %% check if we have enough to decode the bundle
     SharesForThisBundle = [ S || {{Idx, _}, S} <- maps:to_list(NewShares), I == Idx],
-    case length(SharesForThisBundle) > Data#hbbft_data.f andalso not maps:is_key({I, J}, Data#hbbft_data.dec_shares) of
+    case length(SharesForThisBundle) > Data#hbbft_data.f andalso not maps:is_key({I, J}, Data#hbbft_data.dec_shares) andalso lists:keymember(I, 1, Data#hbbft_data.acs_results) of
         true ->
             io:format("~p got enough shares to decrypt bundle ~n", [Data#hbbft_data.j]),
             {I, Enc} = lists:keyfind(I, 1, Data#hbbft_data.acs_results),
