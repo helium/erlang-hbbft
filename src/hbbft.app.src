@@ -4,7 +4,10 @@
   {registered, []},
   {applications,
    [kernel,
-    stdlib
+    stdlib,
+    merkerl,
+    leo_erasure,
+    erlang_tpke
    ]},
   {env,[]},
   {modules, []},

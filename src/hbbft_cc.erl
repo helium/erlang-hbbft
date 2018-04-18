@@ -2,49 +2,60 @@
 
 -export([init/4, get_coin/1, handle_msg/3]).
 
--record(data, {
+-record(cc_data, {
           state = waiting :: waiting | done,
           sk :: tpke_privkey:privkey(),
-          sid :: undefined | binary(),
+          sid :: erlang_pbc:element(),
           n :: pos_integer(),
-          f :: pos_integer(),
+          f :: non_neg_integer(),
           shares = sets:new()
          }).
 
+-type cc_data() :: #cc_data{}.
+-type share_msg() :: {share, tpke_privkey:share()}.
+
+-export_type([cc_data/0, share_msg/0]).
+
+-spec init(tpke_privkey:privkey(), binary() | erlang_pbc:element(), pos_integer(), non_neg_integer()) -> cc_data().
 init(SecretKeyShard, Bin, N, F) when is_binary(Bin) ->
     Sid = tpke_pubkey:hash_message(tpke_privkey:public_key(SecretKeyShard), Bin),
     init(SecretKeyShard, Sid, N, F);
 init(SecretKeyShard, Sid, N, F) ->
-    #data{sk=SecretKeyShard, n=N, f=F, sid=Sid}.
+    #cc_data{sk=SecretKeyShard, n=N, f=F, sid=Sid}.
 
-get_coin(Data = #data{state=done}) ->
+-spec get_coin(cc_data()) -> {cc_data(), ok | {send, [hbbft_utils:multicast(share_msg())]}}.
+get_coin(Data = #cc_data{state=done}) ->
     {Data, ok};
 get_coin(Data) ->
-    Share = tpke_privkey:sign(Data#data.sk, Data#data.sid),
+    Share = tpke_privkey:sign(Data#cc_data.sk, Data#cc_data.sid),
     {Data, {send, [{multicast, {share, Share}}]}}.
 
+%% TODO: more specific return type than an integer?
+-spec handle_msg(cc_data(), non_neg_integer(), share_msg()) -> {cc_data(), ok | {result, integer()}}.
 handle_msg(Data, J, {share, Share}) ->
     share(Data, J, Share).
 
-share(Data = #data{state=done}, _J, _Share) ->
+%% TODO: more specific return type than an integer?
+-spec share(cc_data(), non_neg_integer(), tpke_privkey:share()) -> {cc_data(), ok | {result, integer()}}.
+share(Data = #cc_data{state=done}, _J, _Share) ->
     {Data, ok};
 share(Data, _J, Share) ->
-    case sets:is_element(Share, Data#data.shares) of
+    case sets:is_element(Share, Data#cc_data.shares) of
         false ->
-            case tpke_pubkey:verify_signature_share(tpke_privkey:public_key(Data#data.sk), Share, Data#data.sid) of
+            case tpke_pubkey:verify_signature_share(tpke_privkey:public_key(Data#cc_data.sk), Share, Data#cc_data.sid) of
                 true ->
-                    NewData = Data#data{shares=sets:add_element(Share, Data#data.shares)},
+                    NewData = Data#cc_data{shares=sets:add_element(Share, Data#cc_data.shares)},
                     %% check if we have at least f+1 shares
-                    case sets:size(NewData#data.shares) > Data#data.f of
+                    case sets:size(NewData#cc_data.shares) > Data#cc_data.f of
                         true ->
                             %% combine shares
-                            Sig = tpke_pubkey:combine_signature_shares(tpke_privkey:public_key(NewData#data.sk), sets:to_list(NewData#data.shares)),
+                            Sig = tpke_pubkey:combine_signature_shares(tpke_privkey:public_key(NewData#cc_data.sk), sets:to_list(NewData#cc_data.shares)),
                             %% check if the signature is valid
-                            case tpke_pubkey:verify_signature(tpke_privkey:public_key(NewData#data.sk), Sig, NewData#data.sid) of
+                            case tpke_pubkey:verify_signature(tpke_privkey:public_key(NewData#cc_data.sk), Sig, NewData#cc_data.sid) of
                                 true ->
                                     %% TODO do something better here!
                                     <<Val:32/integer, _/binary>> = erlang_pbc:element_to_binary(Sig),
-                                    {NewData#data{state=done}, {result, Val}};
+                                    {NewData#cc_data{state=done}, {result, Val}};
                                 false ->
                                     {NewData, ok}
                             end;
@@ -63,7 +74,7 @@ share(Data, _J, Share) ->
 -include_lib("eunit/include/eunit.hrl").
 
 kill(Data) ->
-    Data#data{state=done}.
+    Data#cc_data{state=done}.
 
 init_test() ->
     N = 5,
