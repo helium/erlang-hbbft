@@ -107,6 +107,7 @@ ready(Data = #rbc_data{state=waiting, f=F, h=H}, J, H) ->
 ready(Data, _J, _H) ->
     {Data, ok}.
 
+-spec check_completion(rbc_data(), merkerl:hash()) -> {rbc_data(), ok | {result, binary()} | hbbft_utils:multicast(ready_msg()) | abort}.
 check_completion(Data = #rbc_data{n=N, f=F}, H) ->
     %% interpolate Sj from any N-2f leaves received
     Threshold = N - 2*F,
