@@ -34,7 +34,7 @@ init(SK, N, F, J) ->
     #hbbft_data{secret_key=SK, n=N, f=F, j=J, acs=hbbft_acs:init(SK, N, F, J)}.
 
 %% someone submitting a transaction to the replica set
--spec input(hbbft_data(), binary()) -> {hbbft_data(), ok | {send, []}}.
+-spec input(hbbft_data(), binary()) -> {hbbft_data(), ok | {send, [rbc_wrapped_output()]}}.
 input(Data = #hbbft_data{buf=Buf}, Txn) ->
     %% add this txn to the the buffer
     NewBuf = queue:in(Txn, Buf),
@@ -152,7 +152,7 @@ handle_msg(Data, _, Msg) ->
     io:format("ignoring message ~p~n", [Msg]),
     {Data, ok}.
 
--spec maybe_start_acs(hbbft_data()) -> {hbbft_data(), ok | {send, []}}.
+-spec maybe_start_acs(hbbft_data()) -> {hbbft_data(), ok | {send, [rbc_wrapped_output()]}}.
 maybe_start_acs(Data = #hbbft_data{n=N, secret_key=SK}) ->
     case queue:len(Data#hbbft_data.buf) > ?BATCH_SIZE andalso Data#hbbft_data.acs_init == false of
         true ->
