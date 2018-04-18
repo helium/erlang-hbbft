@@ -117,12 +117,12 @@ handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
             %% not enough shares yet
             {Data#hbbft_data{dec_shares=NewShares}, ok}
     end;
-handle_msg(Data = #hbbft_data{round=R}, J, {sign, R, BinShare}) ->
+handle_msg(Data = #hbbft_data{round=R, thingtosign=ThingToSign}, J, {sign, R, BinShare}) when ThingToSign /= undefined ->
     %% messages related to signing the final block for this round, see finalize_round for more information
     %% this is an extension to the HoneyBadger BFT specification
     Share = hbbft_utils:binary_to_share(BinShare, Data#hbbft_data.secret_key),
     %% verify the share
-    case tpke_pubkey:verify_signature_share(tpke_privkey:public_key(Data#hbbft_data.secret_key), Share, Data#hbbft_data.thingtosign) of
+    case tpke_pubkey:verify_signature_share(tpke_privkey:public_key(Data#hbbft_data.secret_key), Share, ThingToSign) of
         true ->
             io:format("~b got valid signature share~n", [Data#hbbft_data.j]),
             NewSigShares = maps:put(J, Share, Data#hbbft_data.sig_shares),
