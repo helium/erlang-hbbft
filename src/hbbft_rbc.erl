@@ -143,7 +143,19 @@ ready(Data = #rbc_data{state=waiting, n=N, f=F}, J, H) ->
             case sets:size(NewData#rbc_data.num_echoes) >= Threshold andalso sets:size(NewData#rbc_data.num_readies) >= 2*F + 1 of
                 true ->
                     %% done
-                    {NewData#rbc_data{state=done}, {result, NewData#rbc_data.msg}};
+                    Msg = case NewData#rbc_data.msg of
+                              undefined ->
+                                  %% We may not have the msg here, decode it
+                                  {_, ShardsWithSize} = lists:unzip(NewData#rbc_data.shares),
+                                  {_, Shards} = lists:unzip(ShardsWithSize),
+                                  case leo_erasure:decode({Threshold, N - Threshold}, Shards, element(1, hd(ShardsWithSize))) of
+                                      {ok, DecodedMsg} -> DecodedMsg;
+                                      %% XXX: not sure what to do if the decoding fails?
+                                      _ -> error
+                                  end;
+                              OrigMsg -> OrigMsg
+                          end,
+                    {NewData#rbc_data{state=done}, {result, Msg}};
                 false when not NewData#rbc_data.ready_sent ->
                     %% multicast ready
                     {NewData#rbc_data{ready_sent=true}, {send, [{multicast, {ready, H}}]}};
