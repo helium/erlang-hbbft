@@ -5,16 +5,15 @@
 -record(cc_data, {
           state = waiting :: waiting | done,
           sk :: tpke_privkey:privkey(),
-          %% sid is assumed to be a unique nonce that serves as name of this common coin
+          %% Note: sid is assumed to be a unique nonce that serves as name of this common coin
           sid :: erlang_pbc:element(),
           n :: pos_integer(),
           f :: non_neg_integer(),
-          shares = sets:new() :: sets:set()
+          shares = maps:new() :: #{non_neg_integer() => tpke_privkey:share()}
          }).
 
 -type cc_data() :: #cc_data{}.
 -type serialized_share() :: binary().
-%% -type share_msg() :: {share, tpke_privkey:share()}.
 -type share_msg() :: {share, serialized_share()}.
 
 -export_type([cc_data/0, share_msg/0]).
@@ -51,7 +50,6 @@ share(Data, J, Share) ->
             case tpke_pubkey:verify_signature_share(tpke_privkey:public_key(Data#cc_data.sk), DeserializedShare, Data#cc_data.sid) of
                 true ->
                     NewData = Data#cc_data{shares=maps:put(J, DeserializedShare, Data#cc_data.shares)},
-
                     %% check if we have at least f+1 shares
                     case maps:size(NewData#cc_data.shares) > Data#cc_data.f of
                         true ->

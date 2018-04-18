@@ -3,10 +3,10 @@
 -behaviour(gen_server).
 
 -record(state, {
-          rbc,
-          n,
-          id,
-          result
+          rbc :: hbbft_rbc:rbc_data(),
+          n :: non_neg_integer(),
+          id :: non_neg_integer(),
+          result :: binary()
          }).
 
 -export([start_link/3, get_results/1, input/2]).

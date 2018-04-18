@@ -8,16 +8,16 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
 -record(block, {
-          prev_hash,
-          transactions,
-          signature
+          prev_hash :: binary(),
+          transactions :: [binary()],
+          signature :: binary()
          }).
 
 -record(state, {
-         n,
-         id,
-         hbbft,
-         blocks
+          n :: non_neg_integer(),
+         id :: non_neg_integer(),
+         hbbft :: hbbft:hbbft_data(),
+         blocks :: list()
         }).
 
 start_link(N, F, ID, SK) ->
