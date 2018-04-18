@@ -24,7 +24,7 @@
 
 -type hbbft_data() :: #hbbft_data{}.
 -type acs_msg() :: {{acs, non_neg_integer()}, hbbft_acs:msgs()}.
--type dec_msg() :: {dec, non_neg_integer(), non_neg_integer(), {non_neg_integer(), erlang_pbc:element()}}.
+-type dec_msg() :: {dec, non_neg_integer(), non_neg_integer(), {non_neg_integer(), binary()}}.
 -type sign_msg() :: {sign, non_neg_integer(), binary()}.
 -type rbc_wrapped_output() :: hbbft_utils:unicast({{acs, non_neg_integer()}, {{rbc, non_neg_integer()}, hbbft_rbc:val_msg()}}) | hbbft_utils:multicast({{acs, non_neg_integer()}, {{rbc, non_neg_integer()}, hbbft_rbc:echo_msg() | hbbft_rbc:ready_msg()}}).
 -type bba_wrapped_output() :: hbbft_utils:multicast({{acs, non_neg_integer()}, hbbft_acs:bba_msg()}).
@@ -90,7 +90,9 @@ handle_msg(Data = #hbbft_data{round=R}, J, {{acs, R}, ACSMsg}) ->
             {Data#hbbft_data{acs=NewACS, acs_results=Results}, {send, Replies}}
     end;
 handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
-    NewShares = maps:put({I, J}, Share, Data#hbbft_data.dec_shares),
+    %% the Share now is a binary, deserialize it and then store in the dec_shares map
+    DeserializedShare = hbbft_utils:binary_to_share(Share, Data#hbbft_data.secret_key),
+    NewShares = maps:put({I, J}, DeserializedShare, Data#hbbft_data.dec_shares),
     %% check if we have enough to decode the bundle
     SharesForThisBundle = [ S || {{Idx, _}, S} <- maps:to_list(NewShares), I == Idx],
     case length(SharesForThisBundle) > Data#hbbft_data.f andalso not maps:is_key({I, J}, Data#hbbft_data.dec_shares) andalso lists:keymember(I, 1, Data#hbbft_data.acs_results) of
