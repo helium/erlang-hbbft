@@ -21,7 +21,7 @@ binary_to_share(<<ShareIdx:8/integer-unsigned, ShareBinary/binary>>, SK) ->
     {ShareIdx, ShareElement}.
 
 %% wrap a subprotocol's outbound messages with a protocol identifier
--spec wrap(atom() | {atom(), non_neg_integer()}, list()) -> list().
+-spec wrap(Tag :: atom() | {atom(), non_neg_integer()}, [{multicast, Msg :: any()} | {unicast, non_neg_integer(),  Msg :: any()}]) -> [{multicast, {Tag, Msg}} | {unicast, non_neg_integer(), {Tag, Msg}}].
 wrap(_, []) ->
     [];
 wrap(Id, [{multicast, Msg}|T]) ->
