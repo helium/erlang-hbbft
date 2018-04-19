@@ -20,7 +20,7 @@ simple_test(_Config) ->
     dealer:start_link(N, F+1, 'SS512'),
     {ok, PubKey, PrivateKeys} = dealer:deal(),
     gen_server:stop(dealer),
-    Workers = [ element(2, hbbft_worker:start_link(N, F, I, SK)) || {I, SK} <- enumerate(PrivateKeys) ],
+    Workers = [ element(2, hbbft_worker:start_link(N, F, I, tpke_privkey:serialize(SK))) || {I, SK} <- enumerate(PrivateKeys) ],
     Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*20)],
     %% feed the badgers some msgs
     lists:foreach(fun(Msg) ->
@@ -30,14 +30,14 @@ simple_test(_Config) ->
                   end, Msgs),
     timer:sleep(15000),
     Chains = sets:from_list(lists:map(fun(W) ->
-                                                {ok, Blocks} = hbbft_worker:get_blocks(W),
-                                                Blocks
-                                        end, Workers)),
+                                              {ok, Blocks} = hbbft_worker:get_blocks(W),
+                                              Blocks
+                                      end, Workers)),
     1 = sets:size(Chains),
     [Chain] = sets:to_list(Chains),
     io:format("chain is of height ~p~n", [length(Chain)]),
     %% verify they are cryptographically linked
-    hbbft_worker:verify_chain(Chain, PubKey),
+    hbbft_worker:verify_chain(Chain, tpke_pubkey:serialize(PubKey)),
     %% check all the transactions are unique
     BlockTxns = lists:flatten([ hbbft_worker:block_transactions(B) || B <- Chain ]),
     true = length(BlockTxns) == sets:size(sets:from_list(BlockTxns)),

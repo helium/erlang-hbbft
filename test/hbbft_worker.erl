@@ -15,13 +15,13 @@
 
 -record(state, {
           n :: non_neg_integer(),
-         id :: non_neg_integer(),
-         hbbft :: hbbft:hbbft_data(),
-         blocks :: list()
-        }).
+          id :: non_neg_integer(),
+          hbbft :: hbbft:hbbft_data(),
+          blocks :: list()
+         }).
 
 start_link(N, F, ID, SK) ->
-    gen_server:start_link({local, name(ID)}, ?MODULE, [N, F, ID, SK], []).
+    gen_server:start_link({global, name(ID)}, ?MODULE, [N, F, ID, tpke_privkey:deserialize(SK)], []).
 
 submit_transaction(Msg, Pid) ->
     gen_server:call(Pid, {submit_txn, Msg}, infinity).
@@ -30,21 +30,23 @@ get_blocks(Pid) ->
     gen_server:call(Pid, get_blocks, infinity).
 
 verify_chain([G], PubKey) ->
+    DeserializedPubKey = tpke_pubkey:deserialize(PubKey),
     io:format("verifying genesis block~n"),
     %% genesis block has no prev hash
     true = G#block.prev_hash == <<>>,
     %% genesis block should have a valid signature
-    HM = tpke_pubkey:hash_message(PubKey, term_to_binary(G#block{signature= <<>>})),
-    Signature = tpke_pubkey:deserialize_element(PubKey, G#block.signature),
-    true = tpke_pubkey:verify_signature(PubKey, Signature, HM);
+    HM = tpke_pubkey:hash_message(DeserializedPubKey, term_to_binary(G#block{signature= <<>>})),
+    Signature = tpke_pubkey:deserialize_element(DeserializedPubKey, G#block.signature),
+    true = tpke_pubkey:verify_signature(DeserializedPubKey, Signature, HM);
 verify_chain([A, B|_]=Chain, PubKey) ->
+    DeserializedPubKey = tpke_pubkey:deserialize(PubKey),
     io:format("Chain verification depth ~p~n", [length(Chain)]),
     %% A should have the the prev_hash of B
     true = A#block.prev_hash == hash_block(B),
     %% A should have a valid signature
-    HM = tpke_pubkey:hash_message(PubKey, term_to_binary(A#block{signature= <<>>})),
-    Signature = tpke_pubkey:deserialize_element(PubKey, A#block.signature),
-    true = tpke_pubkey:verify_signature(PubKey, Signature, HM),
+    HM = tpke_pubkey:hash_message(DeserializedPubKey, term_to_binary(A#block{signature= <<>>})),
+    Signature = tpke_pubkey:deserialize_element(DeserializedPubKey, A#block.signature),
+    true = tpke_pubkey:verify_signature(DeserializedPubKey, Signature, HM),
     verify_chain(tl(Chain), PubKey).
 
 block_transactions(Block) ->
@@ -102,10 +104,12 @@ dispatch(Other, State) ->
 do_send([], _) ->
     ok;
 do_send([{unicast, Dest, Msg}|T], State) ->
-    gen_server:cast(name(Dest), {hbbft, State#state.id, Msg}),
+    io:format("~p unicasting ~p to ~p~n", [State#state.id, Msg, global:whereis_name(name(Dest))]),
+    gen_server:cast({global, name(Dest)}, {hbbft, State#state.id, Msg}),
     do_send(T, State);
 do_send([{multicast, Msg}|T], State) ->
-    [ gen_server:cast(name(Dest), {hbbft, State#state.id, Msg}) || Dest <- lists:seq(0, State#state.n - 1)],
+    io:format("~p multicasting ~p to ~p~n", [State#state.id, Msg, [global:whereis_name(name(Dest)) || Dest <- lists:seq(0, State#state.n - 1)]]),
+    [ gen_server:cast({global, name(Dest)}, {hbbft, State#state.id, Msg}) || Dest <- lists:seq(0, State#state.n - 1)],
     do_send(T, State).
 
 name(N) ->
