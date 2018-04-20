@@ -73,7 +73,7 @@ simple_test(Config) ->
     Workers = [{Node, rpc:call(Node, hbbft_worker, start_link, [N, F, I, tpke_privkey:serialize(SK)])} || {I, {Node, SK}} <- enumerate(NodesSKs)],
     ok = global:sync(),
 
-    io:format("LOL ~p ~n", [global:whereis_name(hbbft_worker_0)]),
+    [ link(W) || {_, {ok, W}} <- Workers ],
 
     %% bunch of msgs
     Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*20)],
@@ -85,29 +85,50 @@ simple_test(Config) ->
                           [hbbft_worker:submit_transaction(Msg, Destination) || {_Node, {ok, Destination}} <- Destinations]
                   end, Msgs),
 
-    timer:sleep(30000),
+    %% wait for all the worker's mailboxes to settle and.
+    %% wait for the chains to converge
+    ok = hbbft_ct_utils:wait_until(fun() ->
+                                           Chains = sets:from_list(lists:map(fun({_Node, {ok, W}}) ->
+                                                                                     {ok, Blocks} = hbbft_worker:get_blocks(W),
+                                                                                     Blocks
+                                                                             end, Workers)),
+
+                                           0 == lists:sum([element(2, rpc:call(Node, erlang, process_info, [W, message_queue_len])) || {Node, {ok, W}} <- Workers ]) andalso
+                                           1 == sets:size(Chains) andalso
+                                           0 /= length(hd(sets:to_list(Chains)))
+                                   end, 60*2, 500),
+
+
     Chains = sets:from_list(lists:map(fun({_Node, {ok, Worker}}) ->
                                               {ok, Blocks} = hbbft_worker:get_blocks(Worker),
                                               Blocks
                                       end, Workers)),
-    1 = sets:size(Chains),
-    true = (0 /= length(hd(sets:to_list(Chains)))),
+    io:format("~p distinct chains~n", [sets:size(Chains)]),
+    %true = (2 > sets:size(Chains)),
+    %true = (2 < length(hd(sets:to_list(Chains)))),
 
-    %% just printing the chain
-    [Chain] = sets:to_list(Chains),
-    io:format("Chain: ~p~n", [Chain]),
-    io:format("chain is of height ~p~n", [length(Chain)]),
+    lists:foreach(fun(Chain) ->
+                          %io:format("Chain: ~p~n", [Chain]),
+                          io:format("chain is of height ~p~n", [length(Chain)]),
 
-    %% verify they are cryptographically linked,
-    hbbft_worker:verify_chain(Chain, tpke_pubkey:serialize(PubKey)),
+                          %% verify they are cryptographically linked,
+                          true = hbbft_worker:verify_chain(Chain, PubKey),
 
-    %% check all transactions are unique
-    BlockTxns = lists:flatten([ hbbft_worker:block_transactions(B) || B <- Chain ]),
-    true = length(BlockTxns) == sets:size(sets:from_list(BlockTxns)),
+                          %% check all transactions are unique
+                          BlockTxns = lists:flatten([ hbbft_worker:block_transactions(B) || B <- Chain ]),
+                          true = length(BlockTxns) == sets:size(sets:from_list(BlockTxns)),
 
-    %% check they're all members of the original message list
-    true = sets:is_subset(sets:from_list(BlockTxns), sets:from_list(Msgs)),
-    io:format("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
+                          %% check they're all members of the original message list
+                          true = sets:is_subset(sets:from_list(BlockTxns), sets:from_list(Msgs)),
+                          io:format("chain contains ~p distinct transactions~n", [length(BlockTxns)])
+                  end, sets:to_list(Chains)),
+
+    %% check we actually converged and made a chain
+
+    true = (1 == sets:size(Chains)),
+    true = (0 < length(hd(sets:to_list(Chains)))),
+
+    [ unlink(W) || {_, {ok, W}} <- Workers ],
     ok.
 
 %% helpers

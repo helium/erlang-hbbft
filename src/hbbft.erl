@@ -251,7 +251,7 @@ hbbft_init_test_() ->
                            %% check that at least N-F actors have started ACS:
                            ?assert(length(Replies) >= N - F),
                            %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
-                           ?assert(lists:all(fun(E) -> E end, [ length(R) == N+1 || {_, {send, R}} <- Replies ])),
+                           ?assert(lists:all(fun(E) -> E end, [ length(R) == N || {_, {send, R}} <- Replies ])),
                            %% start it on runnin'
                            {NextStates, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Replies, NewStates, sets:new()),
                            %io:format("Converged Results ~p~n", [ConvergedResults]),
@@ -317,7 +317,7 @@ hbbft_one_actor_no_txns_test_() ->
                            io:format("~p replies~n", [length(Replies)]),
                            ?assert(length(Replies) >= N - F),
                            %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
-                           ?assert(lists:all(fun(E) -> E end, [ length(R) == N+1 || {_, {send, R}} <- Replies ])),
+                           ?assert(lists:all(fun(E) -> E end, [ length(R) == N || {_, {send, R}} <- Replies ])),
                            %% start it on runnin'
                            {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Replies, NewStates, sets:new()),
                            %io:format("Converged Results ~p~n", [ConvergedResults]),
@@ -357,7 +357,7 @@ hbbft_two_actors_no_txns_test_() ->
                            io:format("~p replies~n", [length(Replies)]),
                            ?assert(length(Replies) =< N - F),
                            %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
-                           ?assert(lists:all(fun(E) -> E end, [ length(R) == N+1 || {_, {send, R}} <- Replies ])),
+                           ?assert(lists:all(fun(E) -> E end, [ length(R) == N || {_, {send, R}} <- Replies ])),
                            %% start it on runnin'
                            {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Replies, NewStates, sets:new()),
                            %% check no actors returned a result
@@ -389,7 +389,7 @@ hbbft_one_actor_missing_test_() ->
                            io:format("~p replies~n", [length(Replies)]),
                            ?assert(length(Replies) >= N - F),
                            %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
-                           ?assert(lists:all(fun(E) -> E end, [ length(R) == N+1 || {_, {send, R}} <- Replies ])),
+                           ?assert(lists:all(fun(E) -> E end, [ length(R) == N || {_, {send, R}} <- Replies ])),
                            %% start it on runnin'
                            {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Replies, NewStates, sets:new()),
                            %% check no actors returned a result
@@ -427,7 +427,7 @@ hbbft_two_actor_missing_test_() ->
                            io:format("~p replies~n", [length(Replies)]),
                            ?assert(length(Replies) =< N - F),
                            %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
-                           ?assert(lists:all(fun(E) -> E end, [ length(R) == N+1 || {_, {send, R}} <- Replies ])),
+                           ?assert(lists:all(fun(E) -> E end, [ length(R) == N || {_, {send, R}} <- Replies ])),
                            %% start it on runnin'
                            {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Replies, NewStates, sets:new()),
                            %% check no actors returned a result

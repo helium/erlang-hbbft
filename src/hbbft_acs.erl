@@ -109,7 +109,8 @@ handle_msg(Data = #acs_data{n=N, f=F}, J, {{bba, I}, BBAMsg}) ->
 check_completion(Data = #acs_data{n=N}) ->
     % once all instances of BA have completed, let C⊂[1..N] be the indexes of each BA that delivered 1.
     % Wait for the output vj for each RBCj such that j∈C. Finally output ∪j∈Cvj.
-    case lists:all(fun(RBC) -> rbc_completed(RBC) end, maps:values(Data#acs_data.rbc)) andalso
+    % Note that this means if a BBA has returned 0, we don't need to wait for the corresponding RBC.
+    case lists:all(fun({E, RBC}) -> get_bba_result(Data, E) == false orelse rbc_completed(RBC) end, maps:to_list(Data#acs_data.rbc)) andalso
          lists:all(fun(BBA) -> bba_completed(BBA) end, maps:values(Data#acs_data.bba)) of
         true ->
             ResultVector = [ {E, get_rbc_result(Data, E)} || E <- lists:seq(0, N-1), get_bba_result(Data, E) ],
