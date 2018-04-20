@@ -11,6 +11,7 @@
           shares = [] :: [{merkerl:proof(), {pos_integer(), binary()}}],
           num_echoes = sets:new() :: sets:set(non_neg_integer()),
           num_readies = sets:new() :: sets:set(non_neg_integer()),
+          seen_val = false :: boolean(),
           ready_sent = false :: boolean()
          }).
 
@@ -50,25 +51,26 @@ input(Data = #rbc_data{state=init, n=N, f=F}, Msg) ->
     NewData = Data#rbc_data{msg=Msg, h=MerkleRootHash},
     Result = [ {unicast, J, {val, MerkleRootHash, lists:nth(J+1, BranchesForShards), lists:nth(J+1, ShardsWithSize)}} || J <- lists:seq(0, N-1)],
     %% unicast all the VAL packets and multicast the ECHO for our own share
-    {NewData#rbc_data{state=waiting}, {send, Result ++ [{multicast, {echo, MerkleRootHash, hd(BranchesForShards), hd(ShardsWithSize)}}]}}.
+    {NewData#rbc_data{state=waiting}, {send, Result}}. % ++ [{multicast, {echo, MerkleRootHash, hd(BranchesForShards), hd(ShardsWithSize)}}]}}.
 
 -spec handle_msg(rbc_data(), non_neg_integer(), val_msg() | echo_msg() | ready_msg()) -> {rbc_data(), ok | {send, send_commands()}} |
                                                                                          {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()} | abort} |
                                                                                          {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()}}.
 
-handle_msg(Data, _J, {val, H, Bj, Sj}) ->
-    val(Data, H, Bj, Sj);
+handle_msg(Data, J, {val, H, Bj, Sj}) ->
+    val(Data, J, H, Bj, Sj);
 handle_msg(Data, J, {echo, H, Bj, Sj}) ->
     echo(Data, J, H, Bj, Sj);
 handle_msg(Data, J, {ready, H}) ->
     ready(Data, J, H).
 
--spec val(rbc_data(), merkerl:hash(), merkerl:proof(), binary()) -> {rbc_data(), ok | {send, send_commands()}}.
-val(Data = #rbc_data{state=init}, H, Bj, Sj) ->
-    NewData = Data#rbc_data{h=H, shares=[{Bj, Sj}]},
+-spec val(rbc_data(), non_neg_integer(), merkerl:hash(), merkerl:proof(), binary()) -> {rbc_data(), ok | {send, send_commands()}}.
+val(Data = #rbc_data{seen_val=false}, _J, H, Bj, Sj) ->
+    NewData = Data#rbc_data{h=H, shares=[{Bj, Sj}], seen_val=true},
     {NewData, {send, [{multicast, {echo, H, Bj, Sj}}]}};
-val(Data, _H, _Bi, _Si) ->
+val(Data, J, _H, _Bi, _Si) ->
     %% we already had a val, just ignore this
+    io:format("~p ignoring duplicate VAL msg from ~p~n", [self(), J]),
     {Data, ok}.
 
 -spec echo(rbc_data(), non_neg_integer(), merkerl:hash(), merkerl:proof(), binary()) -> {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()} | abort}.
@@ -104,7 +106,8 @@ ready(Data = #rbc_data{state=waiting, f=F, h=H}, J, H) ->
             %% waiting
             {NewData, ok}
     end;
-ready(Data, _J, _H) ->
+ready(Data, J, _H) ->
+    io:format("Ignoring result from ~p in state ~p~n", [J, Data#rbc_data.state]),
     {Data, ok}.
 
 -spec check_completion(rbc_data(), merkerl:hash()) -> {rbc_data(), ok | {result, binary()} | hbbft_utils:multicast(ready_msg()) | abort}.

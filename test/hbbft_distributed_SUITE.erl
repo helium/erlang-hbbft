@@ -82,12 +82,12 @@ simple_test(Config) ->
     lists:foreach(fun(Msg) ->
                           Destinations = random_n(rand:uniform(N), Workers),
                           io:format("destinations ~p~n", [Destinations]),
-                          [rpc:call(Node, hbbft_worker, submit_transaction, [Msg, Destination]) || {Node, {ok, Destination}} <- Destinations]
+                          [hbbft_worker:submit_transaction(Msg, Destination) || {_Node, {ok, Destination}} <- Destinations]
                   end, Msgs),
 
     timer:sleep(30000),
-    Chains = sets:from_list(lists:map(fun({Node, {ok, Worker}}) ->
-                                              {ok, Blocks} = rpc:call(Node, hbbft_worker, get_blocks, [Worker]),
+    Chains = sets:from_list(lists:map(fun({_Node, {ok, Worker}}) ->
+                                              {ok, Blocks} = hbbft_worker:get_blocks(Worker),
                                               Blocks
                                       end, Workers)),
     1 = sets:size(Chains),

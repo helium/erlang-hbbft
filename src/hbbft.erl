@@ -151,8 +151,8 @@ handle_msg(Data = #hbbft_data{round=R, thingtosign=ThingToSign}, J, {sign, R, Bi
             io:format("~p got bad signature share from ~p~n", [Data#hbbft_data.j, J]),
             {Data, ok}
     end;
-handle_msg(Data, _, Msg) ->
-    io:format("ignoring message ~p~n", [Msg]),
+handle_msg(Data, J, Msg) ->
+    io:format("~p ignoring message ~p from ~p in round ~p ~n", [Data#hbbft_data.j, Msg, J, Data#hbbft_data.round]),
     {Data, ok}.
 
 -spec maybe_start_acs(hbbft_data()) -> {hbbft_data(), ok | {send, [rbc_wrapped_output()]}}.
