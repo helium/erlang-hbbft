@@ -155,9 +155,6 @@ check_completion(Data = #rbc_data{n=N, f=F}, H) ->
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
-kill(Data) ->
-    Data#rbc_data{state=aborted}.
-
 init_test() ->
     N = 5,
     F = 1,
@@ -182,11 +179,10 @@ pid_dying_test() ->
     Msg = crypto:strong_rand_bytes(512),
     S0 = hbbft_rbc:init(N, F),
     S1 = hbbft_rbc:init(N, F),
-    S2 = hbbft_rbc:init(N, F),
     S3 = hbbft_rbc:init(N, F),
     S4 = hbbft_rbc:init(N, F),
     {NewS0, {send, MsgsToSend}} = hbbft_rbc:input(S0, Msg),
-    States = [NewS0, S1, kill(S2), S3, S4],
+    States = [NewS0, S1, S3, S4],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, [{0, {send, MsgsToSend}}], StatesWithId, sets:new()),
     %% everyone but the dead node should converge
@@ -199,11 +195,9 @@ two_pid_dying_test() ->
     Msg = crypto:strong_rand_bytes(512),
     S0 = hbbft_rbc:init(N, F),
     S1 = hbbft_rbc:init(N, F),
-    S2 = hbbft_rbc:init(N, F),
     S3 = hbbft_rbc:init(N, F),
-    S4 = hbbft_rbc:init(N, F),
     {NewS0, {send, MsgsToSend}} = hbbft_rbc:input(S0, Msg),
-    States = [NewS0, S1, kill(S2), S3, kill(S4)],
+    States = [NewS0, S1, S3],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, [{0, {send, MsgsToSend}}], StatesWithId, sets:new()),
     %% nobody should converge
