@@ -148,9 +148,6 @@ aux(Data = #bba_data{n=N, f=F}, Id, V) ->
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
-kill(Data) ->
-    Data#bba_data{state=done}.
-
 init_test() ->
     N = 5,
     F = 1,
@@ -247,8 +244,8 @@ one_dead_test() ->
     dealer:start_link(N, F+1, 'SS512'),
     {ok, _PubKey, PrivateKeys} = dealer:deal(),
     gen_server:stop(dealer),
-    [S0, S1, S2, S3, S4] = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
-    StatesWithId = lists:zip(lists:seq(0, N - 1), [S0, S1, kill(S2), S3, S4]),
+    [S0, S1, _S2, S3, S4] = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
+    StatesWithId = lists:zip(lists:seq(0, N - 2), [S0, S1, S3, S4]),
     %% all valid members should call get_coin
     Res = lists:map(fun({J, State}) ->
                             {NewState, Result} = input(State, 1),
@@ -266,8 +263,8 @@ two_dead_test() ->
     dealer:start_link(N, F+1, 'SS512'),
     {ok, _PubKey, PrivateKeys} = dealer:deal(),
     gen_server:stop(dealer),
-    [S0, S1, S2, S3, S4] = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
-    StatesWithId = lists:zip(lists:seq(0, N - 1), [S0, S1, kill(S2), S3, kill(S4)]),
+    [S0, S1, _S2, S3, _S4] = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
+    StatesWithId = lists:zip(lists:seq(0, N - 3), [S0, S1, S3]),
     %% all valid members should call get_coin
     Res = lists:map(fun({J, State}) ->
                             {NewState, Result} = input(State, 1),

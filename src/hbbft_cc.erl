@@ -78,9 +78,6 @@ share(Data, J, Share) ->
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
-kill(Data) ->
-    Data#cc_data{state=done}.
-
 init_test() ->
     N = 5,
     F = 1,
@@ -108,8 +105,8 @@ one_dead_test() ->
     {ok, PubKey, PrivateKeys} = dealer:deal(),
     gen_server:stop(dealer),
     Sid = tpke_pubkey:hash_message(PubKey, crypto:strong_rand_bytes(32)),
-    [S0, S1, S2, S3, S4] = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- PrivateKeys],
-    StatesWithId = lists:zip(lists:seq(0, N - 1), [S0, S1, kill(S2), S3, S4]),
+    [S0, S1, _S2, S3, S4] = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- PrivateKeys],
+    StatesWithId = lists:zip(lists:seq(0, N - 2), [S0, S1, S3, S4]),
     %% all valid members should call get_coin
     Res = lists:map(fun({J, State}) ->
                             {NewState, Result} = get_coin(State),
@@ -131,8 +128,8 @@ two_dead_test() ->
     {ok, PubKey, PrivateKeys} = dealer:deal(),
     gen_server:stop(dealer),
     Sid = tpke_pubkey:hash_message(PubKey, crypto:strong_rand_bytes(32)),
-    [S0, S1, S2, S3, S4] = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- PrivateKeys],
-    StatesWithId = lists:zip(lists:seq(0, N - 1), [S0, S1, kill(S2), S3, kill(S4)]),
+    [S0, S1, _S2, S3, _S4] = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- PrivateKeys],
+    StatesWithId = lists:zip(lists:seq(0, N - 3), [S0, S1, S3]),
     %% all valid members should call get_coin
     Res = lists:map(fun({J, State}) ->
                             {NewState, Result} = get_coin(State),
@@ -154,8 +151,8 @@ too_many_dead_test() ->
     {ok, PubKey, PrivateKeys} = dealer:deal(),
     gen_server:stop(dealer),
     Sid = tpke_pubkey:hash_message(PubKey, crypto:strong_rand_bytes(32)),
-    [S0, S1, S2, S3, S4] = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- PrivateKeys],
-    StatesWithId = lists:zip(lists:seq(0, N - 1), [S0, S1, kill(S2), S3, kill(S4)]),
+    [S0, S1, _S2, S3, _S4] = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- PrivateKeys],
+    StatesWithId = lists:zip(lists:seq(0, N - 3), [S0, S1, S3]),
     %% all valid members should call get_coin
     Res = lists:map(fun({J, State}) ->
                             {NewState, Result} = get_coin(State),
