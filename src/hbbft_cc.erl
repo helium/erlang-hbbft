@@ -5,14 +5,16 @@
 -record(cc_data, {
           state = waiting :: waiting | done,
           sk :: tpke_privkey:privkey(),
+          %% Note: sid is assumed to be a unique nonce that serves as name of this common coin
           sid :: erlang_pbc:element(),
           n :: pos_integer(),
           f :: non_neg_integer(),
-          shares = sets:new()
+          shares = maps:new() :: #{non_neg_integer() => tpke_privkey:share()}
          }).
 
 -type cc_data() :: #cc_data{}.
--type share_msg() :: {share, tpke_privkey:share()}.
+-type serialized_share() :: binary().
+-type share_msg() :: {share, serialized_share()}.
 
 -export_type([cc_data/0, share_msg/0]).
 
@@ -28,7 +30,8 @@ get_coin(Data = #cc_data{state=done}) ->
     {Data, ok};
 get_coin(Data) ->
     Share = tpke_privkey:sign(Data#cc_data.sk, Data#cc_data.sid),
-    {Data, {send, [{multicast, {share, Share}}]}}.
+    SerializedShare = hbbft_utils:share_to_binary(Share),
+    {Data, {send, [{multicast, {share, SerializedShare}}]}}.
 
 %% TODO: more specific return type than an integer?
 -spec handle_msg(cc_data(), non_neg_integer(), share_msg()) -> {cc_data(), ok | {result, integer()}}.
@@ -36,20 +39,22 @@ handle_msg(Data, J, {share, Share}) ->
     share(Data, J, Share).
 
 %% TODO: more specific return type than an integer?
--spec share(cc_data(), non_neg_integer(), tpke_privkey:share()) -> {cc_data(), ok | {result, integer()}}.
+-spec share(cc_data(), non_neg_integer(), binary()) -> {cc_data(), ok | {result, integer()}}.
 share(Data = #cc_data{state=done}, _J, _Share) ->
     {Data, ok};
-share(Data, _J, Share) ->
-    case sets:is_element(Share, Data#cc_data.shares) of
+share(Data, J, Share) ->
+    case maps:is_key(J, Data#cc_data.shares) of
         false ->
-            case tpke_pubkey:verify_signature_share(tpke_privkey:public_key(Data#cc_data.sk), Share, Data#cc_data.sid) of
+            %% store the deserialized share in the shares map, convenient to use later to verify signature
+            DeserializedShare = hbbft_utils:binary_to_share(Share, Data#cc_data.sk),
+            case tpke_pubkey:verify_signature_share(tpke_privkey:public_key(Data#cc_data.sk), DeserializedShare, Data#cc_data.sid) of
                 true ->
-                    NewData = Data#cc_data{shares=sets:add_element(Share, Data#cc_data.shares)},
+                    NewData = Data#cc_data{shares=maps:put(J, DeserializedShare, Data#cc_data.shares)},
                     %% check if we have at least f+1 shares
-                    case sets:size(NewData#cc_data.shares) > Data#cc_data.f of
+                    case maps:size(NewData#cc_data.shares) > Data#cc_data.f of
                         true ->
                             %% combine shares
-                            Sig = tpke_pubkey:combine_signature_shares(tpke_privkey:public_key(NewData#cc_data.sk), sets:to_list(NewData#cc_data.shares)),
+                            Sig = tpke_pubkey:combine_signature_shares(tpke_privkey:public_key(NewData#cc_data.sk), maps:values(NewData#cc_data.shares)),
                             %% check if the signature is valid
                             case tpke_pubkey:verify_signature(tpke_privkey:public_key(NewData#cc_data.sk), Sig, NewData#cc_data.sid) of
                                 true ->
@@ -72,9 +77,6 @@ share(Data, _J, Share) ->
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
-
-kill(Data) ->
-    Data#cc_data{state=done}.
 
 init_test() ->
     N = 5,
@@ -103,8 +105,8 @@ one_dead_test() ->
     {ok, PubKey, PrivateKeys} = dealer:deal(),
     gen_server:stop(dealer),
     Sid = tpke_pubkey:hash_message(PubKey, crypto:strong_rand_bytes(32)),
-    [S0, S1, S2, S3, S4] = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- PrivateKeys],
-    StatesWithId = lists:zip(lists:seq(0, N - 1), [S0, S1, kill(S2), S3, S4]),
+    [S0, S1, _S2, S3, S4] = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- PrivateKeys],
+    StatesWithId = lists:zip(lists:seq(0, N - 2), [S0, S1, S3, S4]),
     %% all valid members should call get_coin
     Res = lists:map(fun({J, State}) ->
                             {NewState, Result} = get_coin(State),
@@ -126,8 +128,8 @@ two_dead_test() ->
     {ok, PubKey, PrivateKeys} = dealer:deal(),
     gen_server:stop(dealer),
     Sid = tpke_pubkey:hash_message(PubKey, crypto:strong_rand_bytes(32)),
-    [S0, S1, S2, S3, S4] = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- PrivateKeys],
-    StatesWithId = lists:zip(lists:seq(0, N - 1), [S0, S1, kill(S2), S3, kill(S4)]),
+    [S0, S1, _S2, S3, _S4] = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- PrivateKeys],
+    StatesWithId = lists:zip(lists:seq(0, N - 3), [S0, S1, S3]),
     %% all valid members should call get_coin
     Res = lists:map(fun({J, State}) ->
                             {NewState, Result} = get_coin(State),
@@ -149,8 +151,8 @@ too_many_dead_test() ->
     {ok, PubKey, PrivateKeys} = dealer:deal(),
     gen_server:stop(dealer),
     Sid = tpke_pubkey:hash_message(PubKey, crypto:strong_rand_bytes(32)),
-    [S0, S1, S2, S3, S4] = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- PrivateKeys],
-    StatesWithId = lists:zip(lists:seq(0, N - 1), [S0, S1, kill(S2), S3, kill(S4)]),
+    [S0, S1, _S2, S3, _S4] = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- PrivateKeys],
+    StatesWithId = lists:zip(lists:seq(0, N - 3), [S0, S1, S3]),
     %% all valid members should call get_coin
     Res = lists:map(fun({J, State}) ->
                             {NewState, Result} = get_coin(State),

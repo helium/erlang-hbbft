@@ -2,16 +2,24 @@
 
 -export([init/4, input/2, handle_msg/3]).
 
+-record(rbc_state, {
+          rbc_data :: hbbft_rbc:rbc_data(),
+          result :: undefined | binary()
+         }).
+
+-record(bba_state, {
+          bba_data :: hbbft_bba:bba_data(),
+          input :: undefined | 0 | 1,
+          result :: undefined | boolean()
+         }).
+
 -record(acs_data, {
-          secret_key :: tpke_privkey:privkey(),
           done = false :: boolean(),
           n :: pos_integer(),
           f :: non_neg_integer(),
           j :: non_neg_integer(),
-          rbc = #{} :: #{non_neg_integer() => hbbft_rbc:rbc_data()},
-          bba = #{} :: #{non_neg_integer() => hbbft_bba:bba_data()},
-          bba_results = #{} :: #{non_neg_integer() => boolean()},
-          rbc_results = #{} :: #{non_neg_integer() => binary()}
+          rbc = #{} :: #{non_neg_integer() => #rbc_state{}},
+          bba = #{} :: #{non_neg_integer() => #bba_state{}}
          }).
 
 -type acs_data() :: #acs_data{}.
@@ -25,82 +33,141 @@
 
 -spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer(), non_neg_integer()) -> acs_data().
 init(SK, N, F, J) ->
-    %% instanciate all the RBCs
-    RBCs = [{I, hbbft_rbc:init(N, F)} || I <- lists:seq(0, N-1)],
-    BBAs = [{I, hbbft_bba:init(SK, N, F)} || I <- lists:seq(0, N-1)],
-    #acs_data{secret_key=SK, n=N, f=F, j=J, rbc=maps:from_list(RBCs), bba=maps:from_list(BBAs)}.
+    %% instantiate all the RBCs
+    RBCs = [{I, #rbc_state{rbc_data = hbbft_rbc:init(N, F)}} || I <- lists:seq(0, N-1)],
+    %% instantiate all the BBAs
+    BBAs = [{I, #bba_state{bba_data = hbbft_bba:init(SK, N, F)}} || I <- lists:seq(0, N-1)],
+    #acs_data{n=N, f=F, j=J, rbc=maps:from_list(RBCs), bba=maps:from_list(BBAs)}.
 
 -spec input(acs_data(), binary()) -> {acs_data(), {send, [rbc_wrapped_output()]}}.
 input(Data, Input) ->
     %% input the message to our RBC
-    MyRBC0 = maps:get(Data#acs_data.j, Data#acs_data.rbc),
-    {MyRBC, {send, Responses}} = hbbft_rbc:input(MyRBC0, Input),
-    {Data#acs_data{rbc=maps:put(Data#acs_data.j, MyRBC, Data#acs_data.rbc)}, {send, hbbft_utils:wrap({rbc, Data#acs_data.j}, Responses)}}.
+    MyRBC0 = get_rbc(Data, Data#acs_data.j),
+    {MyRBC, {send, Responses}} = hbbft_rbc:input(MyRBC0#rbc_state.rbc_data, Input),
+    {store_rbc_state(Data, Data#acs_data.j, MyRBC), {send, hbbft_utils:wrap({rbc, Data#acs_data.j}, Responses)}}.
 
 -spec handle_msg(acs_data(), non_neg_integer(), rbc_msg() | bba_msg()) -> {acs_data(), ok |
                                                                            {send, [rbc_wrapped_output() | hbbft_utils:multicast(bba_msg())]} |
                                                                            {result, [{non_neg_integer(), binary()}]}}.
 handle_msg(Data, J, {{rbc, I}, RBCMsg}) ->
-    RBC = maps:get(I, Data#acs_data.rbc),
+    RBC = get_rbc(Data, I),
     io:format("~p RBC message for ~p ~p~n", [Data#acs_data.j, I, element(1, RBCMsg)]),
-    case hbbft_rbc:handle_msg(RBC, J, RBCMsg) of
+    case hbbft_rbc:handle_msg(RBC#rbc_state.rbc_data, J, RBCMsg) of
         {NewRBC, {send, ToSend}} ->
-            {Data#acs_data{rbc=maps:put(I, NewRBC, Data#acs_data.rbc)}, {send, hbbft_utils:wrap({rbc, I}, ToSend)}};
+            {store_rbc_state(Data, I, NewRBC), {send, hbbft_utils:wrap({rbc, I}, ToSend)}};
         {NewRBC, {result, Result}} ->
+            %% upon delivery of vj from RBCj, if input has not yet been provided to BAj, then provide input 1 to BAj
             io:format("~p RBC returned for ~p~n", [Data#acs_data.j, I]),
-            %% ok, start the BBA for this RBC
-            {BBA, {send, ToSend}} = hbbft_bba:input(maps:get(I, Data#acs_data.bba), 1),
-            {Data#acs_data{rbc=maps:put(I, NewRBC, Data#acs_data.rbc),
-                       bba=maps:put(I, BBA, Data#acs_data.bba),
-                       rbc_results=maps:put(I, Result, Data#acs_data.rbc_results)},
-             {send, hbbft_utils:wrap({bba, I}, ToSend)}};
+            NewData = store_rbc_result(store_rbc_state(Data, I, NewRBC), I, Result),
+            case bba_has_had_input(maps:get(I, Data#acs_data.bba)) of
+                true ->
+                    check_completion(NewData);
+                false ->
+                    %% ok, start the BBA for this RBC
+                    BBA = get_bba(NewData, I),
+                    {NewBBA, {send, ToSend}} = hbbft_bba:input(BBA#bba_state.bba_data, 1),
+                    {store_bba_input(store_bba_state(NewData, I, NewBBA), I, 1),
+                     {send, hbbft_utils:wrap({bba, I}, ToSend)}}
+            end;
         {NewRBC, ok} ->
-            {Data#acs_data{rbc=maps:put(I, NewRBC, Data#acs_data.rbc)}, ok}
+            {store_rbc_state(Data, I, NewRBC), ok}
     end;
-handle_msg(Data = #acs_data{n=N, f=F, secret_key=SK}, J, {{bba, I}, BBAMsg}) ->
-    BBA = maps:get(I, Data#acs_data.bba),
-    case hbbft_bba:handle_msg(BBA, J, BBAMsg) of
+handle_msg(Data = #acs_data{n=N, f=F}, J, {{bba, I}, BBAMsg}) ->
+    BBA = get_bba(Data, I),
+    case hbbft_bba:handle_msg(BBA#bba_state.bba_data, J, BBAMsg) of
         {NewBBA, {send, ToSend}} ->
-            {Data#acs_data{bba=maps:put(I, NewBBA, Data#acs_data.bba)}, {send, hbbft_utils:wrap({bba, I}, ToSend)}};
+            {store_bba_state(Data, I, NewBBA), {send, hbbft_utils:wrap({bba, I}, ToSend)}};
         {NewBBA, {result, B}} ->
             io:format("~p BBA ~p returned ~p~n", [Data#acs_data.j, I, B]),
-            NewBBAResults = maps:put(I, B == 1, Data#acs_data.bba_results),
+            NewData = store_bba_state(store_bba_result(Data, I, B), I, NewBBA),
             %% upon delivery of value 1 from at least N − f instances of BA , provide input 0 to each instance of BA that has not yet been provided input.
-            BBAsThatReturnedOne = length([ true || {_, true} <- maps:to_list(NewBBAResults)]),
-            case BBAsThatReturnedOne >= N - F andalso Data#acs_data.done == false of
+            BBAsThatReturnedOne = successful_bba_count(NewData),
+            io:format("~p ~p BBAs completed, ~p returned one, ~p needed~n", [Data#acs_data.j, completed_bba_count(NewData), BBAsThatReturnedOne, N - F]),
+            case BBAsThatReturnedOne >= N - F andalso NewData#acs_data.done == false of
                 true ->
                     io:format("~b Enough BBAs (~b/~b) completed, zeroing the rest~n", [Data#acs_data.j, BBAsThatReturnedOne, N]),
                     %% send 0 to all BBAs that have not yet been provided input because their RBC has not completed
-                    NewBBAsAndReplies = lists:foldl(fun(E, Acc) ->
-                                                            case maps:is_key(E, NewBBAResults) of
-                                                                false ->
-                                                                    {FailedBBA, {send, ToSend}} = hbbft_bba:input(hbbft_bba:init(SK, N, F), 0),
-                                                                    io:format("~p Sending BBA ~p zero~n", [Data#acs_data.j, E]),
-                                                                    [{{E, FailedBBA}, hbbft_utils:wrap({bba, E}, ToSend)}|Acc];
-                                                                true ->
-                                                                    Acc
-                                                            end
-                                                    end, [], lists:seq(0, N - 1)),
-                    {NewBBAs, Replies} = lists:unzip(NewBBAsAndReplies),
-                    {Data#acs_data{bba=maps:merge(Data#acs_data.bba, maps:from_list(NewBBAs)), bba_results=NewBBAResults, done=true}, {send, lists:flatten(Replies)}};
+                    {NextData, Replies} = lists:foldl(fun(E, {DataAcc, MsgAcc}=Acc) ->
+                                                              ThisBBA = get_bba(DataAcc, E),
+                                                              case bba_has_had_input(ThisBBA) of
+                                                                  false ->
+                                                                      {FailedBBA, {send, ToSend}} = hbbft_bba:input(ThisBBA#bba_state.bba_data, 0),
+                                                                      io:format("~p Sending BBA ~p zero~n", [Data#acs_data.j, E]),
+                                                                      {store_bba_input(store_bba_state(Data, E, FailedBBA), E, 0), [hbbft_utils:wrap({bba, E}, ToSend)|MsgAcc]};
+                                                                  true ->
+                                                                      Acc
+                                                              end
+                                                      end, {NewData, []}, lists:seq(0, N - 1)),
+                    {NextData#acs_data{done=true}, {send, lists:flatten(Replies)}};
                 false ->
-                    %% check if all the BBA protocols have completed and all the RBC protocols have finished
-                    Response = case sets:size(sets:from_list([maps:size(NewBBAResults), maps:size(Data#acs_data.bba),
-                                                              maps:size(Data#acs_data.rbc)])) == 1 of
-                                   true ->
-                                       io:format("All BBAs have completed~n"),
-                                       %% construct a 2-tuple list of which BBAs have returned 1 and the corresponding RBC value
-                                       ResultVector = [ {E, maps:get(E, Data#acs_data.rbc_results)} || {E, X} <- lists:keysort(1, maps:to_list(NewBBAResults)), X == true],
-                                       %% return all the RBC values for which BBA has succeeded
-                                       {result, ResultVector};
-                                   false ->
-                                       ok
-                               end,
-                    {Data#acs_data{bba=maps:put(I, NewBBA, Data#acs_data.bba), bba_results=NewBBAResults}, Response}
+                    check_completion(NewData)
             end;
         {NewBBA, ok} ->
-            {Data#acs_data{bba=maps:put(I, NewBBA, Data#acs_data.bba)}, ok}
+            {store_bba_state(Data, I, NewBBA), ok}
     end.
+
+check_completion(Data = #acs_data{n=N}) ->
+    % once all instances of BA have completed, let C⊂[1..N] be the indexes of each BA that delivered 1.
+    % Wait for the output vj for each RBCj such that j∈C. Finally output ∪j∈Cvj.
+    % Note that this means if a BBA has returned 0, we don't need to wait for the corresponding RBC.
+    case lists:all(fun({E, RBC}) -> get_bba_result(Data, E) == false orelse rbc_completed(RBC) end, maps:to_list(Data#acs_data.rbc)) andalso
+         lists:all(fun(BBA) -> bba_completed(BBA) end, maps:values(Data#acs_data.bba)) of
+        true ->
+            ResultVector = [ {E, get_rbc_result(Data, E)} || E <- lists:seq(0, N-1), get_bba_result(Data, E) ],
+            {Data, {result, ResultVector}};
+        false ->
+            {Data, ok}
+    end.
+
+rbc_completed(#rbc_state{result=Result}) ->
+    Result /= undefined.
+
+bba_completed(#bba_state{input=Input, result=Result}) ->
+    Input /= undefined andalso Result /= undefined.
+
+successful_bba_count(Data) ->
+    lists:sum([ 1 || BBA <- maps:values(Data#acs_data.bba), BBA#bba_state.result]).
+
+completed_bba_count(Data) ->
+    lists:sum([ 1 || BBA <- maps:values(Data#acs_data.bba), BBA#bba_state.result /= undefined]).
+
+get_bba(Data, I) ->
+    maps:get(I, Data#acs_data.bba).
+
+bba_has_had_input(#bba_state{input=Input}) ->
+    Input /= undefined.
+
+get_bba_result(Data, I) ->
+    RBC = get_bba(Data, I),
+    RBC#bba_state.result.
+
+store_bba_state(Data, I, State) ->
+    BBA = get_bba(Data, I),
+    Data#acs_data{bba = maps:put(I, BBA#bba_state{bba_data=State}, Data#acs_data.bba)}.
+
+store_bba_input(Data, I, Input) ->
+    BBA = get_bba(Data, I),
+    Data#acs_data{bba = maps:put(I, BBA#bba_state{input=Input}, Data#acs_data.bba)}.
+
+store_bba_result(Data, I, Result) ->
+    BBA = get_bba(Data, I),
+    Data#acs_data{bba = maps:put(I, BBA#bba_state{result=(Result == 1)}, Data#acs_data.bba)}.
+
+get_rbc(Data, I) ->
+    maps:get(I, Data#acs_data.rbc).
+
+get_rbc_result(Data, I) ->
+    RBC = get_rbc(Data, I),
+    RBC#rbc_state.result.
+
+store_rbc_state(Data, I, State) ->
+    RBC = get_rbc(Data, I),
+    Data#acs_data{rbc = maps:put(I, RBC#rbc_state{rbc_data=State}, Data#acs_data.rbc)}.
+
+store_rbc_result(Data, I, Result) ->
+    RBC = get_rbc(Data, I),
+    Data#acs_data{rbc = maps:put(I, RBC#rbc_state{result=Result}, Data#acs_data.rbc)}.
+
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").

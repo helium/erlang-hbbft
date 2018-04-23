@@ -8,8 +8,8 @@
           f :: pos_integer(),
           j :: non_neg_integer(),
           round = 0 :: non_neg_integer(),
-          buf = queue:new(),
-          acs = hbbft_acs:acs_data(),
+          buf = queue:new() :: queue:queue(),
+          acs :: hbbft_acs:acs_data(),
           acs_init = false :: boolean(),
           sent_txns = false :: boolean(),
           sent_sig = false :: boolean(),
@@ -24,7 +24,7 @@
 
 -type hbbft_data() :: #hbbft_data{}.
 -type acs_msg() :: {{acs, non_neg_integer()}, hbbft_acs:msgs()}.
--type dec_msg() :: {dec, non_neg_integer(), non_neg_integer(), {non_neg_integer(), erlang_pbc:element()}}.
+-type dec_msg() :: {dec, non_neg_integer(), non_neg_integer(), {non_neg_integer(), binary()}}.
 -type sign_msg() :: {sign, non_neg_integer(), binary()}.
 -type rbc_wrapped_output() :: hbbft_utils:unicast({{acs, non_neg_integer()}, {{rbc, non_neg_integer()}, hbbft_rbc:val_msg()}}) | hbbft_utils:multicast({{acs, non_neg_integer()}, {{rbc, non_neg_integer()}, hbbft_rbc:echo_msg() | hbbft_rbc:ready_msg()}}).
 -type bba_wrapped_output() :: hbbft_utils:multicast({{acs, non_neg_integer()}, hbbft_acs:bba_msg()}).
@@ -61,10 +61,10 @@ finalize_round(Data, TransactionsToRemove, ThingToSign) ->
 next_round(Data = #hbbft_data{secret_key=SK, n=N, f=F, j=J}) ->
     %% reset all the round-dependant bits of the state and increment the round
     NewData = Data#hbbft_data{round=Data#hbbft_data.round + 1, acs=hbbft_acs:init(SK, N, F, J),
-                        acs_init=false, acs_results=[],
-                        sent_txns=false, sent_sig=false,
-                        dec_shares=#{}, decrypted=#{},
-                        sig_shares=#{}, thingtosign=undefined},
+                              acs_init=false, acs_results=[],
+                              sent_txns=false, sent_sig=false,
+                              dec_shares=#{}, decrypted=#{},
+                              sig_shares=#{}, thingtosign=undefined},
     maybe_start_acs(NewData).
 
 -spec handle_msg(hbbft_data(), non_neg_integer(), acs_msg() | dec_msg() | sign_msg()) -> {hbbft_data(), ok |
@@ -83,14 +83,17 @@ handle_msg(Data = #hbbft_data{round=R}, J, {{acs, R}, ACSMsg}) ->
             io:format("~b ACS[~b] result ~p~n", [Data#hbbft_data.j, Data#hbbft_data.round, hd(Results)]),
             %% start decrypt phase
             Replies = lists:map(fun({I, Result}) ->
-                              EncKey = get_encrypted_key(Data#hbbft_data.secret_key, Result),
-                              Share = tpke_privkey:decrypt_share(Data#hbbft_data.secret_key, EncKey),
-                              {multicast, {dec, Data#hbbft_data.round, I, Share}}
-                      end, Results),
+                                        EncKey = get_encrypted_key(Data#hbbft_data.secret_key, Result),
+                                        Share = tpke_privkey:decrypt_share(Data#hbbft_data.secret_key, EncKey),
+                                        SerializedShare = hbbft_utils:share_to_binary(Share),
+                                        {multicast, {dec, Data#hbbft_data.round, I, SerializedShare}}
+                                end, Results),
             {Data#hbbft_data{acs=NewACS, acs_results=Results}, {send, Replies}}
     end;
 handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
-    NewShares = maps:put({I, J}, Share, Data#hbbft_data.dec_shares),
+    %% the Share now is a binary, deserialize it and then store in the dec_shares map
+    DeserializedShare = hbbft_utils:binary_to_share(Share, Data#hbbft_data.secret_key),
+    NewShares = maps:put({I, J}, DeserializedShare, Data#hbbft_data.dec_shares),
     %% check if we have enough to decode the bundle
     SharesForThisBundle = [ S || {{Idx, _}, S} <- maps:to_list(NewShares), I == Idx],
     case length(SharesForThisBundle) > Data#hbbft_data.f andalso not maps:is_key({I, J}, Data#hbbft_data.dec_shares) andalso lists:keymember(I, 1, Data#hbbft_data.acs_results) of
@@ -148,8 +151,8 @@ handle_msg(Data = #hbbft_data{round=R, thingtosign=ThingToSign}, J, {sign, R, Bi
             io:format("~p got bad signature share from ~p~n", [Data#hbbft_data.j, J]),
             {Data, ok}
     end;
-handle_msg(Data, _, Msg) ->
-    io:format("ignoring message ~p~n", [Msg]),
+handle_msg(Data, J, Msg) ->
+    io:format("~p ignoring message ~p from ~p in round ~p ~n", [Data#hbbft_data.j, Msg, J, Data#hbbft_data.round]),
     {Data, ok}.
 
 -spec maybe_start_acs(hbbft_data()) -> {hbbft_data(), ok | {send, [rbc_wrapped_output()]}}.
@@ -248,7 +251,7 @@ hbbft_init_test_() ->
                            %% check that at least N-F actors have started ACS:
                            ?assert(length(Replies) >= N - F),
                            %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
-                           ?assert(lists:all(fun(E) -> E end, [ length(R) == N+1 || {_, {send, R}} <- Replies ])),
+                           ?assert(lists:all(fun(E) -> E end, [ length(R) == N || {_, {send, R}} <- Replies ])),
                            %% start it on runnin'
                            {NextStates, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Replies, NewStates, sets:new()),
                            %io:format("Converged Results ~p~n", [ConvergedResults]),
@@ -314,7 +317,7 @@ hbbft_one_actor_no_txns_test_() ->
                            io:format("~p replies~n", [length(Replies)]),
                            ?assert(length(Replies) >= N - F),
                            %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
-                           ?assert(lists:all(fun(E) -> E end, [ length(R) == N+1 || {_, {send, R}} <- Replies ])),
+                           ?assert(lists:all(fun(E) -> E end, [ length(R) == N || {_, {send, R}} <- Replies ])),
                            %% start it on runnin'
                            {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Replies, NewStates, sets:new()),
                            %io:format("Converged Results ~p~n", [ConvergedResults]),
@@ -354,7 +357,7 @@ hbbft_two_actors_no_txns_test_() ->
                            io:format("~p replies~n", [length(Replies)]),
                            ?assert(length(Replies) =< N - F),
                            %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
-                           ?assert(lists:all(fun(E) -> E end, [ length(R) == N+1 || {_, {send, R}} <- Replies ])),
+                           ?assert(lists:all(fun(E) -> E end, [ length(R) == N || {_, {send, R}} <- Replies ])),
                            %% start it on runnin'
                            {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Replies, NewStates, sets:new()),
                            %% check no actors returned a result
@@ -386,7 +389,7 @@ hbbft_one_actor_missing_test_() ->
                            io:format("~p replies~n", [length(Replies)]),
                            ?assert(length(Replies) >= N - F),
                            %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
-                           ?assert(lists:all(fun(E) -> E end, [ length(R) == N+1 || {_, {send, R}} <- Replies ])),
+                           ?assert(lists:all(fun(E) -> E end, [ length(R) == N || {_, {send, R}} <- Replies ])),
                            %% start it on runnin'
                            {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Replies, NewStates, sets:new()),
                            %% check no actors returned a result
@@ -424,7 +427,7 @@ hbbft_two_actor_missing_test_() ->
                            io:format("~p replies~n", [length(Replies)]),
                            ?assert(length(Replies) =< N - F),
                            %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
-                           ?assert(lists:all(fun(E) -> E end, [ length(R) == N+1 || {_, {send, R}} <- Replies ])),
+                           ?assert(lists:all(fun(E) -> E end, [ length(R) == N || {_, {send, R}} <- Replies ])),
                            %% start it on runnin'
                            {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Replies, NewStates, sets:new()),
                            %% check no actors returned a result

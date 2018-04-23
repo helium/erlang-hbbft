@@ -20,7 +20,7 @@ simple_test(_Config) ->
     dealer:start_link(N, F+1, 'SS512'),
     {ok, PubKey, PrivateKeys} = dealer:deal(),
     gen_server:stop(dealer),
-    Workers = [ element(2, hbbft_worker:start_link(N, F, I, SK)) || {I, SK} <- enumerate(PrivateKeys) ],
+    Workers = [ element(2, hbbft_worker:start_link(N, F, I, tpke_privkey:serialize(SK))) || {I, SK} <- enumerate(PrivateKeys) ],
     Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*20)],
     %% feed the badgers some msgs
     lists:foreach(fun(Msg) ->
@@ -28,11 +28,25 @@ simple_test(_Config) ->
                           io:format("destinations ~p~n", [Destinations]),
                           [ok = hbbft_worker:submit_transaction(Msg, D) || D <- Destinations]
                   end, Msgs),
-    timer:sleep(15000),
+
+    %% wait for all the worker's mailboxes to settle and
+    %% wait for the chains to converge
+    ok = hbbft_ct_utils:wait_until(fun() ->
+                                           Chains = sets:from_list(lists:map(fun(W) ->
+                                                                                     {ok, Blocks} = hbbft_worker:get_blocks(W),
+                                                                                     Blocks
+                                                                             end, Workers)),
+
+                                           0 == lists:sum([element(2, erlang:process_info(W, message_queue_len)) || W <- Workers ]) andalso
+                                           1 == sets:size(Chains) andalso
+                                           0 /= length(hd(sets:to_list(Chains)))
+                                   end, 60*2, 500),
+
+
     Chains = sets:from_list(lists:map(fun(W) ->
-                                                {ok, Blocks} = hbbft_worker:get_blocks(W),
-                                                Blocks
-                                        end, Workers)),
+                                              {ok, Blocks} = hbbft_worker:get_blocks(W),
+                                              Blocks
+                                      end, Workers)),
     1 = sets:size(Chains),
     [Chain] = sets:to_list(Chains),
     io:format("chain is of height ~p~n", [length(Chain)]),

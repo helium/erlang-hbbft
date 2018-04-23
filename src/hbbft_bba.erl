@@ -148,9 +148,6 @@ aux(Data = #bba_data{n=N, f=F}, Id, V) ->
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
-kill(Data) ->
-    Data#bba_data{state=done}.
-
 init_test() ->
     N = 5,
     F = 1,
@@ -216,28 +213,30 @@ init_with_ones_test() ->
     ?assertEqual([1], sets:to_list(DistinctResults)),
     ok.
 
-init_with_mixed_zeros_and_ones_test() ->
-    N = 10,
-    F = 2,
-    dealer:start_link(N, F+1, 'SS512'),
-    {ok, _PubKey, PrivateKeys} = dealer:deal(),
-    gen_server:stop(dealer),
-    States = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
-    StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
-    MixedList = lists:zip([1, 1, 1, 0, 1, 0, 0, 0, 0, 0], StatesWithId),
-    %% all valid members should call get_coin
-    Res = lists:map(fun({I, {J, State}}) ->
-                            {NewState, Result} = input(State, I),
-                            {{J, NewState}, {J, Result}}
-                    end, MixedList),
-    {NewStates, Results} = lists:unzip(Res),
-    {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
-    DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
-    io:format("DistinctResults: ~p~n", [sets:to_list(DistinctResults)]),
-    io:format("ConvergedResults ~p~n", [sets:to_list(ConvergedResults)]),
-    ?assertEqual(N, sets:size(ConvergedResults)),
-    ?assertEqual(1, sets:size(DistinctResults)),
-    ok.
+init_with_mixed_zeros_and_ones_test_() ->
+    {timeout, 60, fun() ->
+                          N = 10,
+                          F = 2,
+                          dealer:start_link(N, F+1, 'SS512'),
+                          {ok, _PubKey, PrivateKeys} = dealer:deal(),
+                          gen_server:stop(dealer),
+                          States = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
+                          StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
+                          MixedList = lists:zip([1, 1, 1, 0, 1, 0, 0, 0, 0, 0], StatesWithId),
+                          %% all valid members should call get_coin
+                          Res = lists:map(fun({I, {J, State}}) ->
+                                                  {NewState, Result} = input(State, I),
+                                                  {{J, NewState}, {J, Result}}
+                                          end, MixedList),
+                          {NewStates, Results} = lists:unzip(Res),
+                          {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
+                          DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
+                          io:format("DistinctResults: ~p~n", [sets:to_list(DistinctResults)]),
+                          io:format("ConvergedResults ~p~n", [sets:to_list(ConvergedResults)]),
+                          ?assertEqual(N, sets:size(ConvergedResults)),
+                          ?assertEqual(1, sets:size(DistinctResults)),
+                          ok
+                  end}.
 
 one_dead_test() ->
     N = 5,
@@ -245,8 +244,8 @@ one_dead_test() ->
     dealer:start_link(N, F+1, 'SS512'),
     {ok, _PubKey, PrivateKeys} = dealer:deal(),
     gen_server:stop(dealer),
-    [S0, S1, S2, S3, S4] = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
-    StatesWithId = lists:zip(lists:seq(0, N - 1), [S0, S1, kill(S2), S3, S4]),
+    [S0, S1, _S2, S3, S4] = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
+    StatesWithId = lists:zip(lists:seq(0, N - 2), [S0, S1, S3, S4]),
     %% all valid members should call get_coin
     Res = lists:map(fun({J, State}) ->
                             {NewState, Result} = input(State, 1),
@@ -264,8 +263,8 @@ two_dead_test() ->
     dealer:start_link(N, F+1, 'SS512'),
     {ok, _PubKey, PrivateKeys} = dealer:deal(),
     gen_server:stop(dealer),
-    [S0, S1, S2, S3, S4] = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
-    StatesWithId = lists:zip(lists:seq(0, N - 1), [S0, S1, kill(S2), S3, kill(S4)]),
+    [S0, S1, _S2, S3, _S4] = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
+    StatesWithId = lists:zip(lists:seq(0, N - 3), [S0, S1, S3]),
     %% all valid members should call get_coin
     Res = lists:map(fun({J, State}) ->
                             {NewState, Result} = input(State, 1),
