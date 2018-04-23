@@ -3,7 +3,7 @@
 -export([init/2, input/2, handle_msg/3]).
 
 -record(rbc_data, {
-          state = init :: init | waiting | aborted | done,
+          state = init :: init | waiting | done,
           n :: pos_integer(),
           f :: non_neg_integer(),
           msg = undefined :: binary() | undefined,
@@ -15,11 +15,14 @@
           ready_sent = false :: boolean()
          }).
 
+%% rbc protocol requires three message types: ECHO(h, bj, sj), VAL(h, bj, sj) and READY(h)
+%% where h: merkle hash, bj: merkle branch (proof) and sj: blocks of (N-2f, N)-erasure coding scheme applied to input
 -type val_msg() :: {val, merkerl:hash(), merkerl:proof(), {non_neg_integer(), binary()}}.
 -type echo_msg() :: {echo, merkerl:hash(), merkerl:proof(), {non_neg_integer(), binary()}}.
 -type ready_msg() :: {ready, merkerl:hash()}.
 -type msgs() :: val_msg() | echo_msg() | ready_msg().
 
+%% rbc can multicast ECHO and READY msgs but it only unicasts VAL msg
 -type send_commands() :: [hbbft_utils:unicast(val_msg()) | hbbft_utils:multicast(echo_msg() | ready_msg())].
 
 -type rbc_data() :: #rbc_data{}.
@@ -31,16 +34,19 @@
 init(N, F) ->
     #rbc_data{n=N, f=F}.
 
+%% Figure2. Bullet1
+%% let {Sj} j∈[N] be the blocks of an (N − 2 f , N)-erasure coding
+%% scheme applied to v
+%% let h be a Merkle tree root computed over {Sj}
+%% send VAL(h, b j , s j ) to each party P j , where b j is the jth
+%% Merkle tree branch
 -spec input(rbc_data(), binary()) -> {rbc_data(), {send, send_commands()}}.
 input(Data = #rbc_data{state=init, n=N, f=F}, Msg) ->
-    %% Figure2 from honeybadger WP
-    %%%% let {Sj} j∈[N] be the blocks of an (N − 2 f , N)-erasure coding
-    %%%% scheme applied to v
-    %%%% let h be a Merkle tree root computed over {Sj}
-    %%%% send VAL(h, b j , s j ) to each party P j , where b j is the jth
-    %%%% Merkle tree branch
+    %% (N-2f, N)-erasure coding scheme applied to input
     Threshold = N - 2*F,
+    %% Shards represent sj from the whitepaper
     {ok, Shards} = leo_erasure:encode({Threshold, N - Threshold}, Msg),
+    %% Need to know the size of the msg for decoding
     MsgSize = byte_size(Msg),
     ShardsWithSize = [{MsgSize, Shard} || Shard <- Shards],
     Merkle = merkerl:new(ShardsWithSize, fun merkerl:hash_value/1),
@@ -53,6 +59,8 @@ input(Data = #rbc_data{state=init, n=N, f=F}, Msg) ->
     %% unicast all the VAL packets and multicast the ECHO for our own share
     {NewData#rbc_data{state=waiting}, {send, Result}}. % ++ [{multicast, {echo, MerkleRootHash, hd(BranchesForShards), hd(ShardsWithSize)}}]}}.
 
+
+%% message handlers
 -spec handle_msg(rbc_data(), non_neg_integer(), val_msg() | echo_msg() | ready_msg()) -> {rbc_data(), ok | {send, send_commands()}} |
                                                                                          {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()} | abort} |
                                                                                          {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()}}.
@@ -64,27 +72,46 @@ handle_msg(Data, J, {echo, H, Bj, Sj}) ->
 handle_msg(Data, J, {ready, H}) ->
     ready(Data, J, H).
 
+
+%% Figure2. Bullet2
+%% upon receiving VAL(h, bi , si) from PSender,
+%% multicast ECHO(h, bi , si )
 -spec val(rbc_data(), non_neg_integer(), merkerl:hash(), merkerl:proof(), binary()) -> {rbc_data(), ok | {send, send_commands()}}.
 val(Data = #rbc_data{seen_val=false}, _J, H, Bj, Sj) ->
-    NewData = Data#rbc_data{h=H, shares=[{Bj, Sj}], seen_val=true},
+    %% XXX: not sure about this
+    NewShares = case Data#rbc_data.shares of
+                    [] ->
+                        [{Bj, Sj}];
+                    Shares ->
+                        [{Bj, Sj} | Shares]
+                end,
+    NewData = Data#rbc_data{h=H, shares=NewShares, seen_val=true},
     {NewData, {send, [{multicast, {echo, H, Bj, Sj}}]}};
 val(Data, J, _H, _Bi, _Si) ->
     %% we already had a val, just ignore this
     io:format("~p ignoring duplicate VAL msg from ~p~n", [self(), J]),
     {Data, ok}.
 
+
+%% Figure2. Bullet3
+%% upon receiving ECHO(h, bj, sj ) from party Pj ,
+%% check that bj is a valid Merkle branch for root h and leaf sj ,
+%% and otherwise discard
 -spec echo(rbc_data(), non_neg_integer(), merkerl:hash(), merkerl:proof(), binary()) -> {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()} | abort}.
-echo(Data = #rbc_data{state=aborted}, _J, _H, _Bj, _Sj) ->
-    {Data, ok};
 echo(Data = #rbc_data{state=done}, _J, _H, _Bj, _Sj) ->
     {Data, ok};
 echo(Data = #rbc_data{n=N, f=F}, J, H, Bj, Sj) ->
-    %% Check that Bj is a valid merkle branch for root h and and leaf Sj
     case merkerl:verify_proof(merkerl:hash_value(Sj), H, Bj) of
         ok ->
-            NewData = Data#rbc_data{h=H, shares=lists:usort([{Bj, Sj}|Data#rbc_data.shares]), num_echoes=sets:add_element(J, Data#rbc_data.num_echoes)},
+            %% valid branch
+            NewData = Data#rbc_data{h=H, shares=lists:usort([{Bj, Sj} | Data#rbc_data.shares]), num_echoes=sets:add_element(J, Data#rbc_data.num_echoes)},
             case sets:size(NewData#rbc_data.num_echoes) >= (N - F) of
                 true ->
+                    %% Figure2. Bullet4
+                    %% upon receiving valid ECHO(h, ·, ·) messages from N − f distinc tparties,
+                    %% – interpolate {s0 j} from any N − 2 f leaves received
+                    %% – recompute Merkle root h0 and if h0 /= h then abort
+                    %% – if READY(h) has not yet been sent, multicast READY(h)
                     check_completion(NewData, H);
                 false ->
                     {NewData#rbc_data{state=waiting}, ok}
@@ -94,7 +121,9 @@ echo(Data = #rbc_data{n=N, f=F}, J, H, Bj, Sj) ->
             {Data, ok}
     end.
 
-
+%% Figure2. Bullet5
+%% upon receiving f + 1 matching READY(h) messages, if READY
+%% has not yet been sent, multicast READY(h)
 -spec ready(rbc_data(), non_neg_integer(), merkerl:hash()) -> {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()}}.
 ready(Data = #rbc_data{state=waiting, f=F, h=H}, J, H) ->
     %% increment num_readies
@@ -110,6 +139,8 @@ ready(Data, J, _H) ->
     io:format("Ignoring result from ~p in state ~p~n", [J, Data#rbc_data.state]),
     {Data, ok}.
 
+
+%% helper to check whether rbc protocol has completed
 -spec check_completion(rbc_data(), merkerl:hash()) -> {rbc_data(), ok | {result, binary()} | hbbft_utils:multicast(ready_msg()) | abort}.
 check_completion(Data = #rbc_data{n=N, f=F}, H) ->
     %% interpolate Sj from any N-2f leaves received
@@ -130,6 +161,7 @@ check_completion(Data = #rbc_data{n=N, f=F}, H) ->
                     %% check if ready already sent
                     case Data#rbc_data.ready_sent of
                         true ->
+                            %% Figure2. Bullet6
                             %% check if we have enough readies and enough echoes
                             %% N-2F echoes and 2F + 1 readies
                             case sets:size(Data#rbc_data.num_echoes) >= Threshold andalso sets:size(Data#rbc_data.num_readies) >= (2*F + 1) of
@@ -146,7 +178,7 @@ check_completion(Data = #rbc_data{n=N, f=F}, H) ->
                     end;
                 false ->
                     %% abort
-                    {Data#rbc_data{state=aborted}, abort}
+                    {Data#rbc_data{state=done}, abort}
             end;
         {error, _Reason} ->
             {Data#rbc_data{state=waiting}, ok}
