@@ -141,7 +141,7 @@ ready(Data, J, _H) ->
 
 
 %% helper to check whether rbc protocol has completed
--spec check_completion(rbc_data(), merkerl:hash()) -> {rbc_data(), ok | {result, binary()} | hbbft_utils:multicast(ready_msg()) | abort}.
+-spec check_completion(rbc_data(), merkerl:hash()) -> {rbc_data(), ok | {result, binary()} | hbbft_utils:multicast(ready_msg()) | {result, aborted}}.
 check_completion(Data = #rbc_data{n=N, f=F}, H) ->
     %% interpolate Sj from any N-2f leaves received
     Threshold = N - 2*F,
@@ -178,7 +178,7 @@ check_completion(Data = #rbc_data{n=N, f=F}, H) ->
                     end;
                 false ->
                     %% abort
-                    {Data#rbc_data{state=done}, abort}
+                    {Data#rbc_data{state=done}, {result, aborted}}
             end;
         {error, _Reason} ->
             {Data#rbc_data{state=waiting}, ok}
