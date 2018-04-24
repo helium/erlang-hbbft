@@ -202,6 +202,9 @@ init_test() ->
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, [{0, {send, MsgsToSend}}], StatesWithId, sets:new()),
     %% everyone should converge
     ?assertEqual(N, sets:size(ConvergedResults)),
+    %% the decoded result should be the original message
+    ConvergedResultsList = sets:to_list(ConvergedResults),
+    ?assert(lists:all(fun({result, {_, Res}}) -> Res == Msg end, ConvergedResultsList)),
     ok.
 
 
@@ -219,6 +222,9 @@ pid_dying_test() ->
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, [{0, {send, MsgsToSend}}], StatesWithId, sets:new()),
     %% everyone but the dead node should converge
     ?assertEqual(N - 1, sets:size(ConvergedResults)),
+    %% the decoded result should be the original message
+    ConvergedResultsList = sets:to_list(ConvergedResults),
+    ?assert(lists:all(fun({result, {_, Res}}) -> Res == Msg end, ConvergedResultsList)),
     ok.
 
 two_pid_dying_test() ->
