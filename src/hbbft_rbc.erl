@@ -207,6 +207,40 @@ init_test() ->
     ?assert(lists:all(fun({result, {_, Res}}) -> Res == Msg end, ConvergedResultsList)),
     ok.
 
+send_incorrect_msg_test() ->
+    N = 5,
+    F = 1,
+    Msg = crypto:strong_rand_bytes(512),
+    S0 = hbbft_rbc:init(N, F),
+    S1 = hbbft_rbc:init(N, F),
+    S2 = hbbft_rbc:init(N, F),
+    S3 = hbbft_rbc:init(N, F),
+    S4 = hbbft_rbc:init(N, F),
+    {NewS0, {send, MsgsToSend}} = hbbft_rbc:input(S0, Msg),
+
+    %% ====================================================
+    %% screw up 3 val messages in the MsgsToSend
+    %% TODO: something better but this works for now
+    BadMsg = crypto:strong_rand_bytes(512),
+    Threshold = N - 2*F,
+    {ok, Shards} = leo_erasure:encode({Threshold, N - Threshold}, BadMsg),
+    MsgSize = byte_size(BadMsg),
+    ShardsWithSize = [{MsgSize, Shard} || Shard <- Shards],
+    Merkle = merkerl:new(ShardsWithSize, fun merkerl:hash_value/1),
+    MerkleRootHash = merkerl:root_hash(Merkle),
+    BranchesForShards = [merkerl:gen_proof(Hash, Merkle) || {Hash, _} <- merkerl:leaves(Merkle)],
+    BadMsgsToSend = [ {unicast, J, {val, MerkleRootHash, lists:nth(J+1, BranchesForShards), lists:nth(J+1, ShardsWithSize)}} || J <- lists:seq(0, N-1)],
+    [ First, Second | _ ] = MsgsToSend,
+    [ Third, Fourth, Fifth | _ ] = BadMsgsToSend,
+    NewMsgsToSend = [First, Second, Third, Fourth, Fifth],
+    %% ====================================================
+
+    States = [NewS0, S1, S2, S3, S4],
+    StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
+    {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, [{0, {send, NewMsgsToSend}}], StatesWithId, sets:new()),
+    %% no one should converge
+    ?assertEqual(0, sets:size(ConvergedResults)),
+    ok.
 
 pid_dying_test() ->
     N = 5,
