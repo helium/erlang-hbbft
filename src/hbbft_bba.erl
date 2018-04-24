@@ -31,6 +31,10 @@
 init(SK, N, F) ->
     #bba_data{secret_key=SK, n=N, f=F}.
 
+%% upon receiving input binput , set est0 := binput and proceed as
+%% follows in consecutive epochs, with increasing labels r:
+%% – multicast BVALr (estr )
+%% – bin_values  {}
 -spec input(bba_data(), 0 | 1) -> {bba_data(), ok | {send, [hbbft_utils:multicast(bval_msg())]}}.
 input(Data = #bba_data{state=init}, BInput) ->
     {Data#bba_data{est = BInput}, {send, [{multicast, {bval, Data#bba_data.round, BInput}}]}};
@@ -86,6 +90,8 @@ handle_msg(Data = #bba_data{round=R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin
 handle_msg(Data, _J, _Msg) ->
     {Data, ok}.
 
+%% – upon receiving BVALr (b) messages from f + 1 nodes, if
+%% BVALr (b) has not been sent, multicast BVALr (b)
 %% TODO: the coin return type is most likely incorrect here.
 -spec bval(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), {send, [hbbft_utils:multicast(aux_msg() | coin_msg())]}}.
 bval(Data=#bba_data{n=N, f=F}, Id, V) ->
@@ -102,6 +108,8 @@ bval(Data=#bba_data{n=N, f=F}, Id, V) ->
                                 {Data#bba_data{witness=Witness}, []}
                         end,
 
+    %% - upon receiving BVALr (b) messages from 2 f + 1 nodes,
+    %% bin_values_r := bin_valuesr ∪ {b}
     case WitnessCount >= 2*F+1 of
         true ->
             %% add to binvalues
@@ -111,16 +119,15 @@ bval(Data=#bba_data{n=N, f=F}, Id, V) ->
                                       true ->
                                           %% XXX How many times do we send AUX per round? I think just once
                                           Random = lists:nth(rand:uniform(sets:size(NewData2#bba_data.bin_values)), sets:to_list(NewData2#bba_data.bin_values)),
-                                          {NewData2#bba_data{aux_sent = true}, [{multicast, {aux, NewData2#bba_data.round, Random}}|ToSend]};
+                                          {NewData2#bba_data{aux_sent = true}, [{multicast, {aux, NewData2#bba_data.round, Random}} | ToSend]};
                                       false ->
                                           {NewData2, ToSend}
                                   end,
             %% check if we've received at least N - F AUX messages where the values in the AUX messages are member of bin_values
             case maps:size(maps:filter(fun(_, X) -> sets:is_element(X, NewData3#bba_data.bin_values) end, NewData3#bba_data.aux_witness)) >= N - F of
                 true when NewData3#bba_data.coin == undefined ->
-                    %% instanciate the common coin
+                    %% instantiate the common coin
                     %% TODO need more entropy for the SID
-                    %% Note: is there a bug here? maybe?
                     {CoinData, {send, CoinSend}} = hbbft_cc:get_coin(hbbft_cc:init(NewData3#bba_data.secret_key, term_to_binary({NewData3#bba_data.round}), N, F)),
                     {NewData3#bba_data{coin=CoinData}, {send, hbbft_utils:wrap({coin, Data#bba_data.round}, CoinSend) ++ ToSend2}};
                 _ ->
