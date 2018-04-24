@@ -14,9 +14,12 @@
           witness = maps:new() :: #{non_neg_integer() => 0 | 1},
           aux_witness = maps:new() :: #{non_neg_integer() => 0 | 1},
           aux_sent = false :: boolean(),
-          broadcasted = sets:new() :: sets:set(0 | 1),
-          bin_values = sets:new() :: sets:set(0 | 1)
+          broadcasted = 2#0 :: 0 | 1,
+          bin_values = 2#00 :: 0 | 1 | 2 | 3
          }).
+
+-define(ADD(X, Y), X bor Y).
+-define(HAS(X, Y), (X band Y) /= 0).
 
 -type bba_data() :: #bba_data{}.
 
@@ -58,10 +61,10 @@ handle_msg(Data = #bba_data{round=R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin
     case hbbft_cc:handle_msg(Data#bba_data.coin, J, CMsg) of
         {_NewCoin, {result, Result}} ->
             %% ok, we've obtained the common coin
-            case sets:size(Data#bba_data.bin_values) == 1 of
+            case Data#bba_data.bin_values == 2#01 orelse Data#bba_data.bin_values == 2#10 of
                 true ->
                     %% if vals = {b}, then
-                    [B] = sets:to_list(Data#bba_data.bin_values),
+                    B = Data#bba_data.bin_values,
                     Output = case Result rem 2 == B of
                                  true ->
                                      %% if (b = s%2) then output b
@@ -98,11 +101,12 @@ bval(Data=#bba_data{n=N, f=F}, Id, V) ->
     %% add to witnesses
     Witness = maps:put(Id, V, Data#bba_data.witness),
     WitnessCount = lists:sum([ 1 || {_, Val} <- maps:to_list(Witness), V == Val ]),
-    {NewData, ToSend} = case WitnessCount >= F+1 andalso sets:is_element(V, Data#bba_data.broadcasted) == false of
+
+    {NewData, ToSend} = case WitnessCount >= F+1 andalso ?HAS(V, Data#bba_data.broadcasted) of
                             true ->
                                 %% add to broadcasted
                                 NewData0 = Data#bba_data{witness=Witness,
-                                                         broadcasted=sets:add_element(V, Data#bba_data.broadcasted)},
+                                                         broadcasted=?ADD(V, Data#bba_data.broadcasted)},
                                 {NewData0, [{multicast, {bval, Data#bba_data.round, V}}]};
                             false ->
                                 {Data#bba_data{witness=Witness}, []}
@@ -114,17 +118,18 @@ bval(Data=#bba_data{n=N, f=F}, Id, V) ->
         true ->
             %% add to binvalues
             NewData2 = Data#bba_data{witness=Witness,
-                                     bin_values=sets:add_element(V, NewData#bba_data.bin_values)},
+                                     bin_values=?ADD(V, NewData#bba_data.bin_values)},
+                                     %% bin_values=sets:add_element(V, NewData#bba_data.bin_values)},
             {NewData3, ToSend2} = case NewData2#bba_data.aux_sent == false of
                                       true ->
                                           %% XXX How many times do we send AUX per round? I think just once
-                                          Random = lists:nth(rand:uniform(sets:size(NewData2#bba_data.bin_values)), sets:to_list(NewData2#bba_data.bin_values)),
+                                          Random = rand_0_or_1(),
                                           {NewData2#bba_data{aux_sent = true}, [{multicast, {aux, NewData2#bba_data.round, Random}} | ToSend]};
                                       false ->
                                           {NewData2, ToSend}
                                   end,
-            %% check if we've received at least N - F AUX messages where the values in the AUX messages are member of bin_values
-            case maps:size(maps:filter(fun(_, X) -> sets:is_element(X, NewData3#bba_data.bin_values) end, NewData3#bba_data.aux_witness)) >= N - F of
+
+            case check_n_minus_f_aux_messages(N, F, NewData3) of
                 true when NewData3#bba_data.coin == undefined ->
                     %% instantiate the common coin
                     %% TODO need more entropy for the SID
@@ -141,15 +146,27 @@ bval(Data=#bba_data{n=N, f=F}, Id, V) ->
 aux(Data = #bba_data{n=N, f=F}, Id, V) ->
     Witness = maps:put(Id, V, Data#bba_data.aux_witness),
     NewData = Data#bba_data{aux_witness = Witness},
-    %% check if we've received at least N - F AUX messages where the values in the AUX messages are member of bin_values
-    case maps:size(maps:filter(fun(_, X) -> sets:is_element(X, NewData#bba_data.bin_values) end, NewData#bba_data.aux_witness)) >= N - F of
+    case check_n_minus_f_aux_messages(N, F, NewData) of
         true when NewData#bba_data.coin == undefined ->
-            %% instanciate the common coin
+            %% instantiate the common coin
             %% TODO need more entropy for the SID
             {CoinData, {send, ToSend}} = hbbft_cc:get_coin(hbbft_cc:init(NewData#bba_data.secret_key, term_to_binary({NewData#bba_data.round}), N, F)),
             {NewData#bba_data{coin=CoinData}, {send, hbbft_utils:wrap({coin, Data#bba_data.round}, ToSend)}};
         _ ->
             {NewData, ok}
+    end.
+
+
+%% helper functions
+-spec check_n_minus_f_aux_messages(pos_integer(), non_neg_integer(), bba_data()) -> boolean().
+check_n_minus_f_aux_messages(N, F, Data) ->
+    %% check if we've received at least N - F AUX messages where the values in the AUX messages are member of bin_values
+    maps:size(maps:filter(fun(_, X) -> ?HAS(X, Data#bba_data.bin_values) end, Data#bba_data.aux_witness)) >= N - F.
+
+rand_0_or_1() ->
+    case rand:uniform() < 0.5 of
+        true -> 0;
+        false -> 1
     end.
 
 -ifdef(TEST).
