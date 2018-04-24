@@ -11,8 +11,8 @@
           output :: undefined | 0 | 1,
           f :: non_neg_integer(),
           n :: pos_integer(),
-          witness = sets:new() :: sets:set({non_neg_integer(), 0 | 1}),
-          aux_witness = sets:new() :: sets:set({non_neg_integer(), 0 | 1}),
+          witness = maps:new() :: #{non_neg_integer() => 0 | 1},
+          aux_witness = maps:new() :: #{non_neg_integer() => 0 | 1},
           aux_sent = false :: boolean(),
           broadcasted = sets:new() :: sets:set(0 | 1),
           bin_values = sets:new() :: sets:set(0 | 1)
@@ -90,8 +90,8 @@ handle_msg(Data, _J, _Msg) ->
 -spec bval(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), {send, [hbbft_utils:multicast(aux_msg() | coin_msg())]}}.
 bval(Data=#bba_data{n=N, f=F}, Id, V) ->
     %% add to witnesses
-    Witness = sets:add_element({Id, V}, Data#bba_data.witness),
-    WitnessCount = lists:sum([ 1 || {_, Val} <- sets:to_list(Witness), V == Val ]),
+    Witness = maps:put(Id, V, Data#bba_data.witness),
+    WitnessCount = lists:sum([ 1 || {_, Val} <- maps:to_list(Witness), V == Val ]),
     {NewData, ToSend} = case WitnessCount >= F+1 andalso sets:is_element(V, Data#bba_data.broadcasted) == false of
                             true ->
                                 %% add to broadcasted
@@ -116,7 +116,7 @@ bval(Data=#bba_data{n=N, f=F}, Id, V) ->
                                           {NewData2, ToSend}
                                   end,
             %% check if we've received at least N - F AUX messages where the values in the AUX messages are member of bin_values
-            case sets:size(sets:filter(fun({_, X}) -> sets:is_element(X, NewData3#bba_data.bin_values) end, NewData3#bba_data.aux_witness)) >= N - F of
+            case maps:size(maps:filter(fun(_, X) -> sets:is_element(X, NewData3#bba_data.bin_values) end, NewData3#bba_data.aux_witness)) >= N - F of
                 true when NewData3#bba_data.coin == undefined ->
                     %% instanciate the common coin
                     %% TODO need more entropy for the SID
@@ -132,10 +132,10 @@ bval(Data=#bba_data{n=N, f=F}, Id, V) ->
 
 -spec aux(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), ok | {send, [hbbft_utils:multicast(coin_msg())]}}.
 aux(Data = #bba_data{n=N, f=F}, Id, V) ->
-    Witness = sets:add_element({Id, V}, Data#bba_data.aux_witness),
+    Witness = maps:put(Id, V, Data#bba_data.aux_witness),
     NewData = Data#bba_data{aux_witness = Witness},
     %% check if we've received at least N - F AUX messages where the values in the AUX messages are member of bin_values
-    case sets:size(sets:filter(fun({_, X}) -> sets:is_element(X, NewData#bba_data.bin_values) end, NewData#bba_data.aux_witness)) >= N - F of
+    case maps:size(maps:filter(fun(_, X) -> sets:is_element(X, NewData#bba_data.bin_values) end, NewData#bba_data.aux_witness)) >= N - F of
         true when NewData#bba_data.coin == undefined ->
             %% instanciate the common coin
             %% TODO need more entropy for the SID
