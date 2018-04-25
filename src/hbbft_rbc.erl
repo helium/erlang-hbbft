@@ -9,8 +9,8 @@
           msg = undefined :: binary() | undefined,
           h = undefined :: binary() | undefined,
           shares = [] :: [{merkerl:proof(), {pos_integer(), binary()}}],
-          num_echoes = sets:new() :: sets:set(non_neg_integer()),
-          num_readies = sets:new() :: sets:set(non_neg_integer()),
+          num_echoes = [] :: [non_neg_integer()],
+          num_readies = [] :: [non_neg_integer()],
           seen_val = false :: boolean(),
           ready_sent = false :: boolean()
          }).
@@ -104,8 +104,8 @@ echo(Data = #rbc_data{n=N, f=F}, J, H, Bj, Sj) ->
     case merkerl:verify_proof(merkerl:hash_value(Sj), H, Bj) of
         ok ->
             %% valid branch
-            NewData = Data#rbc_data{h=H, shares=lists:usort([{Bj, Sj} | Data#rbc_data.shares]), num_echoes=sets:add_element(J, Data#rbc_data.num_echoes)},
-            case sets:size(NewData#rbc_data.num_echoes) >= (N - F) of
+            NewData = Data#rbc_data{h=H, shares=lists:usort([{Bj, Sj} | Data#rbc_data.shares]), num_echoes=insert_once(J, Data#rbc_data.num_echoes)},
+            case length(NewData#rbc_data.num_echoes) >= (N - F) andalso length(NewData#rbc_data.shares) >= (N - 2*F) of
                 true ->
                     %% Figure2. Bullet4
                     %% upon receiving valid ECHO(h, ·, ·) messages from N − f distinc tparties,
@@ -125,10 +125,10 @@ echo(Data = #rbc_data{n=N, f=F}, J, H, Bj, Sj) ->
 %% upon receiving f + 1 matching READY(h) messages, if READY
 %% has not yet been sent, multicast READY(h)
 -spec ready(rbc_data(), non_neg_integer(), merkerl:hash()) -> {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()}}.
-ready(Data = #rbc_data{state=waiting, f=F, h=H}, J, H) ->
+ready(Data = #rbc_data{state=waiting, n=N, f=F, h=H}, J, H) ->
     %% increment num_readies
-    NewData = Data#rbc_data{num_readies=sets:add_element(J, Data#rbc_data.num_readies)},
-    case sets:size(NewData#rbc_data.num_readies) >= F + 1 of
+    NewData = Data#rbc_data{num_readies=insert_once(J, Data#rbc_data.num_readies)},
+    case length(NewData#rbc_data.num_readies) >= F + 1 andalso length(NewData#rbc_data.shares) >= (N - 2*F) of
         true ->
             check_completion(NewData, H);
         false ->
@@ -164,7 +164,7 @@ check_completion(Data = #rbc_data{n=N, f=F}, H) ->
                             %% Figure2. Bullet6
                             %% check if we have enough readies and enough echoes
                             %% N-2F echoes and 2F + 1 readies
-                            case sets:size(Data#rbc_data.num_echoes) >= Threshold andalso sets:size(Data#rbc_data.num_readies) >= (2*F + 1) of
+                            case length(Data#rbc_data.num_echoes) >= M andalso length(Data#rbc_data.num_readies) >= (2*F + 1) of
                                 true ->
                                     %% decode V. Done
                                     {Data#rbc_data{state=done}, {result, Msg}};
@@ -182,6 +182,13 @@ check_completion(Data = #rbc_data{n=N, f=F}, H) ->
             end;
         {error, _Reason} ->
             {Data#rbc_data{state=waiting}, ok}
+    end.
+
+-spec insert_once(non_neg_integer(), [non_neg_integer()]) -> [non_neg_integer(), ...].
+insert_once(Element, List) ->
+    case lists:member(Element, List) of
+        true -> List;
+        false -> [Element | List]
     end.
 
 -ifdef(TEST).
