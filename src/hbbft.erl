@@ -9,7 +9,7 @@
           f :: pos_integer(),
           j :: non_neg_integer(),
           round = 0 :: non_neg_integer(),
-          buf = queue:new() :: queue:queue(),
+          buf = [] :: [binary()],
           acs :: hbbft_acs:acs_data(),
           acs_init = false :: boolean(),
           sent_txns = false :: boolean(),
@@ -36,8 +36,8 @@ init(SK, N, F, J, BatchSize) ->
 -spec input(hbbft_data(), binary()) -> {hbbft_data(), ok | {send, [rbc_wrapped_output()]}}.
 input(Data = #hbbft_data{buf=Buf}, Txn) ->
     %% add this txn to the the buffer
-    NewBuf = queue:in(Txn, Buf),
-    io:format("~p got message, queue is ~p~n", [Data#hbbft_data.j, queue:len(NewBuf)]),
+    NewBuf = [Txn | Buf],
+    io:format("~p got message, queue is ~p~n", [Data#hbbft_data.j, length(NewBuf)]),
     maybe_start_acs(Data#hbbft_data{buf=NewBuf}).
 
 %% The user has constructed something that looks like a block and is telling us which transactions
@@ -46,10 +46,10 @@ input(Data = #hbbft_data{buf=Buf}, Txn) ->
 %% should not be placed in TransactionsToRemove. Once this returns, the user should call next_round/1.
 -spec finalize_round(hbbft_data(), [binary()], binary()) -> {hbbft_data(), {send, [hbbft_utils:multicast(sign_msg())]}}.
 finalize_round(Data, TransactionsToRemove, ThingToSign) ->
-    NewBuf = queue:filter(fun(Item) ->
+    NewBuf = lists:filter(fun(Item) ->
                                   not lists:member(Item, TransactionsToRemove)
                           end, Data#hbbft_data.buf),
-    io:format("~b finalizing round, removed ~p elements from buf~n", [Data#hbbft_data.j, queue:len(Data#hbbft_data.buf) - queue:len(NewBuf)]),
+    io:format("~b finalizing round, removed ~p elements from buf~n", [Data#hbbft_data.j, length(Data#hbbft_data.buf) - length(NewBuf)]),
     HashThing = tpke_pubkey:hash_message(tpke_privkey:public_key(Data#hbbft_data.secret_key), ThingToSign),
     BinShare = hbbft_utils:share_to_binary(tpke_privkey:sign(Data#hbbft_data.secret_key, HashThing)),
     %% multicast the signature to everyone
@@ -155,8 +155,8 @@ handle_msg(Data, J, Msg) ->
     {Data, ok}.
 
 -spec maybe_start_acs(hbbft_data()) -> {hbbft_data(), ok | {send, [rbc_wrapped_output()]}}.
-maybe_start_acs(Data = #hbbft_data{n=N, secret_key=SK}) ->
-    case queue:len(Data#hbbft_data.buf) > ?BATCH_SIZE andalso Data#hbbft_data.acs_init == false of
+maybe_start_acs(Data = #hbbft_data{n=N, secret_key=SK, batch_size=BatchSize}) ->
+    case length(Data#hbbft_data.buf) > BatchSize andalso Data#hbbft_data.acs_init == false of
         true ->
             %% compose a transaction bundle
             %% get the top b elements from buf
