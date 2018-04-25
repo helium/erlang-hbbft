@@ -71,7 +71,7 @@ block_transactions(Block) ->
     Block#block.transactions.
 
 init([N, F, ID, SK]) ->
-    HBBFT = hbbft:init(SK, N, F, ID),
+    HBBFT = hbbft:init(SK, N, F, ID, 20),
     {ok, #state{hbbft=HBBFT, blocks=[], id=ID, n=N, sk=SK}}.
 
 handle_call({submit_txn, Txn}, _From, State = #state{hbbft=HBBFT}) ->
