@@ -18,9 +18,6 @@
           bin_values = 2#00 :: 0 | 1 | 2 | 3
          }).
 
--define(ADD(X, Y), (1 bsl X) bor Y).
--define(HAS(X, Y), ((1 bsl X) band Y) /= 0).
-
 -type bba_data() :: #bba_data{}.
 
 -type bval_msg() :: {bval, non_neg_integer(), 0 | 1}.
@@ -61,10 +58,10 @@ handle_msg(Data = #bba_data{round=R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin
     case hbbft_cc:handle_msg(Data#bba_data.coin, J, CMsg) of
         {_NewCoin, {result, Result}} ->
             %% ok, we've obtained the common coin
-            case Data#bba_data.bin_values == 2#01 orelse Data#bba_data.bin_values == 2#10 of
+            case count(Data#bba_data.bin_values) == 1 of
                 true ->
                     %% if vals = {b}, then
-                    B = Data#bba_data.bin_values,
+                    B = val(Data#bba_data.bin_values),
                     Output = case Result rem 2 == B of
                                  true ->
                                      %% if (b = s%2) then output b
@@ -102,11 +99,11 @@ bval(Data=#bba_data{n=N, f=F}, Id, V) ->
     Witness = maps:put(Id, V, Data#bba_data.witness),
     WitnessCount = lists:sum([ 1 || {_, Val} <- maps:to_list(Witness), V == Val ]),
 
-    {NewData, ToSend} = case WitnessCount >= F+1 andalso ?HAS(V, Data#bba_data.broadcasted) of
+    {NewData, ToSend} = case WitnessCount >= F+1 andalso has(V, Data#bba_data.broadcasted) of
                             true ->
                                 %% add to broadcasted
                                 NewData0 = Data#bba_data{witness=Witness,
-                                                         broadcasted=?ADD(V, Data#bba_data.broadcasted)},
+                                                         broadcasted=add(V, Data#bba_data.broadcasted)},
                                 {NewData0, [{multicast, {bval, Data#bba_data.round, V}}]};
                             false ->
                                 {Data#bba_data{witness=Witness}, []}
@@ -118,12 +115,12 @@ bval(Data=#bba_data{n=N, f=F}, Id, V) ->
         true ->
             %% add to binvalues
             NewData2 = Data#bba_data{witness=Witness,
-                                     bin_values=?ADD(V, NewData#bba_data.bin_values)},
+                                     bin_values=add(V, NewData#bba_data.bin_values)},
             {NewData3, ToSend2} = case NewData2#bba_data.aux_sent == false of
                                       true ->
                                           %% XXX How many times do we send AUX per round? I think just once
-                                          BinValuesList = integer_to_list(NewData2#bba_data.bin_values),
-                                          Random = lists:nth(rand:uniform(length(BinValuesList)), BinValuesList),
+                                          Random = rand_val(NewData2#bba_data.bin_values),
+																					io:format("random value ~p~n", [Random]),
                                           {NewData2#bba_data{aux_sent = true}, [{multicast, {aux, NewData2#bba_data.round, Random}} | ToSend]};
                                       false ->
                                           {NewData2, ToSend}
@@ -161,8 +158,34 @@ aux(Data = #bba_data{n=N, f=F}, Id, V) ->
 -spec check_n_minus_f_aux_messages(pos_integer(), non_neg_integer(), bba_data()) -> boolean().
 check_n_minus_f_aux_messages(N, F, Data) ->
     %% check if we've received at least N - F AUX messages where the values in the AUX messages are member of bin_values
-    maps:size(maps:filter(fun(_, X) -> ?HAS(X, Data#bba_data.bin_values) end, Data#bba_data.aux_witness)) >= N - F.
+    maps:size(maps:filter(fun(_, X) -> has(X, Data#bba_data.bin_values) end, Data#bba_data.aux_witness)) >= N - F.
 
+%% add X to set Y
+add(X, Y) ->
+		Res = (1 bsl X) bor Y,
+		io:format("Added ~.2b to ~.2b -> ~.2b~n", [1 bsl X, Y, Res]),
+		Res.
+
+%% is X in set Y?
+has(X, Y) ->
+		Res = ((1 bsl X) band Y) /= 0,
+		io:format("Checked if ~.2b is in ~.2b -> ~p~n", [1 bsl X, Y, Res]),
+		Res.
+
+%% count elements of set
+count(2#0) -> 0;
+count(2#1) -> 1;
+count(2#10) -> 1;
+count(2#11) -> 2.
+
+%% get a random value from set
+rand_val(2#1) -> 0;
+rand_val(2#10) -> 1;
+rand_val(2#11) -> hd(hbbft_utils:random_n(1, [0, 1])).
+
+%% get single value from set
+val(2#1) -> 0;
+val(2#10) -> 1.
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
