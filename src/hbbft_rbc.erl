@@ -43,9 +43,10 @@ init(N, F) ->
 -spec input(rbc_data(), binary()) -> {rbc_data(), {send, send_commands()}}.
 input(Data = #rbc_data{state=init, n=N, f=F}, Msg) ->
     %% (N-2f, N)-erasure coding scheme applied to input
-    Threshold = N - 2*F,
+    M = N - 2*F,
+    K = 2*F,
     %% Shards represent sj from the whitepaper
-    {ok, Shards} = leo_erasure:encode({Threshold, N - Threshold}, Msg),
+    {ok, Shards} = leo_erasure:encode({K, M}, Msg),
     %% Need to know the size of the msg for decoding
     MsgSize = byte_size(Msg),
     ShardsWithSize = [{MsgSize, Shard} || Shard <- Shards],
@@ -144,14 +145,21 @@ ready(Data, J, _H) ->
 -spec check_completion(rbc_data(), merkerl:hash()) -> {rbc_data(), ok | {result, binary()} | hbbft_utils:multicast(ready_msg()) | {result, aborted}}.
 check_completion(Data = #rbc_data{n=N, f=F}, H) ->
     %% interpolate Sj from any N-2f leaves received
-    Threshold = N - 2*F,
+
+    %% From leo_erasure:
+    %% Object would be encoded into {k + m} blocks, any {k} blocks could be used to decode back
+    %% K: The number of data chunks - The number of chunks in which the original object is divided
+    %% M: The number of coding chunks - The number of additional chunks computed by leo_erasure's encoding functions
+    M = N - 2*F, %% Note: M = Threshold (specified in RBC protocol)
+    K = 2*F,
+
     {_, ShardsWithSize} = lists:unzip(Data#rbc_data.shares),
     {_, Shards} = lists:unzip(ShardsWithSize),
-    case leo_erasure:decode({Threshold, N - Threshold}, Shards, element(1, hd(ShardsWithSize))) of
+    case leo_erasure:decode({K, M}, Shards, element(1, hd(ShardsWithSize))) of
         {ok, Msg} ->
             %% recompute merkle root H
             MsgSize = byte_size(Msg),
-            {ok, AllShards} = leo_erasure:encode({Threshold, N - Threshold}, Msg),
+            {ok, AllShards} = leo_erasure:encode({K, M}, Msg),
             AllShardsWithSize = [{MsgSize, Shard} || Shard <- AllShards],
             Merkle = merkerl:new(AllShardsWithSize, fun merkerl:hash_value/1),
             MerkleRootHash = merkerl:root_hash(Merkle),
@@ -229,8 +237,9 @@ send_incorrect_msg_test() ->
     %% screw up 3 val messages in the MsgsToSend
     %% TODO: something better but this works for now
     BadMsg = crypto:strong_rand_bytes(512),
-    Threshold = N - 2*F,
-    {ok, Shards} = leo_erasure:encode({Threshold, N - Threshold}, BadMsg),
+    M = N - 2*F,
+    K = 2*F,
+    {ok, Shards} = leo_erasure:encode({K, M}, BadMsg),
     MsgSize = byte_size(BadMsg),
     ShardsWithSize = [{MsgSize, Shard} || Shard <- Shards],
     Merkle = merkerl:new(ShardsWithSize, fun merkerl:hash_value/1),
