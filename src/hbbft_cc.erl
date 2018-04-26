@@ -1,22 +1,15 @@
 -module(hbbft_cc).
 
--export([init/4, get_coin/1, handle_msg/3]).
+-include_lib("hbbft_cc.hrl").
 
--record(cc_data, {
-          state = waiting :: waiting | done,
-          sk :: tpke_privkey:privkey(),
-          %% Note: sid is assumed to be a unique nonce that serves as name of this common coin
-          sid :: erlang_pbc:element(),
-          n :: pos_integer(),
-          f :: non_neg_integer(),
-          shares = maps:new() :: #{non_neg_integer() => tpke_privkey:share()}
-         }).
+-export([init/4, get_coin/1, handle_msg/3, serialize_cc_data/1]).
 
 -type cc_data() :: #cc_data{}.
+-type cc_serialized_data() :: #cc_serialized_data{}.
 -type serialized_share() :: binary().
 -type share_msg() :: {share, serialized_share()}.
 
--export_type([cc_data/0, share_msg/0]).
+-export_type([cc_data/0, cc_serialized_data/0, share_msg/0]).
 
 %% Figure12. Bullet1
 %% Trusted Setup Phase: A trusted dealer runs pk, {ski } ←
@@ -88,6 +81,11 @@ share(Data, J, Share) ->
         true ->
             {Data, ok}
     end.
+
+-spec serialize_cc_data(cc_data()) -> cc_serialized_data().
+serialize_cc_data(#cc_data{state=State, sid=SID, n=N, f=F, shares=ShareMap}) ->
+    SerializedShareMap = maps:map(fun(_K, V) -> hbbft_utils:share_to_binary(V) end, ShareMap),
+    #cc_serialized_data{state=State, sid=erlang_pbc:element_to_binary(SID), n=N, f=F, shares=SerializedShareMap}.
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
