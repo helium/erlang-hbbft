@@ -248,7 +248,9 @@ send_incorrect_msg_test() ->
     States = [NewS0, S1, S2, S3, S4],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, [{0, {send, NewMsgsToSend}}], StatesWithId, sets:new()),
-    %% no one should converge
+    ConvergedResultsList = sets:to_list(ConvergedResults),
+    ?assert(lists:all(fun({result, {_, Res}}) -> Res == aborted end, ConvergedResultsList)),
+    %% 4 should converge
     ?assertEqual(4, sets:size(ConvergedResults)),
     ok.
 
