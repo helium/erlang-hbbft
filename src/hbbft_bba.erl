@@ -1,31 +1,18 @@
 -module(hbbft_bba).
 
--export([init/3, input/2, handle_msg/3]).
+-include_lib("hbbft_bba.hrl").
 
--record(bba_data, {
-          state = init :: init | waiting | done,
-          round = 0 :: non_neg_integer(),
-          secret_key :: tpke_privkey:privkey(),
-          coin :: undefined | hbbft_cc:cc_data(),
-          est :: undefined | 0 | 1,
-          output :: undefined | 0 | 1,
-          f :: non_neg_integer(),
-          n :: pos_integer(),
-          witness = maps:new() :: #{non_neg_integer() => 0 | 1},
-          aux_witness = maps:new() :: #{non_neg_integer() => 0 | 1},
-          aux_sent = false :: boolean(),
-          broadcasted = 2#0 :: 0 | 1,
-          bin_values = 2#00 :: 0 | 1 | 2 | 3
-         }).
+-export([init/3, input/2, handle_msg/3, serialize_bba_data/1]).
 
 -type bba_data() :: #bba_data{}.
+-type bba_serialized_data() :: #bba_serialized_data{}.
 
 -type bval_msg() :: {bval, non_neg_integer(), 0 | 1}.
 -type aux_msg() :: {aux, non_neg_integer(), 0 | 1}.
 -type coin_msg() :: {{coin, non_neg_integer()}, hbbft_cc:share_msg()}.
 -type msgs() :: bval_msg() | aux_msg() | coin_msg().
 
--export_type([bba_data/0, bval_msg/0, aux_msg/0, coin_msg/0, msgs/0]).
+-export_type([bba_data/0, bba_serialized_data/0, bval_msg/0, aux_msg/0, coin_msg/0, msgs/0]).
 
 -spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer()) -> bba_data().
 init(SK, N, F) ->
@@ -153,6 +140,21 @@ aux(Data = #bba_data{n=N, f=F}, Id, V) ->
             {NewData, ok}
     end.
 
+
+-spec serialize_bba_data(bba_data()) -> bba_serialized_data().
+serialize_bba_data(#bba_data{state=State, round=Round, coin=Coin,
+                             est=Est, output=Output, f=F, n=N,
+                             witness=Witness, aux_witness=AuxWitness,
+                             aux_sent=AuxSent, broadcasted=Broadcasted,
+                             bin_values=BinValues}) ->
+    NewCoin = case Coin of
+                  undefined -> undefined;
+                  _ -> hbbft_cc:serialize_cc_data(Coin)
+              end,
+    #bba_serialized_data{state=State, round=Round, coin=NewCoin,
+                         est=Est, output=Output, f=F, n=N, witness=Witness,
+                         aux_witness=AuxWitness, aux_sent=AuxSent, broadcasted=Broadcasted,
+                         bin_values=BinValues}.
 
 %% helper functions
 -spec check_n_minus_f_aux_messages(pos_integer(), non_neg_integer(), bba_data()) -> boolean().
