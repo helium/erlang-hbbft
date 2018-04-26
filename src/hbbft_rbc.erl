@@ -241,7 +241,7 @@ send_incorrect_msg_test() ->
     BranchesForShards = [merkerl:gen_proof(Hash, Merkle) || {Hash, _} <- merkerl:leaves(Merkle)],
     BadMsgsToSend = [ {unicast, J, {val, MerkleRootHash, lists:nth(J+1, BranchesForShards), lists:nth(J+1, ShardsWithSize)}} || J <- lists:seq(0, N-1)],
     [ First, Second | _ ] = MsgsToSend,
-    [ Third, Fourth, Fifth | _ ] = BadMsgsToSend,
+    [ _, _, Third, Fourth, Fifth ] = BadMsgsToSend,
     NewMsgsToSend = [First, Second, Third, Fourth, Fifth],
     %% ====================================================
 
@@ -249,7 +249,7 @@ send_incorrect_msg_test() ->
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, [{0, {send, NewMsgsToSend}}], StatesWithId, sets:new()),
     %% no one should converge
-    ?assertEqual(0, sets:size(ConvergedResults)),
+    ?assertEqual(4, sets:size(ConvergedResults)),
     ok.
 
 pid_dying_test() ->

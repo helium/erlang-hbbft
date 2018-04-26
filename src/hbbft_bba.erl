@@ -16,7 +16,7 @@
           aux_sent = false :: boolean(),
           %% Sets take relatively large space
           %% using bit values here serve the same purpose while saving us space
-          broadcasted = 00 :: 0 | 1,
+          broadcasted = 00 :: 0 | 1 | 2 | 3,
           bin_values = 00 :: 0 | 1 | 2 | 3
          }).
 
