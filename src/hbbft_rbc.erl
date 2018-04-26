@@ -79,13 +79,7 @@ handle_msg(Data, J, {ready, H}) ->
 %% multicast ECHO(h, bi , si )
 -spec val(rbc_data(), non_neg_integer(), merkerl:hash(), merkerl:proof(), binary()) -> {rbc_data(), ok | {send, send_commands()}}.
 val(Data = #rbc_data{seen_val=false}, _J, H, Bj, Sj) ->
-    %% XXX: not sure about this
-    NewShares = case Data#rbc_data.shares of
-                    [] ->
-                        [{Bj, Sj}];
-                    Shares ->
-                        [{Bj, Sj} | Shares]
-                end,
+    NewShares = [ {Bj, Sj} | Data#rbc_data.shares ],
     NewData = Data#rbc_data{h=H, shares=NewShares, seen_val=true},
     {NewData, {send, [{multicast, {echo, H, Bj, Sj}}]}};
 val(Data, J, _H, _Bi, _Si) ->
@@ -109,7 +103,7 @@ echo(Data = #rbc_data{n=N, f=F}, J, H, Bj, Sj) ->
             case length(NewData#rbc_data.num_echoes) >= (N - F) andalso length(NewData#rbc_data.shares) >= (N - 2*F) of
                 true ->
                     %% Figure2. Bullet4
-                    %% upon receiving valid ECHO(h, ·, ·) messages from N − f distinc tparties,
+                    %% upon receiving valid ECHO(h, ·, ·) messages from N − f distinct parties,
                     %% – interpolate {s0 j} from any N − 2 f leaves received
                     %% – recompute Merkle root h0 and if h0 /= h then abort
                     %% – if READY(h) has not yet been sent, multicast READY(h)

@@ -14,8 +14,10 @@
           witness = maps:new() :: #{non_neg_integer() => 0 | 1},
           aux_witness = maps:new() :: #{non_neg_integer() => 0 | 1},
           aux_sent = false :: boolean(),
-          broadcasted = 2#0 :: 0 | 1,
-          bin_values = 2#00 :: 0 | 1 | 2 | 3
+          %% Sets take relatively large space
+          %% using bit values here serve the same purpose while saving us space
+          broadcasted = 00 :: 0 | 1,
+          bin_values = 00 :: 0 | 1 | 2 | 3
          }).
 
 -type bba_data() :: #bba_data{}.
@@ -92,14 +94,13 @@ handle_msg(Data, _J, _Msg) ->
 
 %% – upon receiving BVALr (b) messages from f + 1 nodes, if
 %% BVALr (b) has not been sent, multicast BVALr (b)
-%% TODO: the coin return type is most likely incorrect here.
 -spec bval(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), {send, [hbbft_utils:multicast(aux_msg() | coin_msg())]}}.
 bval(Data=#bba_data{n=N, f=F}, Id, V) ->
     %% add to witnesses
     Witness = maps:put(Id, V, Data#bba_data.witness),
     WitnessCount = lists:sum([ 1 || {_, Val} <- maps:to_list(Witness), V == Val ]),
 
-    {NewData, ToSend} = case WitnessCount >= F+1 andalso has(V, Data#bba_data.broadcasted) of
+    {NewData, ToSend} = case WitnessCount >= F+1 andalso not has(V, Data#bba_data.broadcasted) of
                             true ->
                                 %% add to broadcasted
                                 NewData0 = Data#bba_data{witness=Witness,
@@ -120,7 +121,6 @@ bval(Data=#bba_data{n=N, f=F}, Id, V) ->
                                       true ->
                                           %% XXX How many times do we send AUX per round? I think just once
                                           Random = rand_val(NewData2#bba_data.bin_values),
-																					io:format("random value ~p~n", [Random]),
                                           {NewData2#bba_data{aux_sent = true}, [{multicast, {aux, NewData2#bba_data.round, Random}} | ToSend]};
                                       false ->
                                           {NewData2, ToSend}
@@ -162,15 +162,15 @@ check_n_minus_f_aux_messages(N, F, Data) ->
 
 %% add X to set Y
 add(X, Y) ->
-		Res = (1 bsl X) bor Y,
-		io:format("Added ~.2b to ~.2b -> ~.2b~n", [1 bsl X, Y, Res]),
-		Res.
+    Res = (1 bsl X) bor Y,
+    io:format("Added ~.2b to ~.2b -> ~.2b~n", [1 bsl X, Y, Res]),
+    Res.
 
 %% is X in set Y?
 has(X, Y) ->
-		Res = ((1 bsl X) band Y) /= 0,
-		io:format("Checked if ~.2b is in ~.2b -> ~p~n", [1 bsl X, Y, Res]),
-		Res.
+    Res = ((1 bsl X) band Y) /= 0,
+    io:format("Checked if ~.2b is in ~.2b -> ~p~n", [1 bsl X, Y, Res]),
+    Res.
 
 %% count elements of set
 count(2#0) -> 0;
