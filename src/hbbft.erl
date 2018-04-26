@@ -1,27 +1,15 @@
 -module(hbbft).
 
--export([init/5, input/2, finalize_round/3, next_round/1, get_encrypted_key/2, decrypt/2, handle_msg/3]).
+-include_lib("hbbft.hrl").
+-include_lib("hbbft_acs.hrl").
+-include_lib("hbbft_bba.hrl").
+-include_lib("hbbft_cc.hrl").
+-include_lib("hbbft_rbc.hrl").
 
--record(hbbft_data, {
-          batch_size :: pos_integer(),
-          secret_key :: tpke_privkey:privkey(),
-          n :: pos_integer(),
-          f :: pos_integer(),
-          j :: non_neg_integer(),
-          round = 0 :: non_neg_integer(),
-          buf = [] :: [binary()],
-          acs :: hbbft_acs:acs_data(),
-          acs_init = false :: boolean(),
-          sent_txns = false :: boolean(),
-          sent_sig = false :: boolean(),
-          acs_results = [] :: [{non_neg_integer(), binary()}],
-          dec_shares = #{} :: #{non_neg_integer() => {non_neg_integer(), erlang_pbc:element()}},
-          decrypted = #{} :: #{non_neg_integer() => [binary()]},
-          sig_shares = #{} :: #{non_neg_integer() => {non_neg_integer(), erlang_pbc:element()}},
-          thingtosign :: undefined | erlang_pbc:element()
-         }).
+-export([init/5, input/2, finalize_round/3, next_round/1, get_encrypted_key/2, decrypt/2, handle_msg/3, serialize/1]).
 
 -type hbbft_data() :: #hbbft_data{}.
+-type hbbft_serialized_data() :: #hbbft_serialized_data{}.
 -type acs_msg() :: {{acs, non_neg_integer()}, hbbft_acs:msgs()}.
 -type dec_msg() :: {dec, non_neg_integer(), non_neg_integer(), {non_neg_integer(), binary()}}.
 -type sign_msg() :: {sign, non_neg_integer(), binary()}.
@@ -207,6 +195,33 @@ decrypt(Key, Bin) ->
     <<IV:16/binary, EncKeySize:16/integer-unsigned, EncKey:EncKeySize/binary, Tag:16/binary, CipherText/binary>> = Bin,
     crypto:block_decrypt(aes_gcm, Key, IV, {<<IV:16/binary, EncKeySize:16/integer-unsigned, EncKey:(EncKeySize)/binary>>, CipherText, Tag}).
 
+-spec serialize(hbbft_data()) -> {hbbft_serialized_data(), tpke_privkey:privkey_serialized()}.
+serialize(#hbbft_data{secret_key=SK}=Data) ->
+    {serialize_hbbft_data(Data), tpke_privkey:serialize(SK)}.
+
+-spec serialize_hbbft_data(hbbft_data()) -> hbbft_serialized_data().
+serialize_hbbft_data(#hbbft_data{batch_size=BatchSize, n=N, f=F, j=J, round=Round,
+                                 buf=Buf, acs=ACSData, acs_init=ACSInit, sent_txns=SentTxns,
+                                 sent_sig=SentSig, acs_results=ACSResults, dec_shares=DecShares,
+                                 decrypted=Decrypted, sig_shares=SigShares, thingtosign=ThingToSign
+                                }) ->
+
+    {NewDecShares, NewSigShares} = {maps:map(fun(_K, V) -> hbbft_utils:share_to_binary(V) end, DecShares), maps:map(fun(_K, V) ->  hbbft_utils:share_to_binary(V) end, SigShares)},
+
+    NewThingToSign = case ThingToSign of
+                         undefined -> undefined;
+                         _ -> erlang_pbc:element_to_binary(ThingToSign)
+                     end,
+
+    #hbbft_serialized_data{batch_size=BatchSize, n=N, f=F, round=Round, buf=Buf,
+                           acs=hbbft_acs:serialize_acs_data(ACSData), acs_init=ACSInit,
+                           sent_txns=SentTxns, decrypted=Decrypted, j=J,
+                           sent_sig=SentSig, acs_results=ACSResults,
+                           dec_shares=NewDecShares,
+                           sig_shares=NewSigShares,
+                           thingtosign=NewThingToSign
+                          }.
+
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
@@ -227,6 +242,29 @@ merge_replies(N, NewReplies, Replies) ->
                       end,
             merge_replies(N-1, lists:keydelete(N, 1, NewReplies), lists:keystore(N, 1, Replies, NewSend))
     end.
+
+hbbft_serialize_test() ->
+
+    %% WIP
+
+    N = 5,
+    F = 1,
+    BatchSize = 20,
+    dealer:start_link(N, F+1, 'SS512'),
+    {ok, _PubKey, PrivateKeys} = dealer:deal(),
+    gen_server:stop(dealer),
+    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
+
+    Data = element(2, hd(StatesWithIndex)),
+
+    {SerializedData, SerializedSK} = serialize(Data),
+
+    io:format("SerializedSK: ~p~n", [SerializedSK]),
+    io:format("SerializedData: ~p~n", [SerializedData]),
+
+    %% ?assert(false),
+
+    ok.
 
 hbbft_init_test_() ->
     {timeout, 60, [
