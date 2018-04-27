@@ -12,15 +12,12 @@
           n :: pos_integer(),
           f :: non_neg_integer(),
           msg = undefined :: binary() | undefined,
-
           num_echoes = #{} :: #{merkerl:hash() => [non_neg_integer()]},
           num_readies = #{} :: #{merkerl:hash() => [non_neg_integer()]},
           seen_val = false :: boolean(),
           ready_sent = false :: boolean(),
-
           %% roothash: #{sender: {size, shard}}
           stripes = #{} :: #{merkerl:hash() => #{non_neg_integer() => {pos_integer(), binary()}}}
-
          }).
 
 %% rbc protocol requires three message types: ECHO(h, bj, sj), VAL(h, bj, sj) and READY(h)
@@ -86,26 +83,6 @@ handle_msg(Data, J, {echo, H, Bj, Sj}) ->
 handle_msg(Data, J, {ready, H}) ->
     ready(Data, J, H).
 
-add_stripe(Data = #rbc_data{stripes=Stripes}, RootHash, Sender, Shard) ->
-    %% who sent these stripes
-    ValuesForRootHash = maps:get(RootHash, Stripes, #{}),
-    %% add the sender who sent the shard
-    NewMap = maps:put(Sender, Shard, ValuesForRootHash),
-    Data#rbc_data{stripes = maps:put(RootHash, NewMap, Stripes)}.
-
-add_echo(Data = #rbc_data{num_echoes = Echoes}, RootHash, Sender) ->
-    EchoesForThisHash = maps:get(Roothash, Echoes, []),
-    Data#rbc_data{num_echoes = maps:put(Roothash, insert_once(Sender, EchoesForThisHash))}.
-
-add_ready(Data = #rbc_data{num_readies = Readies}, RootHash, Sender) ->
-    ReadiesForThisHash = maps:get(Roothash, Readies, []),
-    Data#rbc_data{num_readies = maps:put(Roothash, insert_once(Sender, ReadiesForThisHash))}.
-
-has_echo(Data = #rbc_data{num_echoes = Echoes}, Sender) ->
-    lists:any(fun(L) -> lists:member(Sender, L) end, maps:values(Echoes)).
-
-has_ready(Data = #rbc_data{num_readies = Readies}, Sender) ->
-    lists:any(fun(L) -> lists:member(Sender, L) end, maps:values(Readies)).
 
 %% Figure2. Bullet2
 %% upon receiving VAL(h, bi , si) from PSender,
@@ -140,7 +117,7 @@ echo(Data = #rbc_data{state=done}, J, _H, _Bj, _Sj) ->
 echo(Data = #rbc_data{n=N, f=F}, J, H, Bj, Sj) ->
 
     %% check if you've already seen an ECHO from the sender
-    case lists:member(J, Data#rbc_data.num_echoes) of
+    case has_echo(Data, J) of
         true ->
             %% already got an ECHO From J, discard
             {Data, ok};
@@ -148,11 +125,10 @@ echo(Data = #rbc_data{n=N, f=F}, J, H, Bj, Sj) ->
             io:format("ECHO. Verifying merkle proof. RBC: ~p~n", [J]),
             case merkerl:verify_proof(merkerl:hash_value(Sj), H, Bj) of
                 ok ->
-
                     %% valid branch
-                    NewData = add_stripe(Data#rbc_data{num_echoes=insert_once(J, Data#rbc_data.num_echoes)}, H, J, Sj),
-
-                    case length(NewData#rbc_data.num_echoes) >= (N - F) andalso maps:size(maps:get(H, NewData#rbc_data.stripes)) >= (N - 2*F) of
+                    DataWithEchoes = add_echo(Data, H, J),
+                    NewData = add_stripe(DataWithEchoes, H, J, Sj),
+                    case length(maps:get(H, NewData#rbc_data.num_echoes, [])) >= (N - F) andalso maps:size(maps:get(H, NewData#rbc_data.stripes, [])) >= (N - 2*F) of
                         true ->
                             %% Figure2. Bullet4
                             %% upon receiving valid ECHO(h, ·, ·) messages from N − f distinct parties,
@@ -176,18 +152,53 @@ echo(Data = #rbc_data{n=N, f=F}, J, H, Bj, Sj) ->
 ready(Data = #rbc_data{state=waiting, n=N, f=F}, J, H) ->
     %% increment num_readies
     io:format("READY. State=waiting. RBC: ~p~n", [J]),
-    NewData = Data#rbc_data{num_readies=insert_once(J, Data#rbc_data.num_readies)},
-    case length(NewData#rbc_data.num_readies) >= F + 1 andalso maps:size(maps:get(H, NewData#rbc_data.stripes)) >= (N - 2*F) of
+
+    %% check if you've already seen this ready
+    case has_ready(Data, J) of
         true ->
-            check_completion(NewData, H);
+            {Data, ok};
         false ->
-            %% waiting
-            {NewData, ok}
+            NewData = add_ready(Data, H, J),
+            case length(maps:get(H, NewData#rbc_data.num_readies, [])) >= F + 1 andalso maps:size(maps:get(H, NewData#rbc_data.stripes, [])) >= (N - 2*F) of
+                true ->
+                    check_completion(NewData, H);
+                false ->
+                    %% waiting
+                    {NewData, ok}
+            end
     end;
+
 ready(Data, J, _H) ->
     io:format("Ignoring result from ~p in state ~p~n", [J, Data#rbc_data.state]),
     {Data, ok}.
 
+
+%% helper functions
+-spec add_stripe(rbc_data(), merkerl:hash(), non_neg_integer(), binary()) -> rbc_data().
+add_stripe(Data = #rbc_data{stripes=Stripes}, RootHash, Sender, Shard) ->
+    %% who sent these stripes
+    ValuesForRootHash = maps:get(RootHash, Stripes, #{}),
+    %% add the sender who sent the shard
+    NewMap = maps:put(Sender, Shard, ValuesForRootHash),
+    Data#rbc_data{stripes = maps:put(RootHash, NewMap, Stripes)}.
+
+-spec add_echo(rbc_data(), merkerl:hash(), non_neg_integer()) -> rbc_data().
+add_echo(Data = #rbc_data{num_echoes = Echoes}, RootHash, Sender) ->
+    EchoesForThisHash = maps:get(RootHash, Echoes, []),
+    Data#rbc_data{num_echoes = maps:put(RootHash, insert_once(Sender, EchoesForThisHash), Echoes)}.
+
+-spec add_ready(rbc_data(), merkerl:hash(), non_neg_integer()) -> rbc_data().
+add_ready(Data = #rbc_data{num_readies = Readies}, RootHash, Sender) ->
+    ReadiesForThisHash = maps:get(RootHash, Readies, []),
+    Data#rbc_data{num_readies = maps:put(RootHash, insert_once(Sender, ReadiesForThisHash), Readies)}.
+
+-spec has_echo(rbc_data(), non_neg_integer()) -> boolean().
+has_echo(_Data = #rbc_data{num_echoes = Echoes}, Sender) ->
+    lists:any(fun(L) -> lists:member(Sender, L) end, maps:values(Echoes)).
+
+-spec has_ready(rbc_data(), non_neg_integer()) -> boolean().
+has_ready(_Data = #rbc_data{num_readies = Readies}, Sender) ->
+    lists:any(fun(L) -> lists:member(Sender, L) end, maps:values(Readies)).
 
 %% helper to check whether rbc protocol has completed
 -spec check_completion(rbc_data(), merkerl:hash()) -> {rbc_data(), ok | {result, binary()} | hbbft_utils:multicast(ready_msg()) | {result, aborted}}.
@@ -201,8 +212,7 @@ check_completion(Data = #rbc_data{n=N, f=F}, H) ->
     M = N - 2*F, %% Note: M = Threshold (specified in RBC protocol)
     K = 2*F,
 
-    ShardsWithSize = maps:values(maps:get(H, Data#rbc_data.stripes)),
-    io:format("ShardsWithSize: ~p~n", [ShardsWithSize]),
+    ShardsWithSize = maps:values(maps:get(H, Data#rbc_data.stripes, [])),
     {_, Shards} = lists:unzip(ShardsWithSize),
     case leo_erasure:decode({K, M}, Shards, element(1, hd(ShardsWithSize))) of
         {ok, Msg} ->
@@ -221,7 +231,7 @@ check_completion(Data = #rbc_data{n=N, f=F}, H) ->
                             %% Figure2. Bullet6
                             %% check if we have enough readies and enough echoes
                             %% N-2F echoes and 2F + 1 readies
-                            case length(Data#rbc_data.num_echoes) >= M andalso length(Data#rbc_data.num_readies) >= (2*F + 1) of
+                            case length(maps:get(H, Data#rbc_data.num_echoes, [])) >= M andalso length(maps:get(H, Data#rbc_data.num_readies, [])) >= (2*F + 1) of
                                 true ->
                                     %% decode V. Done
                                     {Data#rbc_data{state=done}, {result, Msg}};
@@ -272,47 +282,6 @@ init_test() ->
     ?assert(lists:all(fun({result, {_, Res}}) -> Res == Msg end, ConvergedResultsList)),
     ok.
 
-%% incriminate_leader_test() ->
-%%     %% can we find out if the leader is sending bad messages and incriminate that leader?
-%%     N = 5,
-%%     F = 1,
-%%     %% the leader will input this bad msg
-%%     BadMsg = crypto:strong_rand_bytes(512),
-%%     S0 = hbbft_rbc:init(N, F, 0, 0), %% leader
-%%     S1 = hbbft_rbc:init(N, F, 1, 0),
-%%     S2 = hbbft_rbc:init(N, F, 2, 0),
-%%     S3 = hbbft_rbc:init(N, F, 3, 0),
-%%     S4 = hbbft_rbc:init(N, F, 4, 0),
-%%     %% these are the badmsgstosend from the leader
-%%     {NewS0, {send, BadMsgsToSend}} = hbbft_rbc:input(S0, BadMsg),
-%% 
-%%     %% this is the good message everyone wants
-%%     GoodMsg = crypto:strong_rand_bytes(512),
-%%     M = N - 2*F,
-%%     K = 2*F,
-%%     {ok, Shards} = leo_erasure:encode({K, M}, GoodMsg),
-%%     GoodMsgSize = byte_size(GoodMsg),
-%%     ShardsWithSize = [{GoodMsgSize, Shard} || Shard <- Shards],
-%%     Merkle = merkerl:new(ShardsWithSize, fun merkerl:hash_value/1),
-%%     MerkleRootHash = merkerl:root_hash(Merkle),
-%%     BranchesForShards = [merkerl:gen_proof(Hash, Merkle) || {Hash, _} <- merkerl:leaves(Merkle)],
-%%     %% these are the good messages to send to everyone
-%%     GoodMsgsToSend = [ {unicast, J, {val, MerkleRootHash, lists:nth(J+1, BranchesForShards), lists:nth(J+1, ShardsWithSize)}} || J <- lists:seq(0, N-1)],
-%%     [ First | _ ] = GoodMsgsToSend,
-%%     [ _, Second , Third, Fourth, Fifth ] = BadMsgsToSend,
-%%     NewMsgsToSend = [First, Second, Third, Fourth, Fifth],
-%%     %% ====================================================
-%% 
-%%     States = [NewS0, S1, S2, S3, S4],
-%%     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
-%%     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, [{0, {send, NewMsgsToSend}}], StatesWithId, sets:new()),
-%%     ConvergedResultsList = sets:to_list(ConvergedResults),
-%%     io:format("ConvergedResults: ~p~n", [ConvergedResultsList]),
-%%     ?assert(lists:all(fun({result, {_, Res}}) -> Res == aborted end, ConvergedResultsList)),
-%%     %% everyone should abort
-%%     ?assertEqual(5, sets:size(ConvergedResults)),
-%%     ok.
-%% 
 send_incorrect_msg_test() ->
     N = 5,
     F = 1,
@@ -324,6 +293,8 @@ send_incorrect_msg_test() ->
     S4 = hbbft_rbc:init(N, F, 4, 0),
     {NewS0, {send, MsgsToSend}} = hbbft_rbc:input(S0, Msg),
 
+    {unicast, _, {val, MerkleRootHash, _, _}} = hd(MsgsToSend),
+
     %% ====================================================
     %% screw up 3 val messages in the MsgsToSend
     %% TODO: something better but this works for now
@@ -334,7 +305,6 @@ send_incorrect_msg_test() ->
     MsgSize = byte_size(BadMsg),
     ShardsWithSize = [{MsgSize, Shard} || Shard <- Shards],
     Merkle = merkerl:new(ShardsWithSize, fun merkerl:hash_value/1),
-    MerkleRootHash = merkerl:root_hash(Merkle),
     BranchesForShards = [merkerl:gen_proof(Hash, Merkle) || {Hash, _} <- merkerl:leaves(Merkle)],
     BadMsgsToSend = [ {unicast, J, {val, MerkleRootHash, lists:nth(J+1, BranchesForShards), lists:nth(J+1, ShardsWithSize)}} || J <- lists:seq(0, N-1)],
     [ First, Second | _ ] = MsgsToSend,
@@ -348,6 +318,7 @@ send_incorrect_msg_test() ->
     ConvergedResultsList = sets:to_list(ConvergedResults),
     io:format("ConvergedResults: ~p~n", [ConvergedResultsList]),
     ?assert(lists:all(fun({result, {_, Res}}) -> Res == aborted end, ConvergedResultsList)),
+    ?assertEqual(0, sets:size(ConvergedResults)),
     ok.
 
 incorrect_leader_test() ->

@@ -18,11 +18,11 @@ simple_test(_Config) ->
     N = 5,
     F = (N div 3),
     Msg = crypto:strong_rand_bytes(512),
-    Leader = 0,
+    Leader = rand:uniform(N) - 1,
     Workers = [element(2, rbc_worker:start_link(N, F, Id, Leader)) || Id <- lists:seq(0, N-1)],
 
     %% the first guy is the leader
-    ok = rbc_worker:input(Msg, hd(Workers)),
+    ok = rbc_worker:input(Msg, lists:nth(Leader+1, Workers)),
 
     wait_until(fun() ->
                        lists:all(fun(E) ->
@@ -34,12 +34,6 @@ simple_test(_Config) ->
     1 = sets:size(sets:from_list(ConvergedResults)),
     Msg = hd(ConvergedResults),
     ok.
-
-%% random_n(N, List) ->
-%%     lists:sublist(shuffle(List), N).
-%% 
-%% shuffle(List) ->
-%%     [X || {_,X} <- lists:sort([{rand:uniform(), N} || N <- List])].
 
 wait_until(Fun) ->
     wait_until(Fun, 40, 100).

@@ -37,7 +37,7 @@
 init(SK, N, F, J) ->
     %% instantiate all the RBCs
     %% J=leader, I=Pid
-    RBCs = [{I, #rbc_state{rbc_data = hbbft_rbc:init(N, F, I, J)}} || I <- lists:seq(0, N-1)],
+    RBCs = [{I, #rbc_state{rbc_data = hbbft_rbc:init(N, F, J, I)}} || I <- lists:seq(0, N-1)],
     %% instantiate all the BBAs
     BBAs = [{I, #bba_state{bba_data = hbbft_bba:init(SK, N, F)}} || I <- lists:seq(0, N-1)],
     #acs_data{n=N, f=F, j=J, rbc=maps:from_list(RBCs), bba=maps:from_list(BBAs)}.
