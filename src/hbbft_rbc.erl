@@ -13,8 +13,8 @@
           f :: non_neg_integer(),
           msg = undefined :: binary() | undefined,
 
-          num_echoes = [] :: [non_neg_integer()],
-          num_readies = [] :: [non_neg_integer()],
+          num_echoes = #{} :: #{merkerl:hash() => [non_neg_integer()]},
+          num_readies = #{} :: #{merkerl:hash() => [non_neg_integer()]},
           seen_val = false :: boolean(),
           ready_sent = false :: boolean(),
 
@@ -92,6 +92,20 @@ add_stripe(Data = #rbc_data{stripes=Stripes}, RootHash, Sender, Shard) ->
     %% add the sender who sent the shard
     NewMap = maps:put(Sender, Shard, ValuesForRootHash),
     Data#rbc_data{stripes = maps:put(RootHash, NewMap, Stripes)}.
+
+add_echo(Data = #rbc_data{num_echoes = Echoes}, RootHash, Sender) ->
+    EchoesForThisHash = maps:get(Roothash, Echoes, []),
+    Data#rbc_data{num_echoes = maps:put(Roothash, insert_once(Sender, EchoesForThisHash))}.
+
+add_ready(Data = #rbc_data{num_readies = Readies}, RootHash, Sender) ->
+    ReadiesForThisHash = maps:get(Roothash, Readies, []),
+    Data#rbc_data{num_readies = maps:put(Roothash, insert_once(Sender, ReadiesForThisHash))}.
+
+has_echo(Data = #rbc_data{num_echoes = Echoes}, Sender) ->
+    lists:any(fun(L) -> lists:member(Sender, L) end, maps:values(Echoes)).
+
+has_ready(Data = #rbc_data{num_readies = Readies}, Sender) ->
+    lists:any(fun(L) -> lists:member(Sender, L) end, maps:values(Readies)).
 
 %% Figure2. Bullet2
 %% upon receiving VAL(h, bi , si) from PSender,
