@@ -6,14 +6,15 @@
           rbc :: hbbft_rbc:rbc_data(),
           n :: non_neg_integer(),
           id :: non_neg_integer(),
-          result :: binary()
+          result :: binary(),
+          leader :: non_neg_integer()
          }).
 
--export([start_link/3, get_results/1, input/2]).
+-export([start_link/4, get_results/1, input/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
-start_link(N, F, Id) ->
-    gen_server:start_link({local, name(Id)}, ?MODULE, [N, F, Id], []).
+start_link(N, F, Id, Leader) ->
+    gen_server:start_link({local, name(Id)}, ?MODULE, [N, F, Id, Leader], []).
 
 input(Msg, Pid) ->
     gen_server:cast(Pid, {input, Msg}).
@@ -23,9 +24,10 @@ get_results(Pid) ->
 
 %% callbacks
 
-init([N, F, Id]) ->
-    RBC = hbbft_rbc:init(N, F),
-    {ok, #state{rbc=RBC, n=N, id=Id}}.
+init([N, F, Id, Leader]) ->
+    RBC = hbbft_rbc:init(N, F, Id, Leader),
+    io:format("RBC: ~p~n", [RBC]),
+    {ok, #state{rbc=RBC, n=N, id=Id, leader=Leader}}.
 
 handle_call(get_results, _From, State) ->
     {reply, State#state.result, State};
