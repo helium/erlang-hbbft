@@ -16,3 +16,10 @@ _build
 .idea
 *.iml
 rebar3.crashdump
+
+*.html
+*.css
+*cache
+ct_run.*
+*.js
+*nohost
