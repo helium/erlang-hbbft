@@ -2,7 +2,7 @@
 
 -include_lib("hbbft_bba.hrl").
 
--export([init/3, input/2, handle_msg/3, serialize_bba_data/1]).
+-export([init/3, input/2, handle_msg/3, serialize/1, deserialize/2]).
 
 -type bba_data() :: #bba_data{}.
 -type bba_serialized_data() :: #bba_serialized_data{}.
@@ -138,20 +138,68 @@ aux(Data = #bba_data{n=N, f=F}, Id, V) ->
             {NewData, ok}
     end.
 
--spec serialize_bba_data(bba_data()) -> bba_serialized_data().
-serialize_bba_data(#bba_data{state=State, round=Round, coin=Coin,
-                             est=Est, output=Output, f=F, n=N,
-                             witness=Witness, aux_witness=AuxWitness,
-                             aux_sent=AuxSent, broadcasted=Broadcasted,
-                             bin_values=BinValues}) ->
+-spec serialize(bba_data()) -> bba_serialized_data().
+serialize(#bba_data{state=State,
+                    round=Round,
+                    coin=Coin,
+                    est=Est,
+                    output=Output,
+                    f=F,
+                    n=N,
+                    witness=Witness,
+                    aux_witness=AuxWitness,
+                    aux_sent=AuxSent,
+                    broadcasted=Broadcasted,
+                    bin_values=BinValues}) ->
     NewCoin = case Coin of
                   undefined -> undefined;
-                  _ -> hbbft_cc:serialize_cc_data(Coin)
+                  _ -> hbbft_cc:serialize(Coin)
               end,
-    #bba_serialized_data{state=State, round=Round, coin=NewCoin,
-                         est=Est, output=Output, f=F, n=N, witness=Witness,
-                         aux_witness=AuxWitness, aux_sent=AuxSent, broadcasted=Broadcasted,
+    #bba_serialized_data{state=State,
+                         round=Round,
+                         coin=NewCoin,
+                         est=Est,
+                         output=Output,
+                         f=F,
+                         n=N,
+                         witness=Witness,
+                         aux_witness=AuxWitness,
+                         aux_sent=AuxSent,
+                         broadcasted=Broadcasted,
                          bin_values=BinValues}.
+
+
+-spec deserialize(bba_serialized_data(), tpke_privkey:privkey()) -> bba_data().
+deserialize(#bba_serialized_data{state=State,
+                                 round=Round,
+                                 coin=Coin,
+                                 est=Est,
+                                 output=Output,
+                                 f=F,
+                                 n=N,
+                                 witness=Witness,
+                                 aux_witness=AuxWitness,
+                                 aux_sent=AuxSent,
+                                 broadcasted=Broadcasted,
+                                 bin_values=BinValues}, SK) ->
+    NewCoin = case Coin of
+                  undefined -> undefined;
+                  _ -> hbbft_cc:deserialize(Coin, SK)
+              end,
+    #bba_data{state=State,
+              secret_key=SK,
+              round=Round,
+              coin=NewCoin,
+              est=Est,
+              output=Output,
+              f=F,
+              n=N,
+              witness=Witness,
+              aux_witness=AuxWitness,
+              aux_sent=AuxSent,
+              broadcasted=Broadcasted,
+              bin_values=BinValues}.
+
 
 %% helper functions
 -spec check_n_minus_f_aux_messages(pos_integer(), non_neg_integer(), bba_data()) -> boolean().

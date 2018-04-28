@@ -2,7 +2,7 @@
 
 -include_lib("hbbft_cc.hrl").
 
--export([init/4, get_coin/1, handle_msg/3, serialize_cc_data/1]).
+-export([init/4, get_coin/1, handle_msg/3, serialize/1, deserialize/2]).
 
 -type cc_data() :: #cc_data{}.
 -type cc_serialized_data() :: #cc_serialized_data{}.
@@ -82,10 +82,23 @@ share(Data, J, Share) ->
             {Data, ok}
     end.
 
--spec serialize_cc_data(cc_data()) -> cc_serialized_data().
-serialize_cc_data(#cc_data{state=State, sid=SID, n=N, f=F, shares=ShareMap}) ->
-    SerializedShareMap = maps:map(fun(_K, V) -> hbbft_utils:share_to_binary(V) end, ShareMap),
-    #cc_serialized_data{state=State, sid=erlang_pbc:element_to_binary(SID), n=N, f=F, shares=SerializedShareMap}.
+-spec serialize(cc_data()) -> cc_serialized_data().
+serialize(#cc_data{state=State, sid=SID, n=N, f=F, shares=Shares}) ->
+    #cc_serialized_data{state=State, sid=erlang_pbc:element_to_binary(SID), n=N, f=F, shares=serialize_shares(Shares)}.
+
+-spec deserialize(cc_serialized_data(), tpke_privkey:privkey()) -> cc_data().
+deserialize(#cc_serialized_data{state=State, sid=SID, n=N, f=F, shares=Shares}, SK) ->
+    %% XXX: same hack as in hbbft_utils
+    Yolo = tpke_pubkey:hash_message(tpke_privkey:public_key(SK), <<"yolo">>),
+    Element = erlang_pbc:binary_to_element(Yolo, SID),
+    #cc_data{state=State, sk=SK, sid=Element, n=N, f=F, shares=deserialize_shares(Shares, SK)}.
+
+%% TODO: specs
+serialize_shares(Shares) ->
+    maps:map(fun(_K, V) -> hbbft_utils:share_to_binary(V) end, Shares).
+
+deserialize_shares(Shares, SK) ->
+    maps:map(fun(_K, V) -> hbbft_utils:binary_to_share(V, SK) end, Shares).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").

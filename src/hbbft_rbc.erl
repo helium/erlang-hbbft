@@ -2,7 +2,7 @@
 
 -include_lib("hbbft_rbc.hrl").
 
--export([init/4, input/2, handle_msg/3, serialize_rbc_data/1]).
+-export([init/4, input/2, handle_msg/3, serialize/1, deserialize/1]).
 
 %% rbc protocol requires three message types: ECHO(h, bj, sj), VAL(h, bj, sj) and READY(h)
 %% where h: merkle hash, bj: merkle branch (proof) and sj: blocks of (N-2f, N)-erasure coding scheme applied to input
@@ -237,11 +237,53 @@ check_completion(Data = #rbc_data{n=N, f=F}, H) ->
             {Data#rbc_data{state=waiting}, ok}
     end.
 
--spec serialize_rbc_data(rbc_data()) -> rbc_serialized_data().
-serialize_rbc_data(#rbc_data{state=State, n=N, f=F, msg=Msg, stripes=Stripes, num_echoes=NumEchoes,
-                             num_readies=NumReadies, seen_val=SeenVal, ready_sent=ReadySent}) ->
-    #rbc_serialized_data{state=State, n=N, f=F, msg=Msg, stripes=Stripes, num_echoes=NumEchoes,
-                         num_readies=NumReadies, seen_val=SeenVal, ready_sent=ReadySent}.
+-spec serialize(rbc_data()) -> rbc_serialized_data().
+serialize(#rbc_data{state=State,
+                    n=N,
+                    f=F,
+                    pid=Pid,
+                    leader=Leader,
+                    msg=Msg,
+                    stripes=Stripes,
+                    num_echoes=NumEchoes,
+                    num_readies=NumReadies,
+                    seen_val=SeenVal,
+                    ready_sent=ReadySent}) ->
+    #rbc_serialized_data{state=State,
+                         n=N,
+                         pid=Pid,
+                         leader=Leader,
+                         f=F,
+                         msg=Msg,
+                         stripes=Stripes,
+                         num_echoes=NumEchoes,
+                         num_readies=NumReadies,
+                         seen_val=SeenVal,
+                         ready_sent=ReadySent}.
+
+-spec deserialize(rbc_serialized_data()) -> rbc_data().
+deserialize(#rbc_serialized_data{state=State,
+                    n=N,
+                    pid=Pid,
+                    leader=Leader,
+                    f=F,
+                    msg=Msg,
+                    stripes=Stripes,
+                    num_echoes=NumEchoes,
+                    num_readies=NumReadies,
+                    seen_val=SeenVal,
+                    ready_sent=ReadySent}) ->
+    #rbc_data{state=State,
+              n=N,
+              f=F,
+              pid=Pid,
+              leader=Leader,
+              msg=Msg,
+              stripes=Stripes,
+              num_echoes=NumEchoes,
+              num_readies=NumReadies,
+              seen_val=SeenVal,
+              ready_sent=ReadySent}.
 
 -spec insert_once(non_neg_integer(), [non_neg_integer()]) -> [non_neg_integer(), ...].
 insert_once(Element, List) ->

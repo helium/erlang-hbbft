@@ -6,7 +6,15 @@
 -include_lib("hbbft_cc.hrl").
 -include_lib("hbbft_rbc.hrl").
 
--export([init/5, input/2, finalize_round/3, next_round/1, get_encrypted_key/2, decrypt/2, handle_msg/3, serialize/1]).
+-export([init/5,
+         input/2,
+         finalize_round/3,
+         next_round/1,
+         get_encrypted_key/2,
+         decrypt/2,
+         handle_msg/3,
+         serialize/1,
+         deserialize/2]).
 
 -type hbbft_data() :: #hbbft_data{}.
 -type hbbft_serialized_data() :: #hbbft_serialized_data{}.
@@ -25,7 +33,7 @@ init(SK, N, F, J, BatchSize) ->
 input(Data = #hbbft_data{buf=Buf}, Txn) ->
     %% add this txn to the the buffer
     NewBuf = [Txn | Buf],
-    io:format("~p got message, queue is ~p~n", [Data#hbbft_data.j, length(NewBuf)]),
+    %% io:format("~p got message, queue is ~p~n", [Data#hbbft_data.j, length(NewBuf)]),
     maybe_start_acs(Data#hbbft_data{buf=NewBuf}).
 
 %% The user has constructed something that looks like a block and is telling us which transactions
@@ -37,7 +45,7 @@ finalize_round(Data, TransactionsToRemove, ThingToSign) ->
     NewBuf = lists:filter(fun(Item) ->
                                   not lists:member(Item, TransactionsToRemove)
                           end, Data#hbbft_data.buf),
-    io:format("~b finalizing round, removed ~p elements from buf~n", [Data#hbbft_data.j, length(Data#hbbft_data.buf) - length(NewBuf)]),
+    %% io:format("~b finalizing round, removed ~p elements from buf~n", [Data#hbbft_data.j, length(Data#hbbft_data.buf) - length(NewBuf)]),
     HashThing = tpke_pubkey:hash_message(tpke_privkey:public_key(Data#hbbft_data.secret_key), ThingToSign),
     BinShare = hbbft_utils:share_to_binary(tpke_privkey:sign(Data#hbbft_data.secret_key, HashThing)),
     %% multicast the signature to everyone
@@ -67,7 +75,7 @@ handle_msg(Data = #hbbft_data{round=R}, J, {{acs, R}, ACSMsg}) ->
             {Data#hbbft_data{acs=NewACS}, {send, hbbft_utils:wrap({acs, Data#hbbft_data.round}, ACSResponse)}};
         {NewACS, {result, Results}} ->
             %% ACS[r] has returned, time to move on to the decrypt phase
-            io:format("~b ACS[~b] result ~p~n", [Data#hbbft_data.j, Data#hbbft_data.round, hd(Results)]),
+            %% io:format("~b ACS[~b] result ~p~n", [Data#hbbft_data.j, Data#hbbft_data.round, hd(Results)]),
             %% start decrypt phase
             Replies = lists:map(fun({I, Result}) ->
                                         EncKey = get_encrypted_key(Data#hbbft_data.secret_key, Result),
@@ -85,21 +93,21 @@ handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
     SharesForThisBundle = [ S || {{Idx, _}, S} <- maps:to_list(NewShares), I == Idx],
     case length(SharesForThisBundle) > Data#hbbft_data.f andalso not maps:is_key({I, J}, Data#hbbft_data.dec_shares) andalso lists:keymember(I, 1, Data#hbbft_data.acs_results) of
         true ->
-            io:format("~p got enough shares to decrypt bundle ~n", [Data#hbbft_data.j]),
+            %% io:format("~p got enough shares to decrypt bundle ~n", [Data#hbbft_data.j]),
             {I, Enc} = lists:keyfind(I, 1, Data#hbbft_data.acs_results),
             EncKey = get_encrypted_key(Data#hbbft_data.secret_key, Enc),
             %% TODO verify the shares with verify_share/3
             DecKey = tpke_pubkey:combine_shares(tpke_privkey:public_key(Data#hbbft_data.secret_key), EncKey, SharesForThisBundle),
             case decrypt(DecKey, Enc) of
                 error ->
-                    io:format("failed to decrypt bundle!~n"),
+                    %% io:format("failed to decrypt bundle!~n"),
                     {Data#hbbft_data{dec_shares=NewShares}, ok};
                 Decrypted ->
                     NewDecrypted = maps:put(I, binary_to_term(Decrypted), Data#hbbft_data.decrypted),
                     case maps:size(NewDecrypted) == length(Data#hbbft_data.acs_results) andalso not Data#hbbft_data.sent_txns of
                         true ->
                             %% we did it!
-                            io:format("~p finished decryption phase!~n", [Data#hbbft_data.j]),
+                            %% io:format("~p finished decryption phase!~n", [Data#hbbft_data.j]),
                             %% Combine all unique messages into a single list
                             TransactionsThisRound = lists:usort(lists:flatten(maps:values(NewDecrypted))),
                             %% return the transactions we agreed on to the user
@@ -123,7 +131,7 @@ handle_msg(Data = #hbbft_data{round=R, thingtosign=ThingToSign}, J, {sign, R, Bi
     %% verify the share
     case tpke_pubkey:verify_signature_share(tpke_privkey:public_key(Data#hbbft_data.secret_key), Share, ThingToSign) of
         true ->
-            io:format("~b got valid signature share~n", [Data#hbbft_data.j]),
+            %% io:format("~b got valid signature share~n", [Data#hbbft_data.j]),
             NewSigShares = maps:put(J, Share, Data#hbbft_data.sig_shares),
             %% check if we have at least f+1 shares
             case maps:size(NewSigShares) > Data#hbbft_data.f andalso not Data#hbbft_data.sent_sig of
@@ -135,11 +143,11 @@ handle_msg(Data = #hbbft_data{round=R, thingtosign=ThingToSign}, J, {sign, R, Bi
                     {Data#hbbft_data{sig_shares=NewSigShares}, ok}
             end;
         false ->
-            io:format("~p got bad signature share from ~p~n", [Data#hbbft_data.j, J]),
+            %% io:format("~p got bad signature share from ~p~n", [Data#hbbft_data.j, J]),
             {Data, ok}
     end;
-handle_msg(Data, J, Msg) ->
-    io:format("~p ignoring message ~p from ~p in round ~p ~n", [Data#hbbft_data.j, Msg, J, Data#hbbft_data.round]),
+handle_msg(Data, _J, _Msg) ->
+    %% io:format("~p ignoring message ~p from ~p in round ~p ~n", [Data#hbbft_data.j, Msg, J, Data#hbbft_data.round]),
     {Data, ok}.
 
 -spec maybe_start_acs(hbbft_data()) -> {hbbft_data(), ok | {send, [rbc_wrapped_output()]}}.
@@ -154,7 +162,7 @@ maybe_start_acs(Data = #hbbft_data{n=N, secret_key=SK, batch_size=BatchSize}) ->
             EncX = encrypt(tpke_privkey:public_key(SK), term_to_binary(Proposed)),
             %% time to kick off a round
             {NewACSState, {send, ACSResponse}} = hbbft_acs:input(Data#hbbft_data.acs, EncX),
-            io:format("~p has initiated ACS~n", [Data#hbbft_data.j]),
+            %% io:format("~p has initiated ACS~n", [Data#hbbft_data.j]),
             %% add this to acs set in data and send out the ACS response(s)
             {Data#hbbft_data{acs=NewACSState, acs_init=true},
              {send, hbbft_utils:wrap({acs, Data#hbbft_data.round}, ACSResponse)}};
@@ -175,7 +183,7 @@ encrypt(PK, Bin) ->
     UBin = erlang_pbc:element_to_binary(U),
     WBin = erlang_pbc:element_to_binary(W),
     EncKey = <<(byte_size(UBin)):8/integer-unsigned, UBin/binary, V:32/binary, (byte_size(WBin)):8/integer-unsigned, WBin/binary>>,
-    io:format("Enc key is ~p bytes (~p ~p ~p)~n", [byte_size(EncKey), byte_size(UBin), byte_size(V), byte_size(WBin)]),
+    %% io:format("Enc key is ~p bytes (~p ~p ~p)~n", [byte_size(EncKey), byte_size(UBin), byte_size(V), byte_size(WBin)]),
     %% encrypt the bundle with AES-GCM and put the IV and the encrypted key in the Additional Authenticated Data (AAD)
     AAD = <<IV:16/binary, (byte_size(EncKey)):16/integer-unsigned, EncKey/binary>>,
     {CipherText, CipherTag} = crypto:block_encrypt(aes_gcm, Key, IV, {AAD, Bin}),
@@ -199,28 +207,86 @@ decrypt(Key, Bin) ->
 serialize(#hbbft_data{secret_key=SK}=Data) ->
     {serialize_hbbft_data(Data), tpke_privkey:serialize(SK)}.
 
--spec serialize_hbbft_data(hbbft_data()) -> hbbft_serialized_data().
-serialize_hbbft_data(#hbbft_data{batch_size=BatchSize, n=N, f=F, j=J, round=Round,
-                                 buf=Buf, acs=ACSData, acs_init=ACSInit, sent_txns=SentTxns,
-                                 sent_sig=SentSig, acs_results=ACSResults, dec_shares=DecShares,
-                                 decrypted=Decrypted, sig_shares=SigShares, thingtosign=ThingToSign
-                                }) ->
+-spec deserialize(hbbft_serialized_data(), tpke_privkey:privkey_serialized()) -> hbbft_data().
+deserialize(#hbbft_serialized_data{batch_size=BatchSize,
+                                   n=N,
+                                   f=F,
+                                   round=Round,
+                                   buf=Buf,
+                                   acs=ACSData,
+                                   acs_init=ACSInit,
+                                   sent_txns=SentTxns,
+                                   decrypted=Decrypted, j=J,
+                                   sent_sig=SentSig,
+                                   acs_results=ACSResults,
+                                   dec_shares=DecShares,
+                                   sig_shares=SigShares,
+                                   thingtosign=ThingToSign}, SerializedSK) ->
 
-    {NewDecShares, NewSigShares} = {maps:map(fun(_K, V) -> hbbft_utils:share_to_binary(V) end, DecShares), maps:map(fun(_K, V) ->  hbbft_utils:share_to_binary(V) end, SigShares)},
+    SK = tpke_privkey:deserialize(SerializedSK),
+    #hbbft_data{secret_key=SK,
+                batch_size=BatchSize,
+                n=N,
+                f=F,
+                j=J,
+                round=Round,
+                buf=Buf,
+                acs=hbbft_acs:deserialize(ACSData, SK),
+                acs_init=ACSInit,
+                sent_txns=SentTxns,
+                sent_sig=SentSig,
+                acs_results=ACSResults,
+                decrypted=Decrypted,
+                dec_shares=deserialize_shares(DecShares, SK),
+                sig_shares=deserialize_shares(SigShares, SK),
+                thingtosign=ThingToSign}.
+
+%% TODO: better spec for this
+-spec serialize_shares(#{}) -> #{}.
+serialize_shares(Shares) ->
+    maps:map(fun(_K, V) -> hbbft_utils:share_to_binary(V) end, Shares).
+
+-spec deserialize_shares(#{}, tpke_privkey:privkey()) -> #{}.
+deserialize_shares(Shares, SK) ->
+    maps:map(fun(_K, V) -> hbbft_utils:binary_to_share(V, SK) end, Shares).
+
+-spec serialize_hbbft_data(hbbft_data()) -> hbbft_serialized_data().
+serialize_hbbft_data(#hbbft_data{batch_size=BatchSize,
+                                 n=N,
+                                 f=F,
+                                 j=J,
+                                 round=Round,
+                                 buf=Buf,
+                                 acs=ACSData,
+                                 acs_init=ACSInit,
+                                 sent_txns=SentTxns,
+                                 sent_sig=SentSig,
+                                 acs_results=ACSResults,
+                                 dec_shares=DecShares,
+                                 sig_shares=SigShares,
+                                 decrypted=Decrypted,
+                                 thingtosign=ThingToSign}) ->
 
     NewThingToSign = case ThingToSign of
                          undefined -> undefined;
                          _ -> erlang_pbc:element_to_binary(ThingToSign)
                      end,
 
-    #hbbft_serialized_data{batch_size=BatchSize, n=N, f=F, round=Round, buf=Buf,
-                           acs=hbbft_acs:serialize_acs_data(ACSData), acs_init=ACSInit,
-                           sent_txns=SentTxns, decrypted=Decrypted, j=J,
-                           sent_sig=SentSig, acs_results=ACSResults,
-                           dec_shares=NewDecShares,
-                           sig_shares=NewSigShares,
-                           thingtosign=NewThingToSign
-                          }.
+    #hbbft_serialized_data{batch_size=BatchSize,
+                           n=N,
+                           f=F,
+                           round=Round,
+                           buf=Buf,
+                           acs=hbbft_acs:serialize(ACSData),
+                           acs_init=ACSInit,
+                           sent_txns=SentTxns,
+                           decrypted=Decrypted,
+                           j=J,
+                           sent_sig=SentSig,
+                           acs_results=ACSResults,
+                           dec_shares=serialize_shares(DecShares),
+                           sig_shares=serialize_shares(SigShares),
+                           thingtosign=NewThingToSign}.
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -242,29 +308,6 @@ merge_replies(N, NewReplies, Replies) ->
                       end,
             merge_replies(N-1, lists:keydelete(N, 1, NewReplies), lists:keystore(N, 1, Replies, NewSend))
     end.
-
-hbbft_serialize_test() ->
-
-    %% WIP
-
-    N = 5,
-    F = 1,
-    BatchSize = 20,
-    dealer:start_link(N, F+1, 'SS512'),
-    {ok, _PubKey, PrivateKeys} = dealer:deal(),
-    gen_server:stop(dealer),
-    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
-
-    Data = element(2, hd(StatesWithIndex)),
-
-    {SerializedData, SerializedSK} = serialize(Data),
-
-    io:format("SerializedSK: ~p~n", [SerializedSK]),
-    io:format("SerializedData: ~p~n", [SerializedData]),
-
-    %% ?assert(false),
-
-    ok.
 
 hbbft_init_test_() ->
     {timeout, 60, [
@@ -491,6 +534,36 @@ encrypt_decrypt_test() ->
     EncKey = get_encrypted_key(hd(PrivateKeys), Enc),
     DecKey = tpke_pubkey:combine_shares(PubKey, EncKey, [ tpke_privkey:decrypt_share(SK, EncKey) || SK <- PrivateKeys]),
     ?assertEqual(PlainText, decrypt(DecKey, Enc)),
+    ok.
+
+serialization_test() ->
+    %% WIP.
+    %% XXX: dont really check anything yet
+    N = 5,
+    F = 1,
+    BatchSize = 20,
+    dealer:start_link(N, F+1, 'SS512'),
+    {ok, _PubKey, PrivateKeys} = dealer:deal(),
+    gen_server:stop(dealer),
+    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
+    Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*20)],
+    {NewStates, _Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
+                                               Destinations = hbbft_utils:random_n(rand:uniform(N), States),
+                                               {NewStates, NewReplies} = lists:unzip(lists:map(fun({J, Data}) ->
+                                                                                                       {NewData, Reply} = hbbft:input(Data, Msg),
+                                                                                                       {{J, NewData}, {J, Reply}}
+                                                                                               end, lists:keysort(1, Destinations))),
+                                               {lists:ukeymerge(1, NewStates, States), merge_replies(N, NewReplies, Replies)}
+                                       end, {StatesWithIndex, []}, Msgs),
+    %% some state
+    State = element(2, hd(NewStates)),
+    io:format("State: ~p~n", [State]),
+    %% serialize a state from NewStates
+    {SerializedState, SerializedPvtKey} = hbbft:serialize(State),
+    %% io:format("SerializedState: ~p~n", [SerializedState]),
+    %% io:format("SerializedPvtKey: ~p~n", [SerializedPvtKey]),
+    DeserializedState = hbbft:deserialize(SerializedState, SerializedPvtKey),
+    io:format("DeserializedState: ~p~n", [DeserializedState]),
     ok.
 
 -endif.

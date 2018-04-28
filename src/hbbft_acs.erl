@@ -2,7 +2,7 @@
 
 -include_lib("hbbft_acs.hrl").
 
--export([init/4, input/2, handle_msg/3, serialize_acs_data/1]).
+-export([init/4, input/2, handle_msg/3, serialize/1, deserialize/2]).
 
 -type acs_data() :: #acs_data{}.
 -type acs_serialized_data() :: #acs_serialized_data{}.
@@ -175,19 +175,44 @@ store_rbc_result(Data, I, Result) ->
     RBC = get_rbc(Data, I),
     Data#acs_data{rbc = maps:put(I, RBC#rbc_state{result=Result}, Data#acs_data.rbc)}.
 
--spec serialize_acs_data(acs_data()) -> acs_serialized_data().
-serialize_acs_data(#acs_data{done=Done, n=N, f=F, j=J, rbc=RBCMap, bba=BBAMap}) ->
-    SerializedRBCMap = maps:map(fun(_K, V) -> serialize_rbc_state(V) end, RBCMap),
-    SerializedBBAMap = maps:map(fun(_K, V) -> serialize_bba_state(V) end, BBAMap),
-    #acs_serialized_data{done=Done, n=N, f=F, j=J, rbc=SerializedRBCMap, bba=SerializedBBAMap}.
+-spec serialize(acs_data()) -> acs_serialized_data().
+serialize(#acs_data{done=Done, n=N, f=F, j=J, rbc=RBCMap, bba=BBAMap}) ->
+    #acs_serialized_data{done=Done, n=N, f=F, j=J, rbc=serialize_state(RBCMap, rbc), bba=serialize_state(BBAMap, bba)}.
+
+-spec deserialize(acs_serialized_data(), tpke_privkey:privkey()) -> acs_data().
+deserialize(#acs_serialized_data{done=Done, n=N, f=F, j=J, rbc=RBCMap, bba=BBAMap}, SK) ->
+    #acs_data{done=Done, n=N, f=F, j=J, rbc=deserialize_state(RBCMap, rbc), bba=deserialize_state(BBAMap, bba, SK)}.
+
+%% Helper functions for serialization/deserialization
+-spec serialize_state(#{non_neg_integer() => rbc_state() | bba_state()}, rbc | bba) -> #{}.
+serialize_state(State, rbc) ->
+    maps:map(fun(_K, V) -> serialize_rbc_state(V) end, State);
+serialize_state(State, bba) ->
+    maps:map(fun(_K, V) -> serialize_bba_state(V) end, State).
+
+-spec deserialize_state(#{non_neg_integer() => rbc_serialized_state()}, rbc) -> #{}.
+deserialize_state(State, rbc) ->
+    maps:map(fun(_K, V) -> deserialize_rbc_state(V) end, State).
+
+-spec deserialize_state(#{non_neg_integer() => bba_serialized_state()}, bba, tpke_privkey:privkey()) -> #{}.
+deserialize_state(State, bba, SK) ->
+    maps:map(fun(_K, V) -> deserialize_bba_state(V, SK) end, State).
 
 -spec serialize_rbc_state(rbc_state()) -> rbc_serialized_state().
 serialize_rbc_state(#rbc_state{rbc_data=RBCData, result=Result}) ->
-    #rbc_serialized_state{rbc_data=hbbft_rbc:serialize_rbc_data(RBCData), result=Result}.
+    #rbc_serialized_state{rbc_data=hbbft_rbc:serialize(RBCData), result=Result}.
+
+-spec deserialize_rbc_state(rbc_serialized_state()) -> rbc_state().
+deserialize_rbc_state(#rbc_serialized_state{rbc_data=RBCData, result=Result}) ->
+    #rbc_state{rbc_data=hbbft_rbc:deserialize(RBCData), result=Result}.
 
 -spec serialize_bba_state(bba_state()) -> bba_serialized_state().
 serialize_bba_state(#bba_state{bba_data=BBAData, input=Input, result=Result}) ->
-    #bba_serialized_state{bba_data=hbbft_bba:serialize_bba_data(BBAData), input=Input, result=Result}.
+    #bba_serialized_state{bba_data=hbbft_bba:serialize(BBAData), input=Input, result=Result}.
+
+-spec deserialize_bba_state(bba_serialized_state(), tpke_privkey:privkey()) -> bba_state().
+deserialize_bba_state(#bba_serialized_state{bba_data=BBAData, input=Input, result=Result}, SK) ->
+    #bba_state{bba_data=hbbft_bba:deserialize(BBAData, SK), input=Input, result=Result}.
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
