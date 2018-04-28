@@ -138,7 +138,6 @@ aux(Data = #bba_data{n=N, f=F}, Id, V) ->
             {NewData, ok}
     end.
 
-
 -spec serialize_bba_data(bba_data()) -> bba_serialized_data().
 serialize_bba_data(#bba_data{state=State, round=Round, coin=Coin,
                              est=Est, output=Output, f=F, n=N,
