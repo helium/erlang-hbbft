@@ -18,6 +18,12 @@
 
 -export_type([cc_data/0, share_msg/0]).
 
+%% Figure12. Bullet1
+%% Trusted Setup Phase: A trusted dealer runs pk, {ski } ←
+%% ThresholdSetup to generate a common public key, as well as
+%% secret key shares {ski }, one for each party (secret key ski is
+%% distributed to party Pi). Note that a single setup can be used to
+%% support a family of Coins indexed by arbitrary sid strings.
 -spec init(tpke_privkey:privkey(), binary() | erlang_pbc:element(), pos_integer(), non_neg_integer()) -> cc_data().
 init(SecretKeyShard, Bin, N, F) when is_binary(Bin) ->
     Sid = tpke_pubkey:hash_message(tpke_privkey:public_key(SecretKeyShard), Bin),
@@ -25,6 +31,9 @@ init(SecretKeyShard, Bin, N, F) when is_binary(Bin) ->
 init(SecretKeyShard, Sid, N, F) ->
     #cc_data{sk=SecretKeyShard, n=N, f=F, sid=Sid}.
 
+
+%% Figure12. Bullet2
+%% on input GetCoin, multicast ThresholdSignpk (ski, sid)
 -spec get_coin(cc_data()) -> {cc_data(), ok | {send, [hbbft_utils:multicast(share_msg())]}}.
 get_coin(Data = #cc_data{state=done}) ->
     {Data, ok};
@@ -33,6 +42,11 @@ get_coin(Data) ->
     SerializedShare = hbbft_utils:share_to_binary(Share),
     {Data, {send, [{multicast, {share, SerializedShare}}]}}.
 
+
+%% upon receiving at least f + 1 shares, attempt to combine them
+%% into a signature:
+%% sig ← ThresholdCombinepk ({ j, s j })
+%% if ThresholdVerifypk(sid) then deliver sig
 %% TODO: more specific return type than an integer?
 -spec handle_msg(cc_data(), non_neg_integer(), share_msg()) -> {cc_data(), ok | {result, integer()}}.
 handle_msg(Data, J, {share, Share}) ->

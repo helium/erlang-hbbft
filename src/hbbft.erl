@@ -1,14 +1,15 @@
--module(hbbft). %% big kahuna
+-module(hbbft).
 
--export([init/4, input/2, finalize_round/3, next_round/1, get_encrypted_key/2, decrypt/2, handle_msg/3]).
+-export([init/5, input/2, finalize_round/3, next_round/1, get_encrypted_key/2, decrypt/2, handle_msg/3]).
 
 -record(hbbft_data, {
+          batch_size :: pos_integer(),
           secret_key :: tpke_privkey:privkey(),
           n :: pos_integer(),
           f :: pos_integer(),
           j :: non_neg_integer(),
           round = 0 :: non_neg_integer(),
-          buf = queue:new() :: queue:queue(),
+          buf = [] :: [binary()],
           acs :: hbbft_acs:acs_data(),
           acs_init = false :: boolean(),
           sent_txns = false :: boolean(),
@@ -20,8 +21,6 @@
           thingtosign :: undefined | erlang_pbc:element()
          }).
 
--define(BATCH_SIZE, 20).
-
 -type hbbft_data() :: #hbbft_data{}.
 -type acs_msg() :: {{acs, non_neg_integer()}, hbbft_acs:msgs()}.
 -type dec_msg() :: {dec, non_neg_integer(), non_neg_integer(), {non_neg_integer(), binary()}}.
@@ -29,16 +28,16 @@
 -type rbc_wrapped_output() :: hbbft_utils:unicast({{acs, non_neg_integer()}, {{rbc, non_neg_integer()}, hbbft_rbc:val_msg()}}) | hbbft_utils:multicast({{acs, non_neg_integer()}, {{rbc, non_neg_integer()}, hbbft_rbc:echo_msg() | hbbft_rbc:ready_msg()}}).
 -type bba_wrapped_output() :: hbbft_utils:multicast({{acs, non_neg_integer()}, hbbft_acs:bba_msg()}).
 
--spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer(), non_neg_integer()) -> hbbft_data().
-init(SK, N, F, J) ->
-    #hbbft_data{secret_key=SK, n=N, f=F, j=J, acs=hbbft_acs:init(SK, N, F, J)}.
+-spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer(), non_neg_integer(), pos_integer()) -> hbbft_data().
+init(SK, N, F, J, BatchSize) ->
+    #hbbft_data{secret_key=SK, n=N, f=F, j=J, batch_size=BatchSize, acs=hbbft_acs:init(SK, N, F, J)}.
 
 %% someone submitting a transaction to the replica set
 -spec input(hbbft_data(), binary()) -> {hbbft_data(), ok | {send, [rbc_wrapped_output()]}}.
 input(Data = #hbbft_data{buf=Buf}, Txn) ->
     %% add this txn to the the buffer
-    NewBuf = queue:in(Txn, Buf),
-    io:format("~p got message, queue is ~p~n", [Data#hbbft_data.j, queue:len(NewBuf)]),
+    NewBuf = [Txn | Buf],
+    io:format("~p got message, queue is ~p~n", [Data#hbbft_data.j, length(NewBuf)]),
     maybe_start_acs(Data#hbbft_data{buf=NewBuf}).
 
 %% The user has constructed something that looks like a block and is telling us which transactions
@@ -47,10 +46,10 @@ input(Data = #hbbft_data{buf=Buf}, Txn) ->
 %% should not be placed in TransactionsToRemove. Once this returns, the user should call next_round/1.
 -spec finalize_round(hbbft_data(), [binary()], binary()) -> {hbbft_data(), {send, [hbbft_utils:multicast(sign_msg())]}}.
 finalize_round(Data, TransactionsToRemove, ThingToSign) ->
-    NewBuf = queue:filter(fun(Item) ->
+    NewBuf = lists:filter(fun(Item) ->
                                   not lists:member(Item, TransactionsToRemove)
                           end, Data#hbbft_data.buf),
-    io:format("~b finalizing round, removed ~p elements from buf~n", [Data#hbbft_data.j, queue:len(Data#hbbft_data.buf) - queue:len(NewBuf)]),
+    io:format("~b finalizing round, removed ~p elements from buf~n", [Data#hbbft_data.j, length(Data#hbbft_data.buf) - length(NewBuf)]),
     HashThing = tpke_pubkey:hash_message(tpke_privkey:public_key(Data#hbbft_data.secret_key), ThingToSign),
     BinShare = hbbft_utils:share_to_binary(tpke_privkey:sign(Data#hbbft_data.secret_key, HashThing)),
     %% multicast the signature to everyone
@@ -131,7 +130,7 @@ handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
     end;
 handle_msg(Data = #hbbft_data{round=R, thingtosign=ThingToSign}, J, {sign, R, BinShare}) when ThingToSign /= undefined ->
     %% messages related to signing the final block for this round, see finalize_round for more information
-    %% this is an extension to the HoneyBadger BFT specification
+    %% Note: this is an extension to the HoneyBadger BFT specification
     Share = hbbft_utils:binary_to_share(BinShare, Data#hbbft_data.secret_key),
     %% verify the share
     case tpke_pubkey:verify_signature_share(tpke_privkey:public_key(Data#hbbft_data.secret_key), Share, ThingToSign) of
@@ -156,13 +155,13 @@ handle_msg(Data, J, Msg) ->
     {Data, ok}.
 
 -spec maybe_start_acs(hbbft_data()) -> {hbbft_data(), ok | {send, [rbc_wrapped_output()]}}.
-maybe_start_acs(Data = #hbbft_data{n=N, secret_key=SK}) ->
-    case queue:len(Data#hbbft_data.buf) > ?BATCH_SIZE andalso Data#hbbft_data.acs_init == false of
+maybe_start_acs(Data = #hbbft_data{n=N, secret_key=SK, batch_size=BatchSize}) ->
+    case length(Data#hbbft_data.buf) > BatchSize andalso Data#hbbft_data.acs_init == false of
         true ->
             %% compose a transaction bundle
             %% get the top b elements from buf
             %% pick a random B/N selection of them
-            Proposed = hbbft_utils:random_n(?BATCH_SIZE div N, lists:sublist(queue:to_list(Data#hbbft_data.buf), ?BATCH_SIZE)),
+            Proposed = hbbft_utils:random_n(BatchSize div N, lists:sublist(Data#hbbft_data.buf, length(Data#hbbft_data.buf) - BatchSize + 1, BatchSize)),
             %% encrypt x -> tpke.enc(pk, proposed)
             EncX = encrypt(tpke_privkey:public_key(SK), term_to_binary(Proposed)),
             %% time to kick off a round
@@ -234,10 +233,11 @@ hbbft_init_test_() ->
                    fun() ->
                            N = 5,
                            F = 1,
+                           BatchSize = 20,
                            dealer:start_link(N, F+1, 'SS512'),
                            {ok, PubKey, PrivateKeys} = dealer:deal(),
                            gen_server:stop(dealer),
-                           StatesWithIndex = [{J, hbbft:init(Sk, N, F, J)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
+                           StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
                            Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*20)],
                            %% send each message to a random subset of the HBBFT actors
                            {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
@@ -299,10 +299,11 @@ hbbft_one_actor_no_txns_test_() ->
                    fun() ->
                            N = 5,
                            F = 1,
+                           BatchSize = 20,
                            dealer:start_link(N, F+1, 'SS512'),
                            {ok, _PubKey, PrivateKeys} = dealer:deal(),
                            gen_server:stop(dealer),
-                           StatesWithIndex = [{J, hbbft:init(Sk, N, F, J)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
+                           StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
                            Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*10)],
                            %% send each message to a random subset of the HBBFT actors
                            {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
@@ -339,10 +340,11 @@ hbbft_two_actors_no_txns_test_() ->
                    fun() ->
                            N = 5,
                            F = 1,
+                           BatchSize = 20,
                            dealer:start_link(N, F+1, 'SS512'),
                            {ok, _PubKey, PrivateKeys} = dealer:deal(),
                            gen_server:stop(dealer),
-                           StatesWithIndex = [{J, hbbft:init(Sk, N, F, J)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
+                           StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
                            Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*10)],
                            %% send each message to a random subset of the HBBFT actors
                            {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
@@ -371,10 +373,11 @@ hbbft_one_actor_missing_test_() ->
                    fun() ->
                            N = 5,
                            F = 1,
+                           BatchSize = 20,
                            dealer:start_link(N, F+1, 'SS512'),
                            {ok, _PubKey, PrivateKeys} = dealer:deal(),
                            gen_server:stop(dealer),
-                           StatesWithIndex = [{J, hbbft:init(Sk, N, F, J)} || {J, Sk} <- lists:zip(lists:seq(0, N - 2), lists:sublist(PrivateKeys, N-1))],
+                           StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize)} || {J, Sk} <- lists:zip(lists:seq(0, N - 2), lists:sublist(PrivateKeys, N-1))],
                            Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*10)],
                            %% send each message to a random subset of the HBBFT actors
                            {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
@@ -409,10 +412,11 @@ hbbft_two_actor_missing_test_() ->
                    fun() ->
                            N = 5,
                            F = 1,
+                           BatchSize = 20,
                            dealer:start_link(N, F+1, 'SS512'),
                            {ok, _PubKey, PrivateKeys} = dealer:deal(),
                            gen_server:stop(dealer),
-                           StatesWithIndex = [{J, hbbft:init(Sk, N, F, J)} || {J, Sk} <- lists:zip(lists:seq(0, N - 3), lists:sublist(PrivateKeys, N-2))],
+                           StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize)} || {J, Sk} <- lists:zip(lists:seq(0, N - 3), lists:sublist(PrivateKeys, N-2))],
                            Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*10)],
                            %% send each message to a random subset of the HBBFT actors
                            {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->

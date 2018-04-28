@@ -18,11 +18,13 @@
           n :: pos_integer(),
           f :: non_neg_integer(),
           j :: non_neg_integer(),
-          rbc = #{} :: #{non_neg_integer() => #rbc_state{}},
-          bba = #{} :: #{non_neg_integer() => #bba_state{}}
+          rbc = #{} :: #{non_neg_integer() => rbc_state()},
+          bba = #{} :: #{non_neg_integer() => bba_state()}
          }).
 
 -type acs_data() :: #acs_data{}.
+-type rbc_state() :: #rbc_state{}.
+-type bba_state() :: #bba_state{}.
 
 -type bba_msg() :: {{bba, non_neg_integer()}, hbbft_bba:msgs()}.
 -type rbc_msg() :: {{rbc, non_neg_integer()}, hbbft_rbc:msgs()}.
@@ -34,11 +36,14 @@
 -spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer(), non_neg_integer()) -> acs_data().
 init(SK, N, F, J) ->
     %% instantiate all the RBCs
-    RBCs = [{I, #rbc_state{rbc_data = hbbft_rbc:init(N, F)}} || I <- lists:seq(0, N-1)],
+    %% J=leader, I=Pid
+    RBCs = [{I, #rbc_state{rbc_data = hbbft_rbc:init(N, F, J, I)}} || I <- lists:seq(0, N-1)],
     %% instantiate all the BBAs
     BBAs = [{I, #bba_state{bba_data = hbbft_bba:init(SK, N, F)}} || I <- lists:seq(0, N-1)],
     #acs_data{n=N, f=F, j=J, rbc=maps:from_list(RBCs), bba=maps:from_list(BBAs)}.
 
+%% Figure4, Bullet1
+%% upon receiving input vi , input vi to RBCi
 -spec input(acs_data(), binary()) -> {acs_data(), {send, [rbc_wrapped_output()]}}.
 input(Data, Input) ->
     %% input the message to our RBC
@@ -56,6 +61,7 @@ handle_msg(Data, J, {{rbc, I}, RBCMsg}) ->
         {NewRBC, {send, ToSend}} ->
             {store_rbc_state(Data, I, NewRBC), {send, hbbft_utils:wrap({rbc, I}, ToSend)}};
         {NewRBC, {result, Result}} ->
+            %% Figure4, Bullet2
             %% upon delivery of vj from RBCj, if input has not yet been provided to BAj, then provide input 1 to BAj
             io:format("~p RBC returned for ~p~n", [Data#acs_data.j, I]),
             NewData = store_rbc_result(store_rbc_state(Data, I, NewRBC), I, Result),
@@ -80,6 +86,7 @@ handle_msg(Data = #acs_data{n=N, f=F}, J, {{bba, I}, BBAMsg}) ->
         {NewBBA, {result, B}} ->
             io:format("~p BBA ~p returned ~p~n", [Data#acs_data.j, I, B]),
             NewData = store_bba_state(store_bba_result(Data, I, B), I, NewBBA),
+            %% Figure4, Bullet3
             %% upon delivery of value 1 from at least N − f instances of BA , provide input 0 to each instance of BA that has not yet been provided input.
             BBAsThatReturnedOne = successful_bba_count(NewData),
             io:format("~p ~p BBAs completed, ~p returned one, ~p needed~n", [Data#acs_data.j, completed_bba_count(NewData), BBAsThatReturnedOne, N - F]),
@@ -107,9 +114,10 @@ handle_msg(Data = #acs_data{n=N, f=F}, J, {{bba, I}, BBAMsg}) ->
     end.
 
 check_completion(Data = #acs_data{n=N}) ->
-    % once all instances of BA have completed, let C⊂[1..N] be the indexes of each BA that delivered 1.
-    % Wait for the output vj for each RBCj such that j∈C. Finally output ∪j∈Cvj.
-    % Note that this means if a BBA has returned 0, we don't need to wait for the corresponding RBC.
+    %% Figure4, Bullet4
+    %% once all instances of BA have completed, let C⊂[1..N] be the indexes of each BA that delivered 1.
+    %% Wait for the output vj for each RBCj such that j∈C. Finally output ∪j∈Cvj.
+    %% Note that this means if a BBA has returned 0, we don't need to wait for the corresponding RBC.
     case lists:all(fun({E, RBC}) -> get_bba_result(Data, E) == false orelse rbc_completed(RBC) end, maps:to_list(Data#acs_data.rbc)) andalso
          lists:all(fun(BBA) -> bba_completed(BBA) end, maps:values(Data#acs_data.bba)) of
         true ->
@@ -119,51 +127,65 @@ check_completion(Data = #acs_data{n=N}) ->
             {Data, ok}
     end.
 
+-spec rbc_completed(rbc_state()) -> boolean().
 rbc_completed(#rbc_state{result=Result}) ->
     Result /= undefined.
 
+-spec bba_completed(bba_state()) -> boolean().
 bba_completed(#bba_state{input=Input, result=Result}) ->
     Input /= undefined andalso Result /= undefined.
 
+-spec successful_bba_count(acs_data()) -> non_neg_integer(). %% successful_bba_count can be 0?
 successful_bba_count(Data) ->
     lists:sum([ 1 || BBA <- maps:values(Data#acs_data.bba), BBA#bba_state.result]).
 
+-spec completed_bba_count(acs_data()) -> non_neg_integer(). %% completed_bba_count cannot be 0
 completed_bba_count(Data) ->
     lists:sum([ 1 || BBA <- maps:values(Data#acs_data.bba), BBA#bba_state.result /= undefined]).
 
+-spec get_bba(acs_data(), non_neg_integer()) -> bba_state().
 get_bba(Data, I) ->
     maps:get(I, Data#acs_data.bba).
 
+-spec bba_has_had_input(#bba_state{}) -> boolean().
 bba_has_had_input(#bba_state{input=Input}) ->
     Input /= undefined.
 
+-spec get_bba_result(acs_data(), non_neg_integer()) -> undefined | boolean().
 get_bba_result(Data, I) ->
     RBC = get_bba(Data, I),
     RBC#bba_state.result.
 
+-spec store_bba_state(acs_data(), non_neg_integer(), hbbft_bba:bba_data()) -> acs_data().
 store_bba_state(Data, I, State) ->
     BBA = get_bba(Data, I),
     Data#acs_data{bba = maps:put(I, BBA#bba_state{bba_data=State}, Data#acs_data.bba)}.
 
+-spec store_bba_input(acs_data(), non_neg_integer(), 0 | 1) -> acs_data().
 store_bba_input(Data, I, Input) ->
     BBA = get_bba(Data, I),
     Data#acs_data{bba = maps:put(I, BBA#bba_state{input=Input}, Data#acs_data.bba)}.
 
+-spec store_bba_result(acs_data(), non_neg_integer(), 0 | 1) -> acs_data().
 store_bba_result(Data, I, Result) ->
     BBA = get_bba(Data, I),
     Data#acs_data{bba = maps:put(I, BBA#bba_state{result=(Result == 1)}, Data#acs_data.bba)}.
 
+-spec get_rbc(acs_data(), non_neg_integer()) -> rbc_state().
 get_rbc(Data, I) ->
     maps:get(I, Data#acs_data.rbc).
 
+-spec get_rbc_result(acs_data(), non_neg_integer()) -> undefined | binary().
 get_rbc_result(Data, I) ->
     RBC = get_rbc(Data, I),
     RBC#rbc_state.result.
 
+-spec store_rbc_state(acs_data(), non_neg_integer(), hbbft_rbc:rbc_data()) -> acs_data().
 store_rbc_state(Data, I, State) ->
     RBC = get_rbc(Data, I),
     Data#acs_data{rbc = maps:put(I, RBC#rbc_state{rbc_data=State}, Data#acs_data.rbc)}.
 
+-spec store_rbc_result(acs_data(), non_neg_integer(), undefined | binary()) -> acs_data().
 store_rbc_result(Data, I, Result) ->
     RBC = get_rbc(Data, I),
     Data#acs_data{rbc = maps:put(I, RBC#rbc_state{result=Result}, Data#acs_data.rbc)}.
