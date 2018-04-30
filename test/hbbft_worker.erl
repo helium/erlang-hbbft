@@ -77,16 +77,10 @@ init([N, F, ID, SK]) ->
     %% init hbbft
     HBBFT = hbbft:init(DSK, N, F, ID, 20),
     %% store the serialized state and serialized SK
-    {ok, #state{hbbft=element(1, hbbft:serialize(HBBFT)), blocks=[], id=ID, n=N, sk=DSK, ssk=SK}}.
+    {ok, #state{hbbft=maybe_serialize_HBBFT(HBBFT), blocks=[], id=ID, n=N, sk=DSK, ssk=SK}}.
 
 handle_call({submit_txn, Txn}, _From, State = #state{hbbft=HBBFT, ssk=SSK}) ->
-    NewHBBFT = case is_serialized(HBBFT) of
-                   true ->
-                       %% deserialize it
-                       hbbft:deserialize(HBBFT, SSK);
-                   false -> HBBFT
-               end,
-    NewState = dispatch(hbbft:input(NewHBBFT, Txn), State),
+    NewState = dispatch(hbbft:input(maybe_deserialize_hbbft(HBBFT, SSK), Txn), State),
     {reply, ok, NewState};
 handle_call(get_blocks, _From, State) ->
     {reply, {ok, State#state.blocks}, State};
@@ -95,15 +89,9 @@ handle_call(Msg, _From, State) ->
     {reply, ok, State}.
 
 handle_cast({hbbft, PeerID, Msg}, State = #state{hbbft=HBBFT, ssk=SSK}) ->
-    NewHBBFT = case is_serialized(HBBFT) of
-                   true ->
-                       %% deserialize it
-                       hbbft:deserialize(HBBFT, SSK);
-                   false -> HBBFT
-               end,
-    NewState = dispatch(hbbft:handle_msg(NewHBBFT, PeerID, Msg), State),
+    NewState = dispatch(hbbft:handle_msg(maybe_deserialize_hbbft(HBBFT, SSK), PeerID, Msg), State),
     {noreply, NewState};
-handle_cast({block, NewBlock}, State=#state{sk=SK, hbbft=HBBFT}) ->
+handle_cast({block, NewBlock}, State=#state{sk=SK, hbbft=HBBFT, ssk=SSK}) ->
     case lists:member(NewBlock, State#state.blocks) of
         false ->
             io:format("XXXXXXXX~n"),
@@ -113,8 +101,8 @@ handle_cast({block, NewBlock}, State=#state{sk=SK, hbbft=HBBFT}) ->
                     %% advance to the next round
                     io:format("~p skipping to next round~n", [self()]),
                     %% remove any transactions we have from our queue (drop the signature messages, they're not needed)
-                    {NewHBBFT, _} = hbbft:finalize_round(HBBFT, NewBlock#block.transactions, term_to_binary(NewBlock)),
-                    NewState = dispatch(hbbft:next_round(NewHBBFT), State#state{blocks=[NewBlock | State#state.blocks]}),
+                    {NewHBBFT, _} = hbbft:finalize_round(maybe_deserialize_hbbft(HBBFT, SSK), NewBlock#block.transactions, term_to_binary(NewBlock)),
+                    NewState = dispatch(hbbft:next_round(maybe_deserialize_hbbft(NewHBBFT, SSK)), State#state{blocks=[NewBlock | State#state.blocks]}),
                     {noreply, NewState#state{tempblock=undefined}};
                 false ->
                     io:format("invalid block proposed~n"),
@@ -133,7 +121,7 @@ handle_info(Msg, State) ->
 
 dispatch({NewHBBFT, {send, ToSend}}, State) ->
     do_send(ToSend, State),
-    State#state{hbbft=element(1, hbbft:serialize(NewHBBFT))};
+    State#state{hbbft=maybe_serialize_HBBFT(NewHBBFT)};
 dispatch({NewHBBFT, {result, {transactions, Txns}}}, State) ->
     NewBlock = case State#state.blocks of
                    [] ->
@@ -143,16 +131,16 @@ dispatch({NewHBBFT, {result, {transactions, Txns}}}, State) ->
                        #block{prev_hash=hash_block(PrevBlock), transactions=Txns, signature= <<>>}
                end,
     %% tell the badger to finish the round
-    dispatch(hbbft:finalize_round(NewHBBFT, Txns, term_to_binary(NewBlock)), State#state{tempblock=NewBlock});
+    dispatch(hbbft:finalize_round(maybe_deserialize_hbbft(NewHBBFT, State#state.ssk), Txns, term_to_binary(NewBlock)), State#state{tempblock=NewBlock});
 dispatch({NewHBBFT, {result, {signature, Sig}}}, State = #state{tempblock=NewBlock0}) ->
     NewBlock = NewBlock0#block{signature=Sig},
     [ gen_server:cast({global, name(Dest)}, {block, NewBlock}) || Dest <- lists:seq(0, State#state.n - 1)],
-    dispatch(hbbft:next_round(NewHBBFT), State#state{blocks=[NewBlock|State#state.blocks], tempblock=undefined});
+    dispatch(hbbft:next_round(maybe_deserialize_hbbft(NewHBBFT, State#state.ssk)), State#state{blocks=[NewBlock|State#state.blocks], tempblock=undefined});
 dispatch({NewHBBFT, ok}, State) ->
-    State#state{hbbft=element(1, hbbft:serialize(NewHBBFT))};
+    State#state{hbbft=maybe_serialize_HBBFT(NewHBBFT)};
 dispatch({NewHBBFT, Other}, State) ->
     io:format("UNHANDLED ~p~n", [Other]),
-    State#state{hbbft=element(1, hbbft:serialize(NewHBBFT))};
+    State#state{hbbft=maybe_serialize_HBBFT(NewHBBFT)};
 dispatch(Other, State) ->
     io:format("UNHANDLED2 ~p~n", [Other]),
     State.
@@ -175,6 +163,18 @@ name(N) ->
 
 hash_block(Block) ->
     crypto:hash(sha256, term_to_binary(Block)).
+
+maybe_deserialize_hbbft(HBBFT, SSK) ->
+    case is_serialized(HBBFT) of
+        true -> hbbft:deserialize(HBBFT, SSK);
+        false -> HBBFT
+    end.
+
+maybe_serialize_HBBFT(HBBFT) ->
+    case is_serialized(HBBFT) of
+        true -> HBBFT;
+        false -> element(1, hbbft:serialize(HBBFT))
+    end.
 
 is_serialized(#hbbft_serialized_data{}) -> true;
 is_serialized(#hbbft_data{}) -> false.
