@@ -211,16 +211,17 @@ serialize(#hbbft_data{secret_key=SK}=Data) ->
 deserialize(#hbbft_serialized_data{batch_size=BatchSize,
                                    n=N,
                                    f=F,
+                                   j=J,
                                    round=Round,
                                    buf=Buf,
                                    acs=ACSData,
                                    acs_init=ACSInit,
                                    sent_txns=SentTxns,
-                                   decrypted=Decrypted, j=J,
                                    sent_sig=SentSig,
                                    acs_results=ACSResults,
-                                   dec_shares=DecShares,
+                                   decrypted=Decrypted,
                                    sig_shares=SigShares,
+                                   dec_shares=DecShares,
                                    thingtosign=ThingToSign}, SerializedSK) ->
 
     SK = tpke_privkey:deserialize(SerializedSK),
@@ -231,7 +232,9 @@ deserialize(#hbbft_serialized_data{batch_size=BatchSize,
                 j=J,
                 round=Round,
                 buf=Buf,
-                acs=hbbft_acs:deserialize(ACSData, SK),
+                %% Note: each protocol's deserialize must work independently
+                %% hence the SerializedSK passed here
+                acs=hbbft_acs:deserialize(ACSData, SerializedSK),
                 acs_init=ACSInit,
                 sent_txns=SentTxns,
                 sent_sig=SentSig,
@@ -557,13 +560,13 @@ serialization_test() ->
                                        end, {StatesWithIndex, []}, Msgs),
     %% some state
     State = element(2, hd(NewStates)),
-    io:format("State: ~p~n", [State]),
+    %% io:format("State: ~p~n", [State]),
     %% serialize a state from NewStates
     {SerializedState, SerializedPvtKey} = hbbft:serialize(State),
     %% io:format("SerializedState: ~p~n", [SerializedState]),
     %% io:format("SerializedPvtKey: ~p~n", [SerializedPvtKey]),
-    DeserializedState = hbbft:deserialize(SerializedState, SerializedPvtKey),
-    io:format("DeserializedState: ~p~n", [DeserializedState]),
+    _DeserializedState = hbbft:deserialize(SerializedState, SerializedPvtKey),
+    %% io:format("DeserializedState: ~p~n", [DeserializedState]),
     ok.
 
 -endif.
