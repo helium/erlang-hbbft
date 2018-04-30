@@ -225,6 +225,11 @@ deserialize(#hbbft_serialized_data{batch_size=BatchSize,
                                    thingtosign=ThingToSign}, SerializedSK) ->
 
     SK = tpke_privkey:deserialize(SerializedSK),
+    Derp = tpke_pubkey:hash_message(tpke_privkey:public_key(SK), <<"derp">>),
+    NewThingToSign = case ThingToSign of
+                         undefined -> undefined;
+                         _ -> erlang_pbc:binary_to_element(Derp, ThingToSign)
+                     end,
     #hbbft_data{secret_key=SK,
                 batch_size=BatchSize,
                 n=N,
@@ -240,7 +245,7 @@ deserialize(#hbbft_serialized_data{batch_size=BatchSize,
                 decrypted=Decrypted,
                 dec_shares=deserialize_shares(DecShares, SK),
                 sig_shares=deserialize_shares(SigShares, SK),
-                thingtosign=ThingToSign}.
+                thingtosign=NewThingToSign}.
 
 %% TODO: better spec for this
 -spec serialize_shares(#{}) -> #{}.
