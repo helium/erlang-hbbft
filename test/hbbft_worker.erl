@@ -77,7 +77,7 @@ init([N, F, ID, SK]) ->
     %% init hbbft
     HBBFT = hbbft:init(DSK, N, F, ID, 20),
     %% store the serialized state and serialized SK
-    {ok, #state{hbbft=maybe_serialize_HBBFT(HBBFT), blocks=[], id=ID, n=N, sk=DSK, ssk=SK}}.
+    {ok, #state{hbbft=HBBFT, blocks=[], id=ID, n=N, sk=DSK, ssk=SK}}.
 
 handle_call({submit_txn, Txn}, _From, State = #state{hbbft=HBBFT, ssk=SSK}) ->
     NewState = dispatch(hbbft:input(maybe_deserialize_hbbft(HBBFT, SSK), Txn), State),
@@ -173,7 +173,7 @@ maybe_deserialize_hbbft(HBBFT, SSK) ->
 maybe_serialize_HBBFT(HBBFT) ->
     case is_serialized(HBBFT) of
         true -> HBBFT;
-        false -> element(1, hbbft:serialize(HBBFT))
+        false -> element(1, hbbft:serialize(HBBFT, false))
     end.
 
 is_serialized(#hbbft_serialized_data{}) -> true;

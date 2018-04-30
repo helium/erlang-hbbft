@@ -14,6 +14,7 @@
          decrypt/2,
          handle_msg/3,
          serialize/1,
+         serialize/2,
          deserialize/2]).
 
 -type hbbft_data() :: #hbbft_data{}.
@@ -203,8 +204,17 @@ decrypt(Key, Bin) ->
     <<IV:16/binary, EncKeySize:16/integer-unsigned, EncKey:EncKeySize/binary, Tag:16/binary, CipherText/binary>> = Bin,
     crypto:block_decrypt(aes_gcm, Key, IV, {<<IV:16/binary, EncKeySize:16/integer-unsigned, EncKey:(EncKeySize)/binary>>, CipherText, Tag}).
 
--spec serialize(hbbft_data()) -> {hbbft_serialized_data(), tpke_privkey:privkey_serialized()}.
-serialize(#hbbft_data{secret_key=SK}=Data) ->
+-spec serialize(hbbft_data()) -> {hbbft_serialized_data(), tpke_privkey:privkey_serialized() | tpke_privkey:privkey()}.
+serialize(Data) ->
+    %% serialize the SK if not explicitly told not to do so
+    serialize(Data, true).
+
+-spec serialize(hbbft_data(), boolean()) -> {hbbft_serialized_data(), tpke_privkey:privkey_serialized() | tpke_privkey:privkey()}.
+serialize(#hbbft_data{secret_key=SK}=Data, false) ->
+    %% dont serialize the private key
+    {serialize_hbbft_data(Data), SK};
+serialize(#hbbft_data{secret_key=SK}=Data, true) ->
+    %% serialize the private key as well
     {serialize_hbbft_data(Data), tpke_privkey:serialize(SK)}.
 
 -spec deserialize(hbbft_serialized_data(), tpke_privkey:privkey_serialized()) -> hbbft_data().
