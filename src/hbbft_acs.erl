@@ -179,7 +179,7 @@ store_rbc_result(Data, I, Result) ->
 serialize(#acs_data{done=Done, n=N, f=F, j=J, rbc=RBCMap, bba=BBAMap}) ->
     #acs_serialized_data{done=Done, n=N, f=F, j=J, rbc=serialize_state(RBCMap, rbc), bba=serialize_state(BBAMap, bba)}.
 
--spec deserialize(acs_serialized_data(), tpke_privkey:privkey_serialized()) -> acs_data().
+-spec deserialize(acs_serialized_data(), tpke_privkey:privkey()) -> acs_data().
 deserialize(#acs_serialized_data{done=Done, n=N, f=F, j=J, rbc=RBCMap, bba=BBAMap}, SK) ->
     #acs_data{done=Done, n=N, f=F, j=J, rbc=deserialize_state(RBCMap, rbc), bba=deserialize_state(BBAMap, bba, SK)}.
 
@@ -194,7 +194,7 @@ serialize_state(State, bba) ->
 deserialize_state(State, rbc) ->
     maps:map(fun(_K, V) -> deserialize_rbc_state(V) end, State).
 
--spec deserialize_state(#{non_neg_integer() => bba_serialized_state()}, bba, tpke_privkey:privkey_serialized()) -> #{}.
+-spec deserialize_state(#{non_neg_integer() => bba_serialized_state()}, bba, tpke_privkey:privkey()) -> #{}.
 deserialize_state(State, bba, SK) ->
     maps:map(fun(_K, V) -> deserialize_bba_state(V, SK) end, State).
 
@@ -210,7 +210,7 @@ deserialize_rbc_state(#rbc_serialized_state{rbc_data=RBCData, result=Result}) ->
 serialize_bba_state(#bba_state{bba_data=BBAData, input=Input, result=Result}) ->
     #bba_serialized_state{bba_data=hbbft_bba:serialize(BBAData), input=Input, result=Result}.
 
--spec deserialize_bba_state(bba_serialized_state(), tpke_privkey:privkey_serialized()) -> bba_state().
+-spec deserialize_bba_state(bba_serialized_state(), tpke_privkey:privkey()) -> bba_state().
 deserialize_bba_state(#bba_serialized_state{bba_data=BBAData, input=Input, result=Result}, SK) ->
     #bba_state{bba_data=hbbft_bba:deserialize(BBAData, SK), input=Input, result=Result}.
 

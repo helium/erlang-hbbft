@@ -206,7 +206,7 @@ serialization_test(Config) ->
 
     %% check we actually converged and made a chain
 
-    true = (10 == sets:size(Chains)),
+    true = (1 == sets:size(Chains)),
     true = (0 < length(hd(sets:to_list(Chains)))),
 
     [ unlink(W) || {_, {ok, W}} <- Workers ],

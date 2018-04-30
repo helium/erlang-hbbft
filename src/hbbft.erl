@@ -232,9 +232,7 @@ deserialize(#hbbft_serialized_data{batch_size=BatchSize,
                 j=J,
                 round=Round,
                 buf=Buf,
-                %% Note: each protocol's deserialize must work independently
-                %% hence the SerializedSK passed here
-                acs=hbbft_acs:deserialize(ACSData, SerializedSK),
+                acs=hbbft_acs:deserialize(ACSData, SK),
                 acs_init=ACSInit,
                 sent_txns=SentTxns,
                 sent_sig=SentSig,

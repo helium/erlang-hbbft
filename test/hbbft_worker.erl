@@ -16,13 +16,12 @@
 -record(state, {
           n :: non_neg_integer(),
           id :: non_neg_integer(),
-          hbbft :: hbbft:hbbft_serialized_data(),
+          hbbft :: hbbft:hbbft_data(),
           blocks :: [#block{}],
           tempblock :: undefined | #block{},
-          sk :: tpke_privkey:privkey_serialized()
+          sk :: tpke_privkey:privkey()
          }).
 
-%% serialized secret key is coming in
 start_link(N, F, ID, SK) ->
     gen_server:start_link({global, name(ID)}, ?MODULE, [N, F, ID, SK], []).
 
@@ -71,16 +70,15 @@ block_transactions(Block) ->
     Block#block.transactions.
 
 init([N, F, ID, SK]) ->
+    %% deserialize the secret key once
     DSK = tpke_privkey:deserialize(SK),
     %% init hbbft
     HBBFT = hbbft:init(DSK, N, F, ID, 20),
     %% store the serialized state and serialized SK
-    {SerializedHBBFT, SerializedSK} = hbbft:serialize(HBBFT),
-    {ok, #state{hbbft=SerializedHBBFT, blocks=[], id=ID, n=N, sk=SerializedSK}}.
+    {ok, #state{hbbft=HBBFT, blocks=[], id=ID, n=N, sk=DSK}}.
 
-handle_call({submit_txn, Txn}, _From, State = #state{hbbft=HBBFT, sk=SK}) ->
-    DeserializedHBBFT = hbbft:deserialize(HBBFT, SK),
-    NewState = dispatch(hbbft:input(DeserializedHBBFT, Txn), State),
+handle_call({submit_txn, Txn}, _From, State = #state{hbbft=HBBFT}) ->
+    NewState = dispatch(hbbft:input(HBBFT, Txn), State),
     {reply, ok, NewState};
 handle_call(get_blocks, _From, State) ->
     {reply, {ok, State#state.blocks}, State};
@@ -88,22 +86,20 @@ handle_call(Msg, _From, State) ->
     io:format("unhandled msg ~p~n", [Msg]),
     {reply, ok, State}.
 
-handle_cast({hbbft, PeerID, Msg}, State = #state{hbbft=HBBFT, sk=SK}) ->
-    DeserializedHBBFT = hbbft:deserialize(HBBFT, SK),
-    NewState = dispatch(hbbft:handle_msg(DeserializedHBBFT, PeerID, Msg), State),
+handle_cast({hbbft, PeerID, Msg}, State = #state{hbbft=HBBFT}) ->
+    NewState = dispatch(hbbft:handle_msg(HBBFT, PeerID, Msg), State),
     {noreply, NewState};
 handle_cast({block, NewBlock}, State=#state{sk=SK, hbbft=HBBFT}) ->
     case lists:member(NewBlock, State#state.blocks) of
         false ->
             io:format("XXXXXXXX~n"),
             %% a new block, check if it fits on our chain
-            case verify_chain([NewBlock|State#state.blocks], tpke_privkey:public_key(tpke_privkey:deserialize(SK))) of
+            case verify_chain([NewBlock|State#state.blocks], tpke_privkey:public_key(SK)) of
                 true ->
                     %% advance to the next round
                     io:format("~p skipping to next round~n", [self()]),
                     %% remove any transactions we have from our queue (drop the signature messages, they're not needed)
-                    DeserializedHBBFT = hbbft:deserialize(HBBFT, SK),
-                    {NewHBBFT, _} = hbbft:finalize_round(DeserializedHBBFT, NewBlock#block.transactions, term_to_binary(NewBlock)),
+                    {NewHBBFT, _} = hbbft:finalize_round(HBBFT, NewBlock#block.transactions, term_to_binary(NewBlock)),
                     NewState = dispatch(hbbft:next_round(NewHBBFT), State#state{blocks=[NewBlock | State#state.blocks]}),
                     {noreply, NewState#state{tempblock=undefined}};
                 false ->
@@ -123,8 +119,7 @@ handle_info(Msg, State) ->
 
 dispatch({NewHBBFT, {send, ToSend}}, State) ->
     do_send(ToSend, State),
-    {SerializedHBBFT, _} = hbbft:serialize(NewHBBFT),
-    State#state{hbbft=SerializedHBBFT};
+    State#state{hbbft=NewHBBFT};
 dispatch({NewHBBFT, {result, {transactions, Txns}}}, State) ->
     NewBlock = case State#state.blocks of
                    [] ->
@@ -140,12 +135,10 @@ dispatch({NewHBBFT, {result, {signature, Sig}}}, State = #state{tempblock=NewBlo
     [ gen_server:cast({global, name(Dest)}, {block, NewBlock}) || Dest <- lists:seq(0, State#state.n - 1)],
     dispatch(hbbft:next_round(NewHBBFT), State#state{blocks=[NewBlock|State#state.blocks], tempblock=undefined});
 dispatch({NewHBBFT, ok}, State) ->
-    {SerializedHBBFT, _} = hbbft:serialize(NewHBBFT),
-    State#state{hbbft=SerializedHBBFT};
+    State#state{hbbft=NewHBBFT};
 dispatch({NewHBBFT, Other}, State) ->
     io:format("UNHANDLED ~p~n", [Other]),
-    {SerializedHBBFT, _} = hbbft:serialize(NewHBBFT),
-    State#state{hbbft=SerializedHBBFT};
+    State#state{hbbft=NewHBBFT};
 dispatch(Other, State) ->
     io:format("UNHANDLED2 ~p~n", [Other]),
     State.

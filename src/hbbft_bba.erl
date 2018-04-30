@@ -169,7 +169,7 @@ serialize(#bba_data{state=State,
                          bin_values=BinValues}.
 
 
--spec deserialize(bba_serialized_data(), tpke_privkey:privkey_serialized()) -> bba_data().
+-spec deserialize(bba_serialized_data(), tpke_privkey:privkey()) -> bba_data().
 deserialize(#bba_serialized_data{state=State,
                                  round=Round,
                                  coin=Coin,
@@ -187,7 +187,7 @@ deserialize(#bba_serialized_data{state=State,
                   _ -> hbbft_cc:deserialize(Coin, SK)
               end,
     #bba_data{state=State,
-              secret_key=tpke_privkey:deserialize(SK),
+              secret_key=SK,
               round=Round,
               coin=NewCoin,
               est=Est,
