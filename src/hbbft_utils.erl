@@ -7,13 +7,13 @@
 
 -export([share_to_binary/1, binary_to_share/2, wrap/2, random_n/2, shuffle/1]).
 
--spec share_to_binary({non_neg_integer(), erlang_pbc:element()}) -> binary().
+-spec share_to_binary(tpke_privkey:share()) -> binary().
 share_to_binary({ShareIdx, ShareElement}) ->
     %% Assume less than 256 members in the consensus group
     ShareBinary = erlang_pbc:element_to_binary(ShareElement),
     <<ShareIdx:8/integer-unsigned, ShareBinary/binary>>.
 
--spec binary_to_share(binary(), tpke_privkey:privkey()) -> {non_neg_integer(), erlang_pbc:element()}.
+-spec binary_to_share(binary(), tpke_privkey:privkey()) -> tpke_privkey:share().
 binary_to_share(<<ShareIdx:8/integer-unsigned, ShareBinary/binary>>, SK) ->
     ShareElement = tpke_pubkey:deserialize_element(tpke_privkey:public_key(SK), ShareBinary),
     {ShareIdx, ShareElement}.
