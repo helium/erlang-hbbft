@@ -195,11 +195,11 @@ deserialize_state(State, bba, SK) ->
 
 -spec serialize_rbc_state(rbc_state()) -> rbc_serialized_state().
 serialize_rbc_state(#rbc_state{rbc_data=RBCData, result=Result}) ->
-    #rbc_serialized_state{rbc_data=hbbft_rbc:serialize(RBCData), result=Result}.
+    #rbc_serialized_state{rbc_data=RBCData, result=Result}.
 
 -spec deserialize_rbc_state(rbc_serialized_state()) -> rbc_state().
 deserialize_rbc_state(#rbc_serialized_state{rbc_data=RBCData, result=Result}) ->
-    #rbc_state{rbc_data=hbbft_rbc:deserialize(RBCData), result=Result}.
+    #rbc_state{rbc_data=RBCData, result=Result}.
 
 -spec serialize_bba_state(bba_state()) -> bba_serialized_state().
 serialize_bba_state(#bba_state{bba_data=BBAData, input=Input, result=Result}) ->

@@ -28,7 +28,7 @@
          }).
 
 -record(rbc_serialized_state, {
-          rbc_data :: hbbft_rbc:rbc_serialized_data(),
+          rbc_data :: hbbft_rbc:rbc_data(),
           result :: undefined | binary()
          }).
 
