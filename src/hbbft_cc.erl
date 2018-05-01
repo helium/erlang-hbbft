@@ -91,10 +91,11 @@ deserialize(#cc_serialized_data{state=State, sid=SID, n=N, f=F, shares=Shares}, 
     Element = tpke_pubkey:deserialize_element(tpke_privkey:public_key(SK), SID),
     #cc_data{state=State, sk=SK, sid=Element, n=N, f=F, shares=deserialize_shares(Shares, SK)}.
 
-%% TODO: specs
+-spec serialize_shares(#{non_neg_integer() => tpke_privkey:share()}) -> #{non_neg_integer() => binary()}.
 serialize_shares(Shares) ->
     maps:map(fun(_K, V) -> hbbft_utils:share_to_binary(V) end, Shares).
 
+-spec deserialize_shares(#{non_neg_integer() => binary()}, tpke_privkey:privkey()) -> #{non_neg_integer() => tpke_privkey:share()}.
 deserialize_shares(Shares, SK) ->
     maps:map(fun(_K, V) -> hbbft_utils:binary_to_share(V, SK) end, Shares).
 
