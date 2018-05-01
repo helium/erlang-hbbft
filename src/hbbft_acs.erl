@@ -41,14 +41,12 @@ input(Data, Input) ->
                                                                            {result, [{non_neg_integer(), binary()}]}}.
 handle_msg(Data, J, {{rbc, I}, RBCMsg}) ->
     RBC = get_rbc(Data, I),
-    io:format("~p RBC message for ~p ~p~n", [Data#acs_data.j, I, element(1, RBCMsg)]),
     case hbbft_rbc:handle_msg(RBC#rbc_state.rbc_data, J, RBCMsg) of
         {NewRBC, {send, ToSend}} ->
             {store_rbc_state(Data, I, NewRBC), {send, hbbft_utils:wrap({rbc, I}, ToSend)}};
         {NewRBC, {result, Result}} ->
             %% Figure4, Bullet2
             %% upon delivery of vj from RBCj, if input has not yet been provided to BAj, then provide input 1 to BAj
-            io:format("~p RBC returned for ~p~n", [Data#acs_data.j, I]),
             NewData = store_rbc_result(store_rbc_state(Data, I, NewRBC), I, Result),
             case bba_has_had_input(maps:get(I, Data#acs_data.bba)) of
                 true ->
@@ -69,22 +67,18 @@ handle_msg(Data = #acs_data{n=N, f=F}, J, {{bba, I}, BBAMsg}) ->
         {NewBBA, {send, ToSend}} ->
             {store_bba_state(Data, I, NewBBA), {send, hbbft_utils:wrap({bba, I}, ToSend)}};
         {NewBBA, {result, B}} ->
-            io:format("~p BBA ~p returned ~p~n", [Data#acs_data.j, I, B]),
             NewData = store_bba_state(store_bba_result(Data, I, B), I, NewBBA),
             %% Figure4, Bullet3
             %% upon delivery of value 1 from at least N − f instances of BA , provide input 0 to each instance of BA that has not yet been provided input.
             BBAsThatReturnedOne = successful_bba_count(NewData),
-            io:format("~p ~p BBAs completed, ~p returned one, ~p needed~n", [Data#acs_data.j, completed_bba_count(NewData), BBAsThatReturnedOne, N - F]),
             case BBAsThatReturnedOne >= N - F andalso NewData#acs_data.done == false of
                 true ->
-                    io:format("~b Enough BBAs (~b/~b) completed, zeroing the rest~n", [Data#acs_data.j, BBAsThatReturnedOne, N]),
                     %% send 0 to all BBAs that have not yet been provided input because their RBC has not completed
                     {NextData, Replies} = lists:foldl(fun(E, {DataAcc, MsgAcc}=Acc) ->
                                                               ThisBBA = get_bba(DataAcc, E),
                                                               case bba_has_had_input(ThisBBA) of
                                                                   false ->
                                                                       {FailedBBA, {send, ToSend}} = hbbft_bba:input(ThisBBA#bba_state.bba_data, 0),
-                                                                      io:format("~p Sending BBA ~p zero~n", [Data#acs_data.j, E]),
                                                                       {store_bba_input(store_bba_state(Data, E, FailedBBA), E, 0), [hbbft_utils:wrap({bba, E}, ToSend)|MsgAcc]};
                                                                   true ->
                                                                       Acc

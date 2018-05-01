@@ -204,7 +204,6 @@ key_mismatch_f1_test() ->
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
-    io:format("Results ~p~n", [ConvergedResults]),
     %% all 5 should converge, but there should be 2 distinct results
     ?assertEqual(5, sets:size(ConvergedResults)),
     DistinctResults = lists:usort([ Sig || {result, {_J, Sig}} <- sets:to_list(ConvergedResults) ]),
@@ -229,7 +228,6 @@ key_mismatch_f2_test() ->
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
-    io:format("Results ~p~n", [ConvergedResults]),
     %% the 3 with the right keys should converge to the same value
     ?assertEqual(3, sets:size(ConvergedResults)),
     DistinctResults = lists:usort([ Sig || {result, {_J, Sig}} <- sets:to_list(ConvergedResults) ]),
@@ -259,11 +257,9 @@ mixed_keys_test() ->
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
 
     DistinctCoins = sets:from_list([Coin || {result, {_, Coin}} <- sets:to_list(ConvergedResults)]),
-    io:format("DistinctCoins: ~p~n", [sets:to_list(DistinctCoins)]),
     %% two distinct sets have converged with different coins each
     ?assertEqual(2, sets:size(DistinctCoins)),
 
-    %% io:format("ConvergedResults: ~p~n", [sets:to_list(ConvergedResults)]),
     %% everyone but two should converge
     ?assertEqual(N, sets:size(ConvergedResults)),
     ok.

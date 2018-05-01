@@ -32,7 +32,6 @@ init(N, F, Pid, Leader) ->
 %% Merkle tree branch
 -spec input(rbc_data(), binary()) -> {rbc_data(), {send, send_commands()}}.
 input(Data = #rbc_data{state=init, n=N, f=F, pid=Pid, leader=Leader}, Msg) when Pid == Leader->
-    io:format("INPUT. Pid: ~p. Leader: ~p~n", [Pid, Leader]),
     %% (N-2f, N)-erasure coding scheme applied to input
     M = N - 2*F,
     K = 2*F,
@@ -51,7 +50,6 @@ input(Data = #rbc_data{state=init, n=N, f=F, pid=Pid, leader=Leader}, Msg) when 
     %% unicast all the VAL packets and multicast the ECHO for our own share
     {NewData#rbc_data{state=waiting}, {send, Result}}; % ++ [{multicast, {echo, MerkleRootHash, hd(BranchesForShards), hd(ShardsWithSize)}}]}}.
 input(Data, _Msg) ->
-    io:format("INPUT ignore. Pid: ~p. Leader: ~p~n", [Data#rbc_data.pid, Data#rbc_data.leader]),
     %% ignore anyone else other than leader who tries to start RBC
     {Data, ok}.
 
@@ -78,17 +76,14 @@ val(Data = #rbc_data{seen_val=false, leader=Leader}, J, H, Bj, Sj) when J == Lea
     case merkerl:verify_proof(merkerl:hash_value(Sj), H, Bj) of
         ok ->
             %% the merkle proof is valid, update seen_val for this path
-            io:format("Multicasting ECHO For ~p, Leader: ~p~n", [J, Leader]),
             {Data#rbc_data{seen_val=true}, {send, [{multicast, {echo, H, Bj, Sj}}]}};
         {error, _} ->
             %% otherwise discard
-            io:format("Who is this Leader? ~p~n", [Leader]),
             {Data, ok}
     end;
-val(Data=#rbc_data{leader=Leader}, J, _H, _Bi, _Si) ->
+val(Data=#rbc_data{leader=_Leader}, _J, _H, _Bi, _Si) ->
     %% we already had a val, just ignore this
     %% also, we probably don't care about this leader's VAL message either
-    io:format("VAL ignored. RBC: ~p. Leader : ~p~n", [J, Leader]),
     {Data, ok}.
 
 %% Figure2. Bullet3
@@ -96,8 +91,7 @@ val(Data=#rbc_data{leader=Leader}, J, _H, _Bi, _Si) ->
 %% check that bj is a valid Merkle branch for root h and leaf sj ,
 %% and otherwise discard
 -spec echo(rbc_data(), non_neg_integer(), merkerl:hash(), merkerl:proof(), binary()) -> {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()} | abort}.
-echo(Data = #rbc_data{state=done}, J, _H, _Bj, _Sj) ->
-    io:format("ECHO. State=Done. RBC: ~p~n", [J]),
+echo(Data = #rbc_data{state=done}, _J, _H, _Bj, _Sj) ->
     {Data, ok};
 echo(Data = #rbc_data{n=N, f=F}, J, H, Bj, Sj) ->
 
@@ -107,7 +101,6 @@ echo(Data = #rbc_data{n=N, f=F}, J, H, Bj, Sj) ->
             %% already got an ECHO From J, discard
             {Data, ok};
         false ->
-            io:format("ECHO. Verifying merkle proof. RBC: ~p~n", [J]),
             case merkerl:verify_proof(merkerl:hash_value(Sj), H, Bj) of
                 ok ->
                     %% valid branch
@@ -136,7 +129,6 @@ echo(Data = #rbc_data{n=N, f=F}, J, H, Bj, Sj) ->
 -spec ready(rbc_data(), non_neg_integer(), merkerl:hash()) -> {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()}}.
 ready(Data = #rbc_data{state=waiting, n=N, f=F}, J, H) ->
     %% increment num_readies
-    io:format("READY. State=waiting. RBC: ~p~n", [J]),
 
     %% check if you've already seen this ready
     case has_ready(Data, J) of
@@ -153,8 +145,7 @@ ready(Data = #rbc_data{state=waiting, n=N, f=F}, J, H) ->
             end
     end;
 
-ready(Data, J, _H) ->
-    io:format("Ignoring result from ~p in state ~p~n", [J, Data#rbc_data.state]),
+ready(Data, _J, _H) ->
     {Data, ok}.
 
 
@@ -349,7 +340,6 @@ send_incorrect_msg_test() ->
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, [{0, {send, NewMsgsToSend}}], StatesWithId, sets:new()),
     ConvergedResultsList = sets:to_list(ConvergedResults),
-    io:format("ConvergedResults: ~p~n", [ConvergedResultsList]),
     ?assert(lists:all(fun({result, {_, Res}}) -> Res == aborted end, ConvergedResultsList)),
     ?assertEqual(0, sets:size(ConvergedResults)),
     ok.
@@ -370,7 +360,6 @@ incorrect_leader_test() ->
     States = [NewS0, S1, S2, S3, S4],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, [{0, {send, MsgsToSend}}], StatesWithId, sets:new()),
-    io:format("ConvergedResultsList: ~p~n", [sets:to_list(ConvergedResults)]),
     %% no one should converge
     ?assertEqual(0, sets:size(ConvergedResults)),
     ok.

@@ -209,15 +209,11 @@ check_n_minus_f_aux_messages(N, F, Data) ->
 
 %% add X to set Y
 add(X, Y) ->
-    Res = (1 bsl X) bor Y,
-    io:format("Added ~.2b to ~.2b -> ~.2b~n", [1 bsl X, Y, Res]),
-    Res.
+    (1 bsl X) bor Y.
 
 %% is X in set Y?
 has(X, Y) ->
-    Res = ((1 bsl X) band Y) /= 0,
-    io:format("Checked if ~.2b is in ~.2b -> ~p~n", [1 bsl X, Y, Res]),
-    Res.
+    ((1 bsl X) band Y) /= 0.
 
 %% count elements of set
 count(2#0) -> 0;
@@ -252,7 +248,6 @@ init_test() ->
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
-    io:format("ConvergedResults ~p~n", [ConvergedResults]),
     %% everyone should converge
     ?assertEqual(N, sets:size(ConvergedResults)),
     ok.
@@ -274,7 +269,6 @@ init_with_zeroes_test() ->
     {NewStates, Results} = lists:unzip(Res),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
     DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
-    io:format("DistinctResults: ~p~n", [sets:to_list(DistinctResults)]),
     ?assertEqual(N, sets:size(ConvergedResults)),
     ?assertEqual([0], sets:to_list(DistinctResults)),
     ok.
@@ -296,8 +290,6 @@ init_with_ones_test() ->
     {NewStates, Results} = lists:unzip(Res),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
     DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
-    io:format("DistinctResults: ~p~n", [sets:to_list(DistinctResults)]),
-    %% io:format("ConvergedResults ~p~n", [ConvergedResults]),
     ?assertEqual(N, sets:size(ConvergedResults)),
     ?assertEqual([1], sets:to_list(DistinctResults)),
     ok.
@@ -320,8 +312,6 @@ init_with_mixed_zeros_and_ones_test_() ->
                           {NewStates, Results} = lists:unzip(Res),
                           {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
                           DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
-                          io:format("DistinctResults: ~p~n", [sets:to_list(DistinctResults)]),
-                          io:format("ConvergedResults ~p~n", [sets:to_list(ConvergedResults)]),
                           ?assertEqual(N, sets:size(ConvergedResults)),
                           ?assertEqual(1, sets:size(DistinctResults)),
                           ok

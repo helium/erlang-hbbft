@@ -57,7 +57,6 @@ start_node(Name, Config, Case) ->
                   {startup_functions, [
                                        {code, set_path, [CodePath]}
                                       ]}],
-    io:format("NodeConfig ~p~n", [NodeConfig]),
     case ct_slave:start(Name, NodeConfig) of
         {ok, Node} ->
             ok = wait_until(fun() ->
