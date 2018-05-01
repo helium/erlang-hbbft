@@ -205,7 +205,13 @@ deserialize(#bba_serialized_data{state=State,
 -spec check_n_minus_f_aux_messages(pos_integer(), non_neg_integer(), bba_data()) -> boolean().
 check_n_minus_f_aux_messages(N, F, Data) ->
     %% check if we've received at least N - F AUX messages where the values in the AUX messages are member of bin_values
-    maps:size(maps:filter(fun(_, X) -> has(X, Data#bba_data.bin_values) end, Data#bba_data.aux_witness)) >= N - F.
+    maps:fold(fun(_, V, Acc) ->
+                      case has(V, Data#bba_data.bin_values) of
+                          true ->
+                              Acc + 1;
+                          false -> Acc
+                      end
+              end, 0, Data#bba_data.aux_witness) >= N - F.
 
 %% add X to set Y
 add(X, Y) ->
