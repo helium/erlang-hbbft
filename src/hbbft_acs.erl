@@ -118,9 +118,10 @@ bba_completed(#bba_state{input=Input, result=Result}) ->
 successful_bba_count(Data) ->
     lists:sum([ 1 || BBA <- maps:values(Data#acs_data.bba), BBA#bba_state.result]).
 
--spec completed_bba_count(acs_data()) -> non_neg_integer(). %% completed_bba_count cannot be 0
-completed_bba_count(Data) ->
-    lists:sum([ 1 || BBA <- maps:values(Data#acs_data.bba), BBA#bba_state.result /= undefined]).
+%% XXX: Unused function, remove?
+%% -spec completed_bba_count(acs_data()) -> non_neg_integer(). %% completed_bba_count cannot be 0
+%% completed_bba_count(Data) ->
+%%     lists:sum([ 1 || BBA <- maps:values(Data#acs_data.bba), BBA#bba_state.result /= undefined]).
 
 -spec get_bba(acs_data(), non_neg_integer()) -> bba_state().
 get_bba(Data, I) ->

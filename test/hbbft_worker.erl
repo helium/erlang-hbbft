@@ -79,8 +79,8 @@ init([N, F, ID, SK]) ->
     %% store the serialized state and serialized SK
     {ok, #state{hbbft=HBBFT, blocks=[], id=ID, n=N, sk=DSK, ssk=SK}}.
 
-handle_call({submit_txn, Txn}, _From, State = #state{hbbft=HBBFT, ssk=SSK}) ->
-    NewState = dispatch(hbbft:input(maybe_deserialize_hbbft(HBBFT, SSK), Txn), State),
+handle_call({submit_txn, Txn}, _From, State = #state{hbbft=HBBFT, sk=SK}) ->
+    NewState = dispatch(hbbft:input(maybe_deserialize_hbbft(HBBFT, SK), Txn), State),
     {reply, ok, NewState};
 handle_call(get_blocks, _From, State) ->
     {reply, {ok, State#state.blocks}, State};
@@ -88,21 +88,21 @@ handle_call(Msg, _From, State) ->
     io:format("unhandled msg ~p~n", [Msg]),
     {reply, ok, State}.
 
-handle_cast({hbbft, PeerID, Msg}, State = #state{hbbft=HBBFT, ssk=SSK}) ->
-    NewState = dispatch(hbbft:handle_msg(maybe_deserialize_hbbft(HBBFT, SSK), PeerID, Msg), State),
+handle_cast({hbbft, PeerID, Msg}, State = #state{hbbft=HBBFT, sk=SK}) ->
+    NewState = dispatch(hbbft:handle_msg(maybe_deserialize_hbbft(HBBFT, SK), PeerID, Msg), State),
     {noreply, NewState};
-handle_cast({block, NewBlock}, State=#state{sk=SK, hbbft=HBBFT, ssk=SSK}) ->
+handle_cast({block, NewBlock}, State=#state{sk=SK, hbbft=HBBFT}) ->
     case lists:member(NewBlock, State#state.blocks) of
         false ->
             io:format("XXXXXXXX~n"),
             %% a new block, check if it fits on our chain
-            case verify_chain([NewBlock|State#state.blocks], tpke_privkey:public_key(SK)) of
+            case verify_block_fit([NewBlock|State#state.blocks], tpke_privkey:public_key(SK)) of
                 true ->
                     %% advance to the next round
                     io:format("~p skipping to next round~n", [self()]),
                     %% remove any transactions we have from our queue (drop the signature messages, they're not needed)
-                    {NewHBBFT, _} = hbbft:finalize_round(maybe_deserialize_hbbft(HBBFT, SSK), NewBlock#block.transactions, term_to_binary(NewBlock)),
-                    NewState = dispatch(hbbft:next_round(maybe_deserialize_hbbft(NewHBBFT, SSK)), State#state{blocks=[NewBlock | State#state.blocks]}),
+                    {NewHBBFT, _} = hbbft:finalize_round(maybe_deserialize_hbbft(HBBFT, SK), NewBlock#block.transactions, term_to_binary(NewBlock)),
+                    NewState = dispatch(hbbft:next_round(maybe_deserialize_hbbft(NewHBBFT, SK)), State#state{blocks=[NewBlock | State#state.blocks]}),
                     {noreply, NewState#state{tempblock=undefined}};
                 false ->
                     io:format("invalid block proposed~n"),
@@ -131,11 +131,11 @@ dispatch({NewHBBFT, {result, {transactions, Txns}}}, State) ->
                        #block{prev_hash=hash_block(PrevBlock), transactions=Txns, signature= <<>>}
                end,
     %% tell the badger to finish the round
-    dispatch(hbbft:finalize_round(maybe_deserialize_hbbft(NewHBBFT, State#state.ssk), Txns, term_to_binary(NewBlock)), State#state{tempblock=NewBlock});
+    dispatch(hbbft:finalize_round(maybe_deserialize_hbbft(NewHBBFT, State#state.sk), Txns, term_to_binary(NewBlock)), State#state{tempblock=NewBlock});
 dispatch({NewHBBFT, {result, {signature, Sig}}}, State = #state{tempblock=NewBlock0}) ->
     NewBlock = NewBlock0#block{signature=Sig},
     [ gen_server:cast({global, name(Dest)}, {block, NewBlock}) || Dest <- lists:seq(0, State#state.n - 1)],
-    dispatch(hbbft:next_round(maybe_deserialize_hbbft(NewHBBFT, State#state.ssk)), State#state{blocks=[NewBlock|State#state.blocks], tempblock=undefined});
+    dispatch(hbbft:next_round(maybe_deserialize_hbbft(NewHBBFT, State#state.sk)), State#state{blocks=[NewBlock|State#state.blocks], tempblock=undefined});
 dispatch({NewHBBFT, ok}, State) ->
     State#state{hbbft=maybe_serialize_HBBFT(NewHBBFT)};
 dispatch({NewHBBFT, Other}, State) ->
@@ -159,14 +159,14 @@ do_send([{multicast, Msg}|T], State) ->
 
 %% helper functions
 name(N) ->
-    list_to_atom(lists:flatten(io_lib:format("hbbft_worker_~b", [N]))).
+    list_to_atom(lists:flatten(["hbbft_worker_", integer_to_list(N)])).
 
 hash_block(Block) ->
     crypto:hash(sha256, term_to_binary(Block)).
 
-maybe_deserialize_hbbft(HBBFT, SSK) ->
+maybe_deserialize_hbbft(HBBFT, SK) ->
     case is_serialized(HBBFT) of
-        true -> hbbft:deserialize(HBBFT, SSK);
+        true -> hbbft:deserialize(HBBFT, SK);
         false -> HBBFT
     end.
 

@@ -206,7 +206,7 @@ serialize(#hbbft_data{secret_key=SK}=Data, true) ->
     %% serialize the private key as well
     {serialize_hbbft_data(Data), tpke_privkey:serialize(SK)}.
 
--spec deserialize(hbbft_serialized_data(), tpke_privkey:privkey_serialized()) -> hbbft_data().
+-spec deserialize(hbbft_serialized_data(), tpke_privkey:privkey()) -> hbbft_data().
 deserialize(#hbbft_serialized_data{batch_size=BatchSize,
                                    n=N,
                                    f=F,
@@ -221,9 +221,8 @@ deserialize(#hbbft_serialized_data{batch_size=BatchSize,
                                    decrypted=Decrypted,
                                    sig_shares=SigShares,
                                    dec_shares=DecShares,
-                                   thingtosign=ThingToSign}, SerializedSK) ->
+                                   thingtosign=ThingToSign}, SK) ->
 
-    SK = tpke_privkey:deserialize(SerializedSK),
     NewThingToSign = case ThingToSign of
                          undefined -> undefined;
                          _ -> tpke_pubkey:deserialize_element(tpke_privkey:public_key(SK), ThingToSign)
