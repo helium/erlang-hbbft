@@ -530,32 +530,5 @@ encrypt_decrypt_test() ->
     DecKey = tpke_pubkey:combine_shares(PubKey, EncKey, [ tpke_privkey:decrypt_share(SK, EncKey) || SK <- PrivateKeys]),
     ?assertEqual(PlainText, decrypt(DecKey, Enc)),
     ok.
-
-serialization_test() ->
-    %% WIP.
-    %% XXX: dont really check anything yet
-    N = 5,
-    F = 1,
-    BatchSize = 20,
-    dealer:start_link(N, F+1, 'SS512'),
-    {ok, _PubKey, PrivateKeys} = dealer:deal(),
-    gen_server:stop(dealer),
-    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
-    Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*20)],
-    {NewStates, _Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
-                                               Destinations = hbbft_utils:random_n(rand:uniform(N), States),
-                                               {NewStates, NewReplies} = lists:unzip(lists:map(fun({J, Data}) ->
-                                                                                                       {NewData, Reply} = hbbft:input(Data, Msg),
-                                                                                                       {{J, NewData}, {J, Reply}}
-                                                                                               end, lists:keysort(1, Destinations))),
-                                               {lists:ukeymerge(1, NewStates, States), merge_replies(N, NewReplies, Replies)}
-                                       end, {StatesWithIndex, []}, Msgs),
-    %% some state
-    State = element(2, hd(NewStates)),
-    %% serialize a state from NewStates
-    {SerializedState, _SerializedPvtKey} = hbbft:serialize(State),
-    _DeserializedState = hbbft:deserialize(SerializedState, State#hbbft_data.secret_key),
-    ok.
-
 -endif.
 
