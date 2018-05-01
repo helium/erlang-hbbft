@@ -68,6 +68,25 @@ verify_chain([A, B|_]=Chain, PubKey) ->
             false
     end.
 
+verify_block_fit([A, B | _], PubKey) ->
+    %% A should have the the prev_hash of B
+    case A#block.prev_hash == hash_block(B) of
+        true ->
+            %% A should have a valid signature
+            HM = tpke_pubkey:hash_message(PubKey, term_to_binary(A#block{signature= <<>>})),
+            Signature = tpke_pubkey:deserialize_element(PubKey, A#block.signature),
+            case tpke_pubkey:verify_signature(PubKey, Signature, HM) of
+                true ->
+                    true;
+                false ->
+                    io:format("bad signature~n"),
+                    false
+            end;
+        false ->
+            io:format("parent hash mismatch ~p ~p~n", [A#block.prev_hash, hash_block(B)]),
+            false
+    end.
+
 block_transactions(Block) ->
     Block#block.transactions.
 

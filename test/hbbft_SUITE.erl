@@ -51,7 +51,7 @@ simple_test(_Config) ->
     [Chain] = sets:to_list(Chains),
     io:format("chain is of height ~p~n", [length(Chain)]),
     %% verify they are cryptographically linked
-    hbbft_worker:verify_chain(Chain, PubKey),
+    true = hbbft_worker:verify_chain(Chain, PubKey),
     %% check all the transactions are unique
     BlockTxns = lists:flatten([ hbbft_worker:block_transactions(B) || B <- Chain ]),
     true = length(BlockTxns) == sets:size(sets:from_list(BlockTxns)),
