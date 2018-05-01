@@ -15,9 +15,7 @@ share_to_binary({ShareIdx, ShareElement}) ->
 
 -spec binary_to_share(binary(), tpke_privkey:privkey()) -> {non_neg_integer(), erlang_pbc:element()}.
 binary_to_share(<<ShareIdx:8/integer-unsigned, ShareBinary/binary>>, SK) ->
-    %% XXX we don't have a great way to deserialize the elements yet, this is a hack
-    Ugh = tpke_pubkey:hash_message(tpke_privkey:public_key(SK), <<"ugh">>),
-    ShareElement = erlang_pbc:binary_to_element(Ugh, ShareBinary),
+    ShareElement = tpke_pubkey:deserialize_element(tpke_privkey:public_key(SK), ShareBinary),
     {ShareIdx, ShareElement}.
 
 %% wrap a subprotocol's outbound messages with a protocol identifier

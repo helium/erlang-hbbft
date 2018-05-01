@@ -206,7 +206,7 @@ decrypt(Key, Bin) ->
 
 -spec serialize(hbbft_data()) -> {hbbft_serialized_data(), tpke_privkey:privkey_serialized() | tpke_privkey:privkey()}.
 serialize(Data) ->
-    %% serialize the SK if not explicitly told not to do so
+    %% serialize the SK unless explicitly told not to
     serialize(Data, true).
 
 -spec serialize(hbbft_data(), boolean()) -> {hbbft_serialized_data(), tpke_privkey:privkey_serialized() | tpke_privkey:privkey()}.
@@ -235,10 +235,9 @@ deserialize(#hbbft_serialized_data{batch_size=BatchSize,
                                    thingtosign=ThingToSign}, SerializedSK) ->
 
     SK = tpke_privkey:deserialize(SerializedSK),
-    Derp = tpke_pubkey:hash_message(tpke_privkey:public_key(SK), <<"derp">>),
     NewThingToSign = case ThingToSign of
                          undefined -> undefined;
-                         _ -> erlang_pbc:binary_to_element(Derp, ThingToSign)
+                         _ -> tpke_pubkey:deserialize_element(tpke_privkey:public_key(SK), ThingToSign)
                      end,
     #hbbft_data{secret_key=SK,
                 batch_size=BatchSize,

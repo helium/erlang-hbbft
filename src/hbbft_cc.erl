@@ -88,9 +88,7 @@ serialize(#cc_data{state=State, sid=SID, n=N, f=F, shares=Shares}) ->
 
 -spec deserialize(cc_serialized_data(), tpke_privkey:privkey()) -> cc_data().
 deserialize(#cc_serialized_data{state=State, sid=SID, n=N, f=F, shares=Shares}, SK) ->
-    %% XXX: same hack as in hbbft_utils
-    Yolo = tpke_pubkey:hash_message(tpke_privkey:public_key(SK), <<"yolo">>),
-    Element = erlang_pbc:binary_to_element(Yolo, SID),
+    Element = tpke_pubkey:deserialize_element(tpke_privkey:public_key(SK), SID),
     #cc_data{state=State, sk=SK, sid=Element, n=N, f=F, shares=deserialize_shares(Shares, SK)}.
 
 %% TODO: specs
