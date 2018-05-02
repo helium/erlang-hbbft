@@ -1,8 +1,24 @@
 -module(hbbft_rbc).
 
--include_lib("hbbft_rbc.hrl").
-
 -export([init/4, input/2, handle_msg/3]).
+
+-record(rbc_data, {
+          state = init :: init | waiting | done,
+          %% each rbc actor must know its identity
+          pid :: non_neg_integer(),
+          %% each rbc actor must know who the leader is
+          %% this would be used for determining who broadcasts the VAL message
+          leader :: non_neg_integer(),
+          n :: pos_integer(),
+          f :: non_neg_integer(),
+          msg = undefined :: binary() | undefined,
+          num_echoes = #{} :: #{merkerl:hash() => [non_neg_integer()]},
+          num_readies = #{} :: #{merkerl:hash() => [non_neg_integer()]},
+          seen_val = false :: boolean(),
+          ready_sent = false :: boolean(),
+          %% roothash: #{sender: {size, shard}}
+          stripes = #{} :: #{merkerl:hash() => #{non_neg_integer() => {pos_integer(), binary()}}}
+         }).
 
 %% rbc protocol requires three message types: ECHO(h, bj, sj), VAL(h, bj, sj) and READY(h)
 %% where h: merkle hash, bj: merkle branch (proof) and sj: blocks of (N-2f, N)-erasure coding scheme applied to input

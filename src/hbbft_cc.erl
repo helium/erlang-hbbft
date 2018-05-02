@@ -1,8 +1,24 @@
 -module(hbbft_cc).
 
--include_lib("hbbft_cc.hrl").
-
 -export([init/4, get_coin/1, handle_msg/3, serialize/1, deserialize/2]).
+
+-record(cc_data, {
+          state = waiting :: waiting | done,
+          sk :: tpke_privkey:privkey(),
+          %% Note: sid is assumed to be a unique nonce that serves as name of this common coin
+          sid :: erlang_pbc:element(),
+          n :: pos_integer(),
+          f :: non_neg_integer(),
+          shares = maps:new() :: #{non_neg_integer() => tpke_privkey:share()}
+         }).
+
+-record(cc_serialized_data, {
+          state = waiting :: waiting | done,
+          sid :: binary(),
+          n :: pos_integer(),
+          f :: non_neg_integer(),
+          shares :: #{non_neg_integer() => binary()}
+         }).
 
 -type cc_data() :: #cc_data{}.
 -type cc_serialized_data() :: #cc_serialized_data{}.

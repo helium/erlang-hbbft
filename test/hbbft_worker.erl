@@ -1,6 +1,5 @@
 -module(hbbft_worker).
 
--include_lib("../src/hbbft.hrl").
 -behaviour(gen_server).
 
 -export([start_link/6, submit_transaction/2, get_blocks/1]).
