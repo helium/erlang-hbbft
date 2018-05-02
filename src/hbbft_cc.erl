@@ -1,6 +1,6 @@
 -module(hbbft_cc).
 
--export([init/4, get_coin/1, handle_msg/3]).
+-export([init/4, get_coin/1, handle_msg/3, serialize/1, deserialize/2]).
 
 -record(cc_data, {
           state = waiting :: waiting | done,
@@ -12,11 +12,20 @@
           shares = maps:new() :: #{non_neg_integer() => tpke_privkey:share()}
          }).
 
+-record(cc_serialized_data, {
+          state = waiting :: waiting | done,
+          sid :: binary(),
+          n :: pos_integer(),
+          f :: non_neg_integer(),
+          shares :: #{non_neg_integer() => binary()}
+         }).
+
 -type cc_data() :: #cc_data{}.
+-type cc_serialized_data() :: #cc_serialized_data{}.
 -type serialized_share() :: binary().
 -type share_msg() :: {share, serialized_share()}.
 
--export_type([cc_data/0, share_msg/0]).
+-export_type([cc_data/0, cc_serialized_data/0, share_msg/0]).
 
 %% Figure12. Bullet1
 %% Trusted Setup Phase: A trusted dealer runs pk, {ski } ←
@@ -88,6 +97,23 @@ share(Data, J, Share) ->
         true ->
             {Data, ok}
     end.
+
+-spec serialize(cc_data()) -> cc_serialized_data().
+serialize(#cc_data{state=State, sid=SID, n=N, f=F, shares=Shares}) ->
+    #cc_serialized_data{state=State, sid=erlang_pbc:element_to_binary(SID), n=N, f=F, shares=serialize_shares(Shares)}.
+
+-spec deserialize(cc_serialized_data(), tpke_privkey:privkey()) -> cc_data().
+deserialize(#cc_serialized_data{state=State, sid=SID, n=N, f=F, shares=Shares}, SK) ->
+    Element = tpke_pubkey:deserialize_element(tpke_privkey:public_key(SK), SID),
+    #cc_data{state=State, sk=SK, sid=Element, n=N, f=F, shares=deserialize_shares(Shares, SK)}.
+
+-spec serialize_shares(#{non_neg_integer() => tpke_privkey:share()}) -> #{non_neg_integer() => binary()}.
+serialize_shares(Shares) ->
+    maps:map(fun(_K, V) -> hbbft_utils:share_to_binary(V) end, Shares).
+
+-spec deserialize_shares(#{non_neg_integer() => binary()}, tpke_privkey:privkey()) -> #{non_neg_integer() => tpke_privkey:share()}.
+deserialize_shares(Shares, SK) ->
+    maps:map(fun(_K, V) -> hbbft_utils:binary_to_share(V, SK) end, Shares).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -195,7 +221,6 @@ key_mismatch_f1_test() ->
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
-    io:format("Results ~p~n", [ConvergedResults]),
     %% all 5 should converge, but there should be 2 distinct results
     ?assertEqual(5, sets:size(ConvergedResults)),
     DistinctResults = lists:usort([ Sig || {result, {_J, Sig}} <- sets:to_list(ConvergedResults) ]),
@@ -220,7 +245,6 @@ key_mismatch_f2_test() ->
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
-    io:format("Results ~p~n", [ConvergedResults]),
     %% the 3 with the right keys should converge to the same value
     ?assertEqual(3, sets:size(ConvergedResults)),
     DistinctResults = lists:usort([ Sig || {result, {_J, Sig}} <- sets:to_list(ConvergedResults) ]),
@@ -250,11 +274,9 @@ mixed_keys_test() ->
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
 
     DistinctCoins = sets:from_list([Coin || {result, {_, Coin}} <- sets:to_list(ConvergedResults)]),
-    io:format("DistinctCoins: ~p~n", [sets:to_list(DistinctCoins)]),
     %% two distinct sets have converged with different coins each
     ?assertEqual(2, sets:size(DistinctCoins)),
 
-    %% io:format("ConvergedResults: ~p~n", [sets:to_list(ConvergedResults)]),
     %% everyone but two should converge
     ?assertEqual(N, sets:size(ConvergedResults)),
     ok.

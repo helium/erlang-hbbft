@@ -1,6 +1,6 @@
 -module(hbbft_bba).
 
--export([init/3, input/2, handle_msg/3]).
+-export([init/3, input/2, handle_msg/3, serialize/1, deserialize/2]).
 
 -record(bba_data, {
           state = init :: init | waiting | done,
@@ -14,20 +14,34 @@
           witness = maps:new() :: #{non_neg_integer() => 0 | 1},
           aux_witness = maps:new() :: #{non_neg_integer() => 0 | 1},
           aux_sent = false :: boolean(),
-          %% Sets take relatively large space
-          %% using bit values here serve the same purpose while saving us space
-          broadcasted = 00 :: 0 | 1 | 2 | 3,
-          bin_values = 00 :: 0 | 1 | 2 | 3
+          broadcasted = 2#0 :: 0 | 1,
+          bin_values = 2#00 :: 0 | 1 | 2 | 3
+         }).
+
+-record(bba_serialized_data, {
+          state = init :: init | waiting | done,
+          round = 0 :: non_neg_integer(),
+          coin :: undefined | hbbft_cc:cc_serialized_data(),
+          est :: undefined | 0 | 1,
+          output :: undefined | 0 | 1,
+          f :: non_neg_integer(),
+          n :: pos_integer(),
+          witness = maps:new() :: #{non_neg_integer() => 0 | 1},
+          aux_witness = maps:new() :: #{non_neg_integer() => 0 | 1},
+          aux_sent = false :: boolean(),
+          broadcasted = 2#0 :: 0 | 1,
+          bin_values = 2#00 :: 0 | 1 | 2 | 3
          }).
 
 -type bba_data() :: #bba_data{}.
+-type bba_serialized_data() :: #bba_serialized_data{}.
 
 -type bval_msg() :: {bval, non_neg_integer(), 0 | 1}.
 -type aux_msg() :: {aux, non_neg_integer(), 0 | 1}.
 -type coin_msg() :: {{coin, non_neg_integer()}, hbbft_cc:share_msg()}.
 -type msgs() :: bval_msg() | aux_msg() | coin_msg().
 
--export_type([bba_data/0, bval_msg/0, aux_msg/0, coin_msg/0, msgs/0]).
+-export_type([bba_data/0, bba_serialized_data/0, bval_msg/0, aux_msg/0, coin_msg/0, msgs/0]).
 
 -spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer()) -> bba_data().
 init(SK, N, F) ->
@@ -153,24 +167,88 @@ aux(Data = #bba_data{n=N, f=F}, Id, V) ->
             {NewData, ok}
     end.
 
+-spec serialize(bba_data()) -> bba_serialized_data().
+serialize(#bba_data{state=State,
+                    round=Round,
+                    coin=Coin,
+                    est=Est,
+                    output=Output,
+                    f=F,
+                    n=N,
+                    witness=Witness,
+                    aux_witness=AuxWitness,
+                    aux_sent=AuxSent,
+                    broadcasted=Broadcasted,
+                    bin_values=BinValues}) ->
+    NewCoin = case Coin of
+                  undefined -> undefined;
+                  _ -> hbbft_cc:serialize(Coin)
+              end,
+    #bba_serialized_data{state=State,
+                         round=Round,
+                         coin=NewCoin,
+                         est=Est,
+                         output=Output,
+                         f=F,
+                         n=N,
+                         witness=Witness,
+                         aux_witness=AuxWitness,
+                         aux_sent=AuxSent,
+                         broadcasted=Broadcasted,
+                         bin_values=BinValues}.
+
+
+-spec deserialize(bba_serialized_data(), tpke_privkey:privkey()) -> bba_data().
+deserialize(#bba_serialized_data{state=State,
+                                 round=Round,
+                                 coin=Coin,
+                                 est=Est,
+                                 output=Output,
+                                 f=F,
+                                 n=N,
+                                 witness=Witness,
+                                 aux_witness=AuxWitness,
+                                 aux_sent=AuxSent,
+                                 broadcasted=Broadcasted,
+                                 bin_values=BinValues}, SK) ->
+    NewCoin = case Coin of
+                  undefined -> undefined;
+                  _ -> hbbft_cc:deserialize(Coin, SK)
+              end,
+    #bba_data{state=State,
+              secret_key=SK,
+              round=Round,
+              coin=NewCoin,
+              est=Est,
+              output=Output,
+              f=F,
+              n=N,
+              witness=Witness,
+              aux_witness=AuxWitness,
+              aux_sent=AuxSent,
+              broadcasted=Broadcasted,
+              bin_values=BinValues}.
+
 
 %% helper functions
 -spec check_n_minus_f_aux_messages(pos_integer(), non_neg_integer(), bba_data()) -> boolean().
 check_n_minus_f_aux_messages(N, F, Data) ->
     %% check if we've received at least N - F AUX messages where the values in the AUX messages are member of bin_values
-    maps:size(maps:filter(fun(_, X) -> has(X, Data#bba_data.bin_values) end, Data#bba_data.aux_witness)) >= N - F.
+    maps:fold(fun(_, V, Acc) ->
+                      case has(V, Data#bba_data.bin_values) of
+                          true ->
+                              Acc + 1;
+                          false -> Acc
+                      end
+              end, 0, Data#bba_data.aux_witness) >= N - F.
 
 %% add X to set Y
 add(X, Y) ->
-    Res = (1 bsl X) bor Y,
-    io:format("Added ~.2b to ~.2b -> ~.2b~n", [1 bsl X, Y, Res]),
-    Res.
+    (1 bsl X) bor Y.
 
 %% is X in set Y?
 has(X, Y) ->
-    Res = ((1 bsl X) band Y) /= 0,
-    io:format("Checked if ~.2b is in ~.2b -> ~p~n", [1 bsl X, Y, Res]),
-    Res.
+    ((1 bsl X) band Y) /= 0.
 
 %% count elements of set
 count(2#0) -> 0;
@@ -205,7 +283,6 @@ init_test() ->
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
-    io:format("ConvergedResults ~p~n", [ConvergedResults]),
     %% everyone should converge
     ?assertEqual(N, sets:size(ConvergedResults)),
     ok.
@@ -227,7 +304,6 @@ init_with_zeroes_test() ->
     {NewStates, Results} = lists:unzip(Res),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
     DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
-    io:format("DistinctResults: ~p~n", [sets:to_list(DistinctResults)]),
     ?assertEqual(N, sets:size(ConvergedResults)),
     ?assertEqual([0], sets:to_list(DistinctResults)),
     ok.
@@ -249,8 +325,6 @@ init_with_ones_test() ->
     {NewStates, Results} = lists:unzip(Res),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
     DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
-    io:format("DistinctResults: ~p~n", [sets:to_list(DistinctResults)]),
-    %% io:format("ConvergedResults ~p~n", [ConvergedResults]),
     ?assertEqual(N, sets:size(ConvergedResults)),
     ?assertEqual([1], sets:to_list(DistinctResults)),
     ok.
@@ -273,8 +347,6 @@ init_with_mixed_zeros_and_ones_test_() ->
                           {NewStates, Results} = lists:unzip(Res),
                           {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
                           DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
-                          io:format("DistinctResults: ~p~n", [sets:to_list(DistinctResults)]),
-                          io:format("ConvergedResults ~p~n", [sets:to_list(ConvergedResults)]),
                           ?assertEqual(N, sets:size(ConvergedResults)),
                           ?assertEqual(1, sets:size(DistinctResults)),
                           ok

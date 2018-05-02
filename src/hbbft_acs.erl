@@ -1,6 +1,6 @@
 -module(hbbft_acs).
 
--export([init/4, input/2, handle_msg/3]).
+-export([init/4, input/2, handle_msg/3, serialize/1, deserialize/2]).
 
 -record(rbc_state, {
           rbc_data :: hbbft_rbc:rbc_data(),
@@ -18,20 +18,43 @@
           n :: pos_integer(),
           f :: non_neg_integer(),
           j :: non_neg_integer(),
-          rbc = #{} :: #{non_neg_integer() => rbc_state()},
-          bba = #{} :: #{non_neg_integer() => bba_state()}
+          rbc = #{} :: #{non_neg_integer() => hbbft_acs:rbc_state()},
+          bba = #{} :: #{non_neg_integer() => hbbft_acs:bba_state()}
+         }).
+
+-record(acs_serialized_data, {
+          done = false :: boolean(),
+          n :: pos_integer(),
+          f :: non_neg_integer(),
+          j :: non_neg_integer(),
+          rbc = #{} :: #{non_neg_integer() => hbbft_acs:rbc_serialized_state()},
+          bba = #{} :: #{non_neg_integer() => hbbft_acs:bba_serialized_state()}
+         }).
+
+-record(rbc_serialized_state, {
+          rbc_data :: hbbft_rbc:rbc_data(),
+          result :: undefined | binary()
+         }).
+
+-record(bba_serialized_state, {
+          bba_data :: hbbft_bba:bba_serialized_data(),
+          input :: undefined | 0 | 1,
+          result :: undefined | boolean()
          }).
 
 -type acs_data() :: #acs_data{}.
+-type acs_serialized_data() :: #acs_serialized_data{}.
 -type rbc_state() :: #rbc_state{}.
+-type rbc_serialized_state() :: #rbc_serialized_state{}.
 -type bba_state() :: #bba_state{}.
+-type bba_serialized_state() :: #bba_serialized_state{}.
 
 -type bba_msg() :: {{bba, non_neg_integer()}, hbbft_bba:msgs()}.
 -type rbc_msg() :: {{rbc, non_neg_integer()}, hbbft_rbc:msgs()}.
 -type rbc_wrapped_output() :: hbbft_utils:unicast({{rbc, non_neg_integer()}, hbbft_rbc:val_msg()}) | hbbft_utils:multicast({{rbc, non_neg_integer()}, hbbft_rbc:echo_msg() | hbbft_rbc:ready_msg()}).
 -type msgs() :: bba_msg() | rbc_msg().
 
--export_type([acs_data/0, msgs/0, bba_msg/0]).
+-export_type([acs_data/0, msgs/0, bba_msg/0, acs_serialized_data/0, bba_state/0, rbc_state/0, bba_serialized_state/0, rbc_serialized_state/0]).
 
 -spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer(), non_neg_integer()) -> acs_data().
 init(SK, N, F, J) ->
@@ -56,14 +79,12 @@ input(Data, Input) ->
                                                                            {result, [{non_neg_integer(), binary()}]}}.
 handle_msg(Data, J, {{rbc, I}, RBCMsg}) ->
     RBC = get_rbc(Data, I),
-    io:format("~p RBC message for ~p ~p~n", [Data#acs_data.j, I, element(1, RBCMsg)]),
     case hbbft_rbc:handle_msg(RBC#rbc_state.rbc_data, J, RBCMsg) of
         {NewRBC, {send, ToSend}} ->
             {store_rbc_state(Data, I, NewRBC), {send, hbbft_utils:wrap({rbc, I}, ToSend)}};
         {NewRBC, {result, Result}} ->
             %% Figure4, Bullet2
             %% upon delivery of vj from RBCj, if input has not yet been provided to BAj, then provide input 1 to BAj
-            io:format("~p RBC returned for ~p~n", [Data#acs_data.j, I]),
             NewData = store_rbc_result(store_rbc_state(Data, I, NewRBC), I, Result),
             case bba_has_had_input(maps:get(I, Data#acs_data.bba)) of
                 true ->
@@ -84,22 +105,18 @@ handle_msg(Data = #acs_data{n=N, f=F}, J, {{bba, I}, BBAMsg}) ->
         {NewBBA, {send, ToSend}} ->
             {store_bba_state(Data, I, NewBBA), {send, hbbft_utils:wrap({bba, I}, ToSend)}};
         {NewBBA, {result, B}} ->
-            io:format("~p BBA ~p returned ~p~n", [Data#acs_data.j, I, B]),
             NewData = store_bba_state(store_bba_result(Data, I, B), I, NewBBA),
             %% Figure4, Bullet3
             %% upon delivery of value 1 from at least N − f instances of BA , provide input 0 to each instance of BA that has not yet been provided input.
             BBAsThatReturnedOne = successful_bba_count(NewData),
-            io:format("~p ~p BBAs completed, ~p returned one, ~p needed~n", [Data#acs_data.j, completed_bba_count(NewData), BBAsThatReturnedOne, N - F]),
             case BBAsThatReturnedOne >= N - F andalso NewData#acs_data.done == false of
                 true ->
-                    io:format("~b Enough BBAs (~b/~b) completed, zeroing the rest~n", [Data#acs_data.j, BBAsThatReturnedOne, N]),
                     %% send 0 to all BBAs that have not yet been provided input because their RBC has not completed
                     {NextData, Replies} = lists:foldl(fun(E, {DataAcc, MsgAcc}=Acc) ->
                                                               ThisBBA = get_bba(DataAcc, E),
                                                               case bba_has_had_input(ThisBBA) of
                                                                   false ->
                                                                       {FailedBBA, {send, ToSend}} = hbbft_bba:input(ThisBBA#bba_state.bba_data, 0),
-                                                                      io:format("~p Sending BBA ~p zero~n", [Data#acs_data.j, E]),
                                                                       {store_bba_input(store_bba_state(Data, E, FailedBBA), E, 0), [hbbft_utils:wrap({bba, E}, ToSend)|MsgAcc]};
                                                                   true ->
                                                                       Acc
@@ -138,10 +155,6 @@ bba_completed(#bba_state{input=Input, result=Result}) ->
 -spec successful_bba_count(acs_data()) -> non_neg_integer(). %% successful_bba_count can be 0?
 successful_bba_count(Data) ->
     lists:sum([ 1 || BBA <- maps:values(Data#acs_data.bba), BBA#bba_state.result]).
-
--spec completed_bba_count(acs_data()) -> non_neg_integer(). %% completed_bba_count cannot be 0
-completed_bba_count(Data) ->
-    lists:sum([ 1 || BBA <- maps:values(Data#acs_data.bba), BBA#bba_state.result /= undefined]).
 
 -spec get_bba(acs_data(), non_neg_integer()) -> bba_state().
 get_bba(Data, I) ->
@@ -190,6 +203,44 @@ store_rbc_result(Data, I, Result) ->
     RBC = get_rbc(Data, I),
     Data#acs_data{rbc = maps:put(I, RBC#rbc_state{result=Result}, Data#acs_data.rbc)}.
 
+-spec serialize(acs_data()) -> acs_serialized_data().
+serialize(#acs_data{done=Done, n=N, f=F, j=J, rbc=RBCMap, bba=BBAMap}) ->
+    #acs_serialized_data{done=Done, n=N, f=F, j=J, rbc=serialize_state(RBCMap, rbc), bba=serialize_state(BBAMap, bba)}.
+
+-spec deserialize(acs_serialized_data(), tpke_privkey:privkey()) -> acs_data().
+deserialize(#acs_serialized_data{done=Done, n=N, f=F, j=J, rbc=RBCMap, bba=BBAMap}, SK) ->
+    #acs_data{done=Done, n=N, f=F, j=J, rbc=deserialize_state(RBCMap, rbc), bba=deserialize_state(BBAMap, bba, SK)}.
+
+%% Helper functions for serialization/deserialization
+-spec serialize_state(#{non_neg_integer() => rbc_state() | bba_state()}, rbc | bba) -> #{}.
+serialize_state(State, rbc) ->
+    maps:map(fun(_K, V) -> serialize_rbc_state(V) end, State);
+serialize_state(State, bba) ->
+    maps:map(fun(_K, V) -> serialize_bba_state(V) end, State).
+
+-spec deserialize_state(#{non_neg_integer() => rbc_serialized_state()}, rbc) -> #{}.
+deserialize_state(State, rbc) ->
+    maps:map(fun(_K, V) -> deserialize_rbc_state(V) end, State).
+
+-spec deserialize_state(#{non_neg_integer() => bba_serialized_state()}, bba, tpke_privkey:privkey()) -> #{}.
+deserialize_state(State, bba, SK) ->
+    maps:map(fun(_K, V) -> deserialize_bba_state(V, SK) end, State).
+
+-spec serialize_rbc_state(rbc_state()) -> rbc_serialized_state().
+serialize_rbc_state(#rbc_state{rbc_data=RBCData, result=Result}) ->
+    #rbc_serialized_state{rbc_data=RBCData, result=Result}.
+
+-spec deserialize_rbc_state(rbc_serialized_state()) -> rbc_state().
+deserialize_rbc_state(#rbc_serialized_state{rbc_data=RBCData, result=Result}) ->
+    #rbc_state{rbc_data=RBCData, result=Result}.
+
+-spec serialize_bba_state(bba_state()) -> bba_serialized_state().
+serialize_bba_state(#bba_state{bba_data=BBAData, input=Input, result=Result}) ->
+    #bba_serialized_state{bba_data=hbbft_bba:serialize(BBAData), input=Input, result=Result}.
+
+-spec deserialize_bba_state(bba_serialized_state(), tpke_privkey:privkey()) -> bba_state().
+deserialize_bba_state(#bba_serialized_state{bba_data=BBAData, input=Input, result=Result}, SK) ->
+    #bba_state{bba_data=hbbft_bba:deserialize(BBAData, SK), input=Input, result=Result}.
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
