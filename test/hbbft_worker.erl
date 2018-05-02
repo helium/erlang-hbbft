@@ -184,16 +184,13 @@ hash_block(Block) ->
     crypto:hash(sha256, term_to_binary(Block)).
 
 maybe_deserialize_hbbft(HBBFT, SK) ->
-    case is_serialized(HBBFT) of
+    case hbbft:is_serialized(HBBFT) of
         true -> hbbft:deserialize(HBBFT, SK);
         false -> HBBFT
     end.
 
 maybe_serialize_HBBFT(HBBFT, ToSerialize) ->
-    case is_serialized(HBBFT) orelse not ToSerialize of
+    case hbbft:is_serialized(HBBFT) orelse not ToSerialize of
         true -> HBBFT;
         false -> element(1, hbbft:serialize(HBBFT, false))
     end.
-
-is_serialized(#hbbft_serialized_data{}) -> true;
-is_serialized(#hbbft_data{}) -> false.

@@ -323,6 +323,10 @@ serialize_hbbft_data(#hbbft_data{batch_size=BatchSize,
                            sig_shares=serialize_shares(SigShares),
                            thingtosign=NewThingToSign}.
 
+-spec is_serialized(hbbft_data() | hbbft_serialized_data()) -> boolean().
+is_serialized(Data) when is_record(Data, hbbft_serialized_data) -> true;
+is_serialized(Data) when is_record(Data, hbbft_data) -> false.
+
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
