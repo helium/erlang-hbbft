@@ -3,7 +3,7 @@
 -include_lib("../src/hbbft.hrl").
 -behaviour(gen_server).
 
--export([start_link/4, submit_transaction/2, get_blocks/1]).
+-export([start_link/5, submit_transaction/2, get_blocks/1]).
 -export([verify_chain/2, block_transactions/1]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
@@ -24,8 +24,8 @@
           ssk :: tpke_privkey:privkey_serialized()
          }).
 
-start_link(N, F, ID, SK) ->
-    gen_server:start_link({global, name(ID)}, ?MODULE, [N, F, ID, SK], []).
+start_link(N, F, ID, SK, BatchSize) ->
+    gen_server:start_link({global, name(ID)}, ?MODULE, [N, F, ID, SK, BatchSize], []).
 
 submit_transaction(Msg, Pid) ->
     gen_server:call(Pid, {submit_txn, Msg}, infinity).
@@ -90,11 +90,11 @@ verify_block_fit([A, B | _], PubKey) ->
 block_transactions(Block) ->
     Block#block.transactions.
 
-init([N, F, ID, SK]) ->
+init([N, F, ID, SK, BatchSize]) ->
     %% deserialize the secret key once
     DSK = tpke_privkey:deserialize(SK),
     %% init hbbft
-    HBBFT = hbbft:init(DSK, N, F, ID, 20),
+    HBBFT = hbbft:init(DSK, N, F, ID, BatchSize),
     %% store the serialized state and serialized SK
     {ok, #state{hbbft=HBBFT, blocks=[], id=ID, n=N, sk=DSK, ssk=SK}}.
 

@@ -17,10 +17,11 @@ end_per_testcase(_, _) ->
 simple_test(_Config) ->
     N=5,
     F=(N div 3),
+    BatchSize = 20,
     dealer:start_link(N, F+1, 'SS512'),
     {ok, PubKey, PrivateKeys} = dealer:deal(),
     gen_server:stop(dealer),
-    Workers = [ element(2, hbbft_worker:start_link(N, F, I, tpke_privkey:serialize(SK))) || {I, SK} <- enumerate(PrivateKeys) ],
+    Workers = [ element(2, hbbft_worker:start_link(N, F, I, tpke_privkey:serialize(SK), BatchSize)) || {I, SK} <- enumerate(PrivateKeys) ],
     Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*20)],
     %% feed the badgers some msgs
     lists:foreach(fun(Msg) ->

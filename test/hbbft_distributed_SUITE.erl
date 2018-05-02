@@ -56,6 +56,7 @@ simple_test(Config) ->
     %% master starts the dealer
     N = length(Nodes),
     F = (N div 3),
+    BatchSize = 20,
     dealer:start_link(N, F+1, 'SS512'),
     {ok, PubKey, PrivateKeys} = dealer:deal(),
     gen_server:stop(dealer),
@@ -70,7 +71,7 @@ simple_test(Config) ->
                             end, Nodes),
 
     %% start a hbbft_worker on each node
-    Workers = [{Node, rpc:call(Node, hbbft_worker, start_link, [N, F, I, tpke_privkey:serialize(SK)])} || {I, {Node, SK}} <- enumerate(NodesSKs)],
+    Workers = [{Node, rpc:call(Node, hbbft_worker, start_link, [N, F, I, tpke_privkey:serialize(SK), BatchSize])} || {I, {Node, SK}} <- enumerate(NodesSKs)],
     ok = global:sync(),
 
     [ link(W) || {_, {ok, W}} <- Workers ],
@@ -137,6 +138,7 @@ serialization_test(Config) ->
     %% master starts the dealer
     N = length(Nodes),
     F = (N div 3),
+    BatchSize = 20,
     dealer:start_link(N, F+1, 'SS512'),
     {ok, PubKey, PrivateKeys} = dealer:deal(),
     gen_server:stop(dealer),
@@ -151,7 +153,7 @@ serialization_test(Config) ->
                             end, Nodes),
 
     %% start a hbbft_worker on each node
-    Workers = [{Node, rpc:call(Node, hbbft_worker, start_link, [N, F, I, tpke_privkey:serialize(SK)])} || {I, {Node, SK}} <- enumerate(NodesSKs)],
+    Workers = [{Node, rpc:call(Node, hbbft_worker, start_link, [N, F, I, tpke_privkey:serialize(SK), BatchSize])} || {I, {Node, SK}} <- enumerate(NodesSKs)],
     ok = global:sync(),
 
     [ link(W) || {_, {ok, W}} <- Workers ],
