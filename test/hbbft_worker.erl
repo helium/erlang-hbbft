@@ -3,7 +3,7 @@
 -include_lib("../src/hbbft.hrl").
 -behaviour(gen_server).
 
--export([start_link/5, submit_transaction/2, get_blocks/1]).
+-export([start_link/6, submit_transaction/2, get_blocks/1]).
 -export([verify_chain/2, block_transactions/1]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
@@ -21,11 +21,12 @@
           blocks :: [#block{}],
           tempblock :: undefined | #block{},
           sk :: tpke_privkey:privkey(),
-          ssk :: tpke_privkey:privkey_serialized()
+          ssk :: tpke_privkey:privkey_serialized(),
+          to_serialize = false :: boolean()
          }).
 
-start_link(N, F, ID, SK, BatchSize) ->
-    gen_server:start_link({global, name(ID)}, ?MODULE, [N, F, ID, SK, BatchSize], []).
+start_link(N, F, ID, SK, BatchSize, ToSerialize) ->
+    gen_server:start_link({global, name(ID)}, ?MODULE, [N, F, ID, SK, BatchSize, ToSerialize], []).
 
 submit_transaction(Msg, Pid) ->
     gen_server:call(Pid, {submit_txn, Msg}, infinity).
@@ -90,13 +91,13 @@ verify_block_fit([A, B | _], PubKey) ->
 block_transactions(Block) ->
     Block#block.transactions.
 
-init([N, F, ID, SK, BatchSize]) ->
+init([N, F, ID, SK, BatchSize, ToSerialize]) ->
     %% deserialize the secret key once
     DSK = tpke_privkey:deserialize(SK),
     %% init hbbft
     HBBFT = hbbft:init(DSK, N, F, ID, BatchSize),
     %% store the serialized state and serialized SK
-    {ok, #state{hbbft=HBBFT, blocks=[], id=ID, n=N, sk=DSK, ssk=SK}}.
+    {ok, #state{hbbft=HBBFT, blocks=[], id=ID, n=N, sk=DSK, ssk=SK, to_serialize=ToSerialize}}.
 
 handle_call({submit_txn, Txn}, _From, State = #state{hbbft=HBBFT, sk=SK}) ->
     NewState = dispatch(hbbft:input(maybe_deserialize_hbbft(HBBFT, SK), Txn), State),
@@ -140,7 +141,7 @@ handle_info(Msg, State) ->
 
 dispatch({NewHBBFT, {send, ToSend}}, State) ->
     do_send(ToSend, State),
-    State#state{hbbft=maybe_serialize_HBBFT(NewHBBFT)};
+    State#state{hbbft=maybe_serialize_HBBFT(NewHBBFT, State#state.to_serialize)};
 dispatch({NewHBBFT, {result, {transactions, Txns}}}, State) ->
     NewBlock = case State#state.blocks of
                    [] ->
@@ -156,10 +157,10 @@ dispatch({NewHBBFT, {result, {signature, Sig}}}, State = #state{tempblock=NewBlo
     [ gen_server:cast({global, name(Dest)}, {block, NewBlock}) || Dest <- lists:seq(0, State#state.n - 1)],
     dispatch(hbbft:next_round(maybe_deserialize_hbbft(NewHBBFT, State#state.sk)), State#state{blocks=[NewBlock|State#state.blocks], tempblock=undefined});
 dispatch({NewHBBFT, ok}, State) ->
-    State#state{hbbft=maybe_serialize_HBBFT(NewHBBFT)};
+    State#state{hbbft=maybe_serialize_HBBFT(NewHBBFT, State#state.to_serialize)};
 dispatch({NewHBBFT, Other}, State) ->
     io:format("UNHANDLED ~p~n", [Other]),
-    State#state{hbbft=maybe_serialize_HBBFT(NewHBBFT)};
+    State#state{hbbft=maybe_serialize_HBBFT(NewHBBFT, State#state.to_serialize)};
 dispatch(Other, State) ->
     io:format("UNHANDLED2 ~p~n", [Other]),
     State.
@@ -189,8 +190,8 @@ maybe_deserialize_hbbft(HBBFT, SK) ->
         false -> HBBFT
     end.
 
-maybe_serialize_HBBFT(HBBFT) ->
-    case is_serialized(HBBFT) of
+maybe_serialize_HBBFT(HBBFT, ToSerialize) ->
+    case is_serialized(HBBFT) orelse not ToSerialize of
         true -> HBBFT;
         false -> element(1, hbbft:serialize(HBBFT, false))
     end.

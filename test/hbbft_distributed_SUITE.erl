@@ -71,7 +71,7 @@ simple_test(Config) ->
                             end, Nodes),
 
     %% start a hbbft_worker on each node
-    Workers = [{Node, rpc:call(Node, hbbft_worker, start_link, [N, F, I, tpke_privkey:serialize(SK), BatchSize])} || {I, {Node, SK}} <- enumerate(NodesSKs)],
+    Workers = [{Node, rpc:call(Node, hbbft_worker, start_link, [N, F, I, tpke_privkey:serialize(SK), BatchSize, false])} || {I, {Node, SK}} <- enumerate(NodesSKs)],
     ok = global:sync(),
 
     [ link(W) || {_, {ok, W}} <- Workers ],
@@ -153,7 +153,7 @@ serialization_test(Config) ->
                             end, Nodes),
 
     %% start a hbbft_worker on each node
-    Workers = [{Node, rpc:call(Node, hbbft_worker, start_link, [N, F, I, tpke_privkey:serialize(SK), BatchSize])} || {I, {Node, SK}} <- enumerate(NodesSKs)],
+    Workers = [{Node, rpc:call(Node, hbbft_worker, start_link, [N, F, I, tpke_privkey:serialize(SK), BatchSize, true])} || {I, {Node, SK}} <- enumerate(NodesSKs)],
     ok = global:sync(),
 
     [ link(W) || {_, {ok, W}} <- Workers ],
