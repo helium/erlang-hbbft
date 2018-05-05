@@ -158,8 +158,8 @@ bval(Data=#bba_data{n=N, f=F}, Id, V) ->
                             %% TODO need more entropy for the SID
                             {CoinData, {send, CoinSend}} = hbbft_cc:get_coin(hbbft_cc:init(NewData3#bba_data.secret_key, term_to_binary({NewData3#bba_data.round}), N, F)),
                             {NewData3#bba_data{coin=CoinData}, {send, hbbft_utils:wrap({coin, Data#bba_data.round}, CoinSend) ++ ToSend2}};
-                        false ->
-                            {NewData3, ToSend2}
+                        _ ->
+                            {NewData3, {send, ToSend2}}
                     end;
                 false ->
                     {NewData3, {send, ToSend2}}
