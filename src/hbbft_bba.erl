@@ -175,7 +175,13 @@ aux(Data = #bba_data{n=N, f=F}, Id, V) ->
     case threshold(N, F, NewData, aux) of
         true->
             %% only send conf after n-f aux messages
-            {NewData#bba_data{conf_sent=true}, {send, [{multicast, {conf, NewData#bba_data.round, val(NewData#bba_data.bin_values)}}]}};
+            case maps:is_key(Id, NewData#bba_data.conf_witness) of
+                false ->
+                    {NewData#bba_data{conf_sent=true}, {send, [{multicast, {conf, NewData#bba_data.round, V}}]}};
+                true ->
+                    %% conf was already sent
+                    {NewData, ok}
+            end;
         _ ->
             {NewData, ok}
     end.
@@ -275,10 +281,10 @@ deserialize(#bba_serialized_data{state=State,
 threshold(N, F, Data, Msg) ->
     case Msg of
         aux -> check(N, F, Data#bba_data.bin_values, Data#bba_data.aux_witness);
-        conf -> check(N, F, Data#bba_data.bin_values, Data#bba_data.conf_witness);
-        _ -> error
+        conf -> check(N, F, Data#bba_data.bin_values, Data#bba_data.conf_witness)
     end.
 
+-spec check(pos_integer(), non_neg_integer(), 0 | 1 | 2 | 3, #{non_neg_integer() => 0 | 1}) -> boolean().
 check(N, F, ToCheck, Map) ->
     maps:fold(fun(_, V, Acc) ->
                       case has(V, ToCheck) of
@@ -287,7 +293,6 @@ check(N, F, ToCheck, Map) ->
                           false -> Acc
                       end
               end, 0, Map) >= N - F.
-
 
 %% add X to set Y
 add(X, Y) ->
