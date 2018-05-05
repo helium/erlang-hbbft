@@ -177,7 +177,7 @@ aux(Data = #bba_data{n=N, f=F}, Id, V) ->
             %% only send conf after n-f aux messages
             case maps:is_key(Id, NewData#bba_data.conf_witness) of
                 false ->
-                    {NewData#bba_data{conf_sent=true}, {send, [{multicast, {conf, NewData#bba_data.round, V}}]}};
+                    {NewData#bba_data{conf_sent=true}, {send, [{multicast, {conf, NewData#bba_data.round, NewData#bba_data.bin_values}}]}};
                 true ->
                     %% conf was already sent
                     {NewData, ok}
@@ -280,14 +280,14 @@ deserialize(#bba_serialized_data{state=State,
 -spec threshold(pos_integer(), non_neg_integer(), bba_data(), aux | conf) -> boolean().
 threshold(N, F, Data, Msg) ->
     case Msg of
-        aux -> check(N, F, Data#bba_data.bin_values, Data#bba_data.aux_witness);
-        conf -> check(N, F, Data#bba_data.bin_values, Data#bba_data.conf_witness)
+        aux -> check(N, F, Data#bba_data.bin_values, Data#bba_data.aux_witness, fun has/2);
+        conf -> check(N, F, Data#bba_data.bin_values, Data#bba_data.conf_witness, fun subset/2)
     end.
 
--spec check(pos_integer(), non_neg_integer(), 0 | 1 | 2 | 3, #{non_neg_integer() => 0 | 1}) -> boolean().
-check(N, F, ToCheck, Map) ->
+-spec check(pos_integer(), non_neg_integer(), 0 | 1 | 2 | 3, #{non_neg_integer() => 0 | 1}, fun((0|1|2|3, 0|1|2|3) -> boolean())) -> boolean().
+check(N, F, ToCheck, Map, Fun) ->
     maps:fold(fun(_, V, Acc) ->
-                      case has(V, ToCheck) of
+                      case Fun(V, ToCheck) of
                           true ->
                               Acc + 1;
                           false -> Acc
@@ -301,6 +301,10 @@ add(X, Y) ->
 %% is X in set Y?
 has(X, Y) ->
     ((1 bsl X) band Y) /= 0.
+
+%% is X a subset of Y?
+subset(X, Y) ->
+    (X band Y) == X.
 
 %% count elements of set
 count(2#0) -> 0;
