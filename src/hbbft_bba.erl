@@ -119,7 +119,7 @@ handle_msg(Data, _J, _Msg) ->
 -spec bval(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), {send, [hbbft_utils:multicast(aux_msg() | coin_msg())]}}.
 bval(Data=#bba_data{n=N, f=F}, Id, V) ->
     %% add to witnesses
-    Witness = maps:put(Id, V, Data#bba_data.witness),
+    Witness = add_witness(Id, V, Data#bba_data.witness),
     WitnessCount = lists:sum([ 1 || {_, Val} <- maps:to_list(Witness), V == Val ]),
 
     {NewData, ToSend} = case WitnessCount >= F+1 andalso not has(V, Data#bba_data.broadcasted) of
@@ -170,7 +170,7 @@ bval(Data=#bba_data{n=N, f=F}, Id, V) ->
 
 -spec aux(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), ok | {send, [hbbft_utils:multicast(conf_msg())]}}.
 aux(Data = #bba_data{n=N, f=F}, Id, V) ->
-    Witness = maps:put(Id, V, Data#bba_data.aux_witness),
+    Witness = add_witness(Id, V, Data#bba_data.aux_witness),
     NewData = Data#bba_data{aux_witness = Witness},
     case threshold(N, F, NewData, aux) of
         true->
@@ -188,7 +188,7 @@ aux(Data = #bba_data{n=N, f=F}, Id, V) ->
 
 -spec conf(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), ok | {send, [hbbft_utils:multicast(coin_msg())]}}.
 conf(Data = #bba_data{n=N, f=F}, Id, V) ->
-    Witness = maps:put(Id, V, Data#bba_data.conf_witness),
+    Witness = add_witness(Id, V, Data#bba_data.conf_witness),
     NewData = Data#bba_data{conf_witness = Witness},
     case threshold(N, F, NewData, aux) of
         true->
@@ -320,6 +320,15 @@ rand_val(2#11) -> hd(hbbft_utils:random_n(1, [0, 1])).
 %% get single value from set
 val(2#1) -> 0;
 val(2#10) -> 1.
+
+add_witness(Id, Value, Witness) ->
+    case maps:is_key(Id, Witness) of
+        true ->
+            %% Don't allow 2 values from the same witness
+            Witness;
+        false ->
+            maps:put(Id, Value, Witness)
+    end.
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
