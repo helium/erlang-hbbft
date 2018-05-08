@@ -152,7 +152,7 @@ bval(Data=#bba_data{n=N, f=F}, Id, V) ->
             case threshold(N, F, NewData3, aux) of
                 true ->
                     %% check if we have n-f conf messages
-                    case threshold(F, F, NewData3, conf) of
+                    case threshold(N, F, NewData3, conf) of
                         %% instantiate the common coin
                         true when NewData3#bba_data.coin == undefined ->
                             %% TODO need more entropy for the SID
