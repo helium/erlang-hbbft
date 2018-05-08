@@ -454,4 +454,28 @@ two_dead_test() ->
     %% should not converge
     ?assertEqual(0, sets:size(ConvergedResults)),
     ok.
+
+%% https://github.com/amiller/HoneyBadgerBFT/issues/59
+%% constructive_attack_test_() ->
+%%     {timeout, 60, fun() ->
+%%                           N = 7,
+%%                           F = 2,
+%%                           dealer:start_link(N, F+1, 'SS512'),
+%%                           {ok, _PubKey, PrivateKeys} = dealer:deal(),
+%%                           gen_server:stop(dealer),
+%%                           States = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
+%%                           StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
+%%                           MixedList = lists:zip([1, 1, 1, 1, 0, 0, 0], StatesWithId),
+%%                           %% all valid members should call get_coin
+%%                           Res = lists:map(fun({I, {J, State}}) ->
+%%                                                   {NewState, Result} = input(State, I),
+%%                                                   {{J, NewState}, {J, Result}}
+%%                                           end, MixedList),
+%%                           {NewStates, Results} = lists:unzip(Res),
+%%                           {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
+%%                           DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
+%%                           ?assertEqual(N, sets:size(ConvergedResults)),
+%%                           ?assertEqual(1, sets:size(DistinctResults)),
+%%                           ok
+%%                   end}.
 -endif.
