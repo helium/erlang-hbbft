@@ -16,7 +16,7 @@
           conf_witness = maps:new() :: #{non_neg_integer() => 0 | 1},
           aux_sent = false :: boolean(),
           conf_sent = false :: boolean(),
-          broadcasted = 2#0 :: 0 | 1,
+          broadcasted = 2#0 :: 0 | 1 | 2 | 3,
           bin_values = 2#00 :: 0 | 1 | 2 | 3
          }).
 
@@ -33,7 +33,7 @@
           conf_witness = maps:new() :: #{non_neg_integer() => 0 | 1},
           aux_sent = false :: boolean(),
           conf_sent = false :: boolean(),
-          broadcasted = 2#0 :: 0 | 1,
+          broadcasted = 2#0 :: 0 | 1 | 2 | 3,
           bin_values = 2#00 :: 0 | 1 | 2 | 3
          }).
 
@@ -58,7 +58,7 @@ init(SK, N, F) ->
 %% – bin_values  {}
 -spec input(bba_data(), 0 | 1) -> {bba_data(), ok | {send, [hbbft_utils:multicast(bval_msg())]}}.
 input(Data = #bba_data{state=init}, BInput) ->
-    {Data#bba_data{est = BInput}, {send, [{multicast, {bval, Data#bba_data.round, BInput}}]}};
+    {Data#bba_data{est = BInput, broadcasted=add(BInput, Data#bba_data.broadcasted)}, {send, [{multicast, {bval, Data#bba_data.round, BInput}}]}};
 input(Data = #bba_data{state=done}, _BInput) ->
     {Data, ok}.
 
@@ -120,7 +120,7 @@ handle_msg(Data, _J, _Msg) ->
 bval(Data=#bba_data{n=N, f=F}, Id, V) ->
     %% add to witnesses
     Witness = add_witness(Id, V, Data#bba_data.witness),
-    WitnessCount = lists:sum([ 1 || {_, Val} <- maps:to_list(Witness), V == Val ]),
+    WitnessCount = lists:sum([ 1 || {_, Val} <- maps:to_list(Witness), has(V, Val) ]),
 
     {NewData, ToSend} = case WitnessCount >= F+1 andalso not has(V, Data#bba_data.broadcasted) of
                             true ->
@@ -175,7 +175,7 @@ aux(Data = #bba_data{n=N, f=F}, Id, V) ->
     case threshold(N, F, NewData, aux) of
         true->
             %% only send conf after n-f aux messages
-            case maps:is_key(Id, NewData#bba_data.conf_witness) of
+            case NewData#bba_data.conf_sent of
                 false ->
                     {NewData#bba_data{conf_sent=true}, {send, [{multicast, {conf, NewData#bba_data.round, NewData#bba_data.bin_values}}]}};
                 true ->
@@ -188,7 +188,7 @@ aux(Data = #bba_data{n=N, f=F}, Id, V) ->
 
 -spec conf(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), ok | {send, [hbbft_utils:multicast(coin_msg())]}}.
 conf(Data = #bba_data{n=N, f=F}, Id, V) ->
-    Witness = add_witness(Id, V, Data#bba_data.conf_witness),
+    Witness = maps:put(Id, V, Data#bba_data.conf_witness),
     NewData = Data#bba_data{conf_witness = Witness},
     case threshold(N, F, NewData, aux) of
         true->
@@ -280,7 +280,7 @@ deserialize(#bba_serialized_data{state=State,
 -spec threshold(pos_integer(), non_neg_integer(), bba_data(), aux | conf) -> boolean().
 threshold(N, F, Data, Msg) ->
     case Msg of
-        aux -> check(N, F, Data#bba_data.bin_values, Data#bba_data.aux_witness, fun has/2);
+        aux -> check(N, F, Data#bba_data.bin_values, Data#bba_data.aux_witness, fun subset/2);
         conf -> check(N, F, Data#bba_data.bin_values, Data#bba_data.conf_witness, fun subset/2)
     end.
 
@@ -322,16 +322,26 @@ val(2#1) -> 0;
 val(2#10) -> 1.
 
 add_witness(Id, Value, Witness) ->
-    case maps:is_key(Id, Witness) of
-        true ->
-            %% Don't allow 2 values from the same witness
-            Witness;
-        false ->
-            maps:put(Id, Value, Witness)
-    end.
+    Old = maps:get(Id, Witness, 0),
+    maps:put(Id, add(Value, Old), Witness).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
+
+dump_state(State) ->
+    lists:flatten([io_lib:format("BBA is in round ~b with state ~p est ~p output ~p and bin_values ~p~n",
+                  [State#bba_data.round, State#bba_data.state, State#bba_data.est, State#bba_data.output, vals(State#bba_data.bin_values)]),
+                   io_lib:format("AUX sent ~p, CONF sent ~p~n", [State#bba_data.aux_sent, State#bba_data.conf_sent]),
+                   io_lib:format("BVAL witness ~p~n", [State#bba_data.witness]),
+                   io_lib:format("AUX witness ~p~n", [State#bba_data.aux_witness]),
+                   io_lib:format("CONF witness ~p~n", [State#bba_data.conf_witness]),
+                   io_lib:format("Broadcasted ~p~n", [vals(State#bba_data.broadcasted)])
+                  ]).
+
+vals(2#0) -> [];
+vals(2#1) -> [0];
+vals(2#10) -> [1];
+vals(2#11) -> [0, 1].
 
 init_test() ->
     N = 5,
@@ -416,6 +426,41 @@ init_with_mixed_zeros_and_ones_test_() ->
                           ?assertEqual(1, sets:size(DistinctResults)),
                           ok
                   end}.
+
+termination_test_() ->
+    Fun = fun(Vals) ->
+                  fun() ->
+                          N = 7,
+                          F = 2,
+                          dealer:start_link(N, F+1, 'SS512'),
+                          {ok, _PubKey, PrivateKeys} = dealer:deal(),
+                          gen_server:stop(dealer),
+                          States = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
+                          StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
+                          MixedList = lists:zip(Vals, StatesWithId),
+                          %% all valid members should call get_coin
+                          Res = lists:map(fun({I, {J, State}}) ->
+                                                  {NewState, Result} = input(State, I),
+                                                  {{J, NewState}, {J, Result}}
+                                          end, MixedList),
+                          {NewStates, Results} = lists:unzip(Res),
+                          {FinalStates, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
+                          [ io:format("~p ~s~n", [ID, dump_state(S)]) || {ID, S} <- FinalStates],
+                          DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
+                          ?assertEqual(N, sets:size(ConvergedResults)),
+                          ?assertEqual(1, sets:size(DistinctResults)),
+                          ok
+                  end
+          end,
+    [
+     Fun([1, 0, 0, 0, 0, 0, 0]),
+     Fun([1, 1, 0, 0, 0, 0, 0]),
+     Fun([1, 1, 1, 0, 0, 0, 0]),
+     Fun([1, 1, 1, 1, 0, 0, 0]),
+     Fun([1, 1, 1, 1, 1, 0, 0]),
+     Fun([1, 1, 1, 1, 1, 1, 0]),
+     Fun([1, 1, 1, 1, 1, 1, 1])
+    ].
 
 one_dead_test() ->
     N = 5,
