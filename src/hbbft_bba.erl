@@ -13,8 +13,10 @@
           n :: pos_integer(),
           witness = maps:new() :: #{non_neg_integer() => 0 | 1},
           aux_witness = maps:new() :: #{non_neg_integer() => 0 | 1},
+          conf_witness = maps:new() :: #{non_neg_integer() => 0 | 1},
           aux_sent = false :: boolean(),
-          broadcasted = 2#0 :: 0 | 1,
+          conf_sent = false :: boolean(),
+          broadcasted = 2#0 :: 0 | 1 | 2 | 3,
           bin_values = 2#00 :: 0 | 1 | 2 | 3
          }).
 
@@ -28,8 +30,10 @@
           n :: pos_integer(),
           witness = maps:new() :: #{non_neg_integer() => 0 | 1},
           aux_witness = maps:new() :: #{non_neg_integer() => 0 | 1},
+          conf_witness = maps:new() :: #{non_neg_integer() => 0 | 1},
           aux_sent = false :: boolean(),
-          broadcasted = 2#0 :: 0 | 1,
+          conf_sent = false :: boolean(),
+          broadcasted = 2#0 :: 0 | 1 | 2 | 3,
           bin_values = 2#00 :: 0 | 1 | 2 | 3
          }).
 
@@ -38,10 +42,11 @@
 
 -type bval_msg() :: {bval, non_neg_integer(), 0 | 1}.
 -type aux_msg() :: {aux, non_neg_integer(), 0 | 1}.
+-type conf_msg() :: {conf, non_neg_integer(), 0 | 1}.
 -type coin_msg() :: {{coin, non_neg_integer()}, hbbft_cc:share_msg()}.
--type msgs() :: bval_msg() | aux_msg() | coin_msg().
+-type msgs() :: bval_msg() | aux_msg() | conf_msg() | coin_msg().
 
--export_type([bba_data/0, bba_serialized_data/0, bval_msg/0, aux_msg/0, coin_msg/0, msgs/0]).
+-export_type([bba_data/0, bba_serialized_data/0, bval_msg/0, aux_msg/0, coin_msg/0, msgs/0, conf_msg/0]).
 
 -spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer()) -> bba_data().
 init(SK, N, F) ->
@@ -53,22 +58,25 @@ init(SK, N, F) ->
 %% – bin_values  {}
 -spec input(bba_data(), 0 | 1) -> {bba_data(), ok | {send, [hbbft_utils:multicast(bval_msg())]}}.
 input(Data = #bba_data{state=init}, BInput) ->
-    {Data#bba_data{est = BInput}, {send, [{multicast, {bval, Data#bba_data.round, BInput}}]}};
+    {Data#bba_data{est = BInput, broadcasted=add(BInput, Data#bba_data.broadcasted)}, {send, [{multicast, {bval, Data#bba_data.round, BInput}}]}};
 input(Data = #bba_data{state=done}, _BInput) ->
     {Data, ok}.
 
 -spec handle_msg(bba_data(), non_neg_integer(),
                  coin_msg() |
                  bval_msg() |
-                 aux_msg()) -> {bba_data(), ok} |
-                               {bba_data(), {send, [hbbft_utils:multicast(bval_msg() | aux_msg() | coin_msg())]}} |
-                               {bba_data(), {result, 0 | 1}}.
+                 aux_msg() |
+                 conf_msg()) -> {bba_data(), ok} |
+                                {bba_data(), {send, [hbbft_utils:multicast(bval_msg() | aux_msg() | conf_msg() | coin_msg())]}} |
+                                {bba_data(), {result, 0 | 1}}.
 handle_msg(Data = #bba_data{state=done}, _J, _BInput) ->
     {Data, ok};
 handle_msg(Data = #bba_data{round=R}, J, {bval, R, V}) ->
     bval(Data, J, V);
 handle_msg(Data = #bba_data{round=_R}, J, {aux, _R, V}) ->
     aux(Data, J, V);
+handle_msg(Data = #bba_data{round=_R}, J, {conf, _R, V}) ->
+    conf(Data, J, V);
 handle_msg(Data = #bba_data{round=R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin /= undefined ->
     %% dispatch the message to the nested coin protocol
     case hbbft_cc:handle_msg(Data#bba_data.coin, J, CMsg) of
@@ -111,8 +119,8 @@ handle_msg(Data, _J, _Msg) ->
 -spec bval(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), {send, [hbbft_utils:multicast(aux_msg() | coin_msg())]}}.
 bval(Data=#bba_data{n=N, f=F}, Id, V) ->
     %% add to witnesses
-    Witness = maps:put(Id, V, Data#bba_data.witness),
-    WitnessCount = lists:sum([ 1 || {_, Val} <- maps:to_list(Witness), V == Val ]),
+    Witness = add_witness(Id, V, Data#bba_data.witness),
+    WitnessCount = lists:sum([ 1 || {_, Val} <- maps:to_list(Witness), has(V, Val) ]),
 
     {NewData, ToSend} = case WitnessCount >= F+1 andalso not has(V, Data#bba_data.broadcasted) of
                             true ->
@@ -140,29 +148,59 @@ bval(Data=#bba_data{n=N, f=F}, Id, V) ->
                                           {NewData2, ToSend}
                                   end,
 
-            case check_n_minus_f_aux_messages(N, F, NewData3) of
-                true when NewData3#bba_data.coin == undefined ->
-                    %% instantiate the common coin
-                    %% TODO need more entropy for the SID
-                    {CoinData, {send, CoinSend}} = hbbft_cc:get_coin(hbbft_cc:init(NewData3#bba_data.secret_key, term_to_binary({NewData3#bba_data.round}), N, F)),
-                    {NewData3#bba_data{coin=CoinData}, {send, hbbft_utils:wrap({coin, Data#bba_data.round}, CoinSend) ++ ToSend2}};
-                _ ->
+            %% check if we have n-f aux messages
+            case threshold(N, F, NewData3, aux) of
+                true ->
+                    %% check if we have n-f conf messages
+                    case threshold(N, F, NewData3, conf) of
+                        %% instantiate the common coin
+                        true when NewData3#bba_data.coin == undefined ->
+                            %% TODO need more entropy for the SID
+                            {CoinData, {send, CoinSend}} = hbbft_cc:get_coin(hbbft_cc:init(NewData3#bba_data.secret_key, term_to_binary({NewData3#bba_data.round}), N, F)),
+                            {NewData3#bba_data{coin=CoinData}, {send, hbbft_utils:wrap({coin, Data#bba_data.round}, CoinSend) ++ ToSend2}};
+                        _ ->
+                            {NewData3, {send, ToSend2}}
+                    end;
+                false ->
                     {NewData3, {send, ToSend2}}
             end;
         false ->
             {NewData, {send, ToSend}}
     end.
 
--spec aux(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), ok | {send, [hbbft_utils:multicast(coin_msg())]}}.
+-spec aux(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), ok | {send, [hbbft_utils:multicast(conf_msg())]}}.
 aux(Data = #bba_data{n=N, f=F}, Id, V) ->
-    Witness = maps:put(Id, V, Data#bba_data.aux_witness),
+    Witness = add_witness(Id, V, Data#bba_data.aux_witness),
     NewData = Data#bba_data{aux_witness = Witness},
-    case check_n_minus_f_aux_messages(N, F, NewData) of
-        true when NewData#bba_data.coin == undefined ->
-            %% instantiate the common coin
-            %% TODO need more entropy for the SID
-            {CoinData, {send, ToSend}} = hbbft_cc:get_coin(hbbft_cc:init(NewData#bba_data.secret_key, term_to_binary({NewData#bba_data.round}), N, F)),
-            {NewData#bba_data{coin=CoinData}, {send, hbbft_utils:wrap({coin, Data#bba_data.round}, ToSend)}};
+    case threshold(N, F, NewData, aux) of
+        true->
+            %% only send conf after n-f aux messages
+            case NewData#bba_data.conf_sent of
+                false ->
+                    {NewData#bba_data{conf_sent=true}, {send, [{multicast, {conf, NewData#bba_data.round, NewData#bba_data.bin_values}}]}};
+                true ->
+                    %% conf was already sent
+                    {NewData, ok}
+            end;
+        _ ->
+            {NewData, ok}
+    end.
+
+-spec conf(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), ok | {send, [hbbft_utils:multicast(coin_msg())]}}.
+conf(Data = #bba_data{n=N, f=F}, Id, V) ->
+    Witness = maps:put(Id, V, Data#bba_data.conf_witness),
+    NewData = Data#bba_data{conf_witness = Witness},
+    case threshold(N, F, NewData, aux) of
+        true->
+            case threshold(N, F, NewData, conf) of
+                true when NewData#bba_data.coin == undefined ->
+                    %% instantiate the common coin
+                    %% TODO need more entropy for the SID
+                    {CoinData, {send, ToSend}} = hbbft_cc:get_coin(hbbft_cc:init(NewData#bba_data.secret_key, term_to_binary({NewData#bba_data.round}), N, F)),
+                    {NewData#bba_data{coin=CoinData}, {send, hbbft_utils:wrap({coin, NewData#bba_data.round}, ToSend)}};
+                _ ->
+                    {NewData, ok}
+            end;
         _ ->
             {NewData, ok}
     end.
@@ -177,7 +215,9 @@ serialize(#bba_data{state=State,
                     n=N,
                     witness=Witness,
                     aux_witness=AuxWitness,
+                    conf_witness=ConfWitness,
                     aux_sent=AuxSent,
+                    conf_sent=ConfSent,
                     broadcasted=Broadcasted,
                     bin_values=BinValues}) ->
     NewCoin = case Coin of
@@ -193,10 +233,11 @@ serialize(#bba_data{state=State,
                          n=N,
                          witness=Witness,
                          aux_witness=AuxWitness,
+                         conf_witness=ConfWitness,
                          aux_sent=AuxSent,
+                         conf_sent=ConfSent,
                          broadcasted=Broadcasted,
                          bin_values=BinValues}.
-
 
 -spec deserialize(bba_serialized_data(), tpke_privkey:privkey()) -> bba_data().
 deserialize(#bba_serialized_data{state=State,
@@ -208,7 +249,9 @@ deserialize(#bba_serialized_data{state=State,
                                  n=N,
                                  witness=Witness,
                                  aux_witness=AuxWitness,
+                                 conf_witness=ConfWitness,
                                  aux_sent=AuxSent,
+                                 conf_sent=ConfSent,
                                  broadcasted=Broadcasted,
                                  bin_values=BinValues}, SK) ->
     NewCoin = case Coin of
@@ -225,22 +268,31 @@ deserialize(#bba_serialized_data{state=State,
               n=N,
               witness=Witness,
               aux_witness=AuxWitness,
+              conf_witness=ConfWitness,
               aux_sent=AuxSent,
+              conf_sent=ConfSent,
               broadcasted=Broadcasted,
               bin_values=BinValues}.
 
 
 %% helper functions
--spec check_n_minus_f_aux_messages(pos_integer(), non_neg_integer(), bba_data()) -> boolean().
-check_n_minus_f_aux_messages(N, F, Data) ->
-    %% check if we've received at least N - F AUX messages where the values in the AUX messages are member of bin_values
+
+-spec threshold(pos_integer(), non_neg_integer(), bba_data(), aux | conf) -> boolean().
+threshold(N, F, Data, Msg) ->
+    case Msg of
+        aux -> check(N, F, Data#bba_data.bin_values, Data#bba_data.aux_witness, fun subset/2);
+        conf -> check(N, F, Data#bba_data.bin_values, Data#bba_data.conf_witness, fun subset/2)
+    end.
+
+-spec check(pos_integer(), non_neg_integer(), 0 | 1 | 2 | 3, #{non_neg_integer() => 0 | 1}, fun((0|1|2|3, 0|1|2|3) -> boolean())) -> boolean().
+check(N, F, ToCheck, Map, Fun) ->
     maps:fold(fun(_, V, Acc) ->
-                      case has(V, Data#bba_data.bin_values) of
+                      case Fun(V, ToCheck) of
                           true ->
                               Acc + 1;
                           false -> Acc
                       end
-              end, 0, Data#bba_data.aux_witness) >= N - F.
+              end, 0, Map) >= N - F.
 
 %% add X to set Y
 add(X, Y) ->
@@ -249,6 +301,10 @@ add(X, Y) ->
 %% is X in set Y?
 has(X, Y) ->
     ((1 bsl X) band Y) /= 0.
+
+%% is X a subset of Y?
+subset(X, Y) ->
+    (X band Y) == X.
 
 %% count elements of set
 count(2#0) -> 0;
@@ -264,6 +320,10 @@ rand_val(2#11) -> hd(hbbft_utils:random_n(1, [0, 1])).
 %% get single value from set
 val(2#1) -> 0;
 val(2#10) -> 1.
+
+add_witness(Id, Value, Witness) ->
+    Old = maps:get(Id, Witness, 0),
+    maps:put(Id, add(Value, Old), Witness).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -351,6 +411,40 @@ init_with_mixed_zeros_and_ones_test_() ->
                           ?assertEqual(1, sets:size(DistinctResults)),
                           ok
                   end}.
+
+termination_test_() ->
+    Fun = fun(Vals) ->
+                  fun() ->
+                          N = 7,
+                          F = 2,
+                          dealer:start_link(N, F+1, 'SS512'),
+                          {ok, _PubKey, PrivateKeys} = dealer:deal(),
+                          gen_server:stop(dealer),
+                          States = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
+                          StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
+                          MixedList = lists:zip(Vals, StatesWithId),
+                          %% all valid members should call get_coin
+                          Res = lists:map(fun({I, {J, State}}) ->
+                                                  {NewState, Result} = input(State, I),
+                                                  {{J, NewState}, {J, Result}}
+                                          end, MixedList),
+                          {NewStates, Results} = lists:unzip(Res),
+                          {_FinalStates, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
+                          DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
+                          ?assertEqual(N, sets:size(ConvergedResults)),
+                          ?assertEqual(1, sets:size(DistinctResults)),
+                          ok
+                  end
+          end,
+    [
+     Fun([1, 0, 0, 0, 0, 0, 0]),
+     Fun([1, 1, 0, 0, 0, 0, 0]),
+     Fun([1, 1, 1, 0, 0, 0, 0]),
+     Fun([1, 1, 1, 1, 0, 0, 0]),
+     Fun([1, 1, 1, 1, 1, 0, 0]),
+     Fun([1, 1, 1, 1, 1, 1, 0]),
+     Fun([1, 1, 1, 1, 1, 1, 1])
+    ].
 
 one_dead_test() ->
     N = 5,
