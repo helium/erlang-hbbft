@@ -328,21 +328,6 @@ add_witness(Id, Value, Witness) ->
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
-dump_state(State) ->
-    lists:flatten([io_lib:format("BBA is in round ~b with state ~p est ~p output ~p and bin_values ~p~n",
-                  [State#bba_data.round, State#bba_data.state, State#bba_data.est, State#bba_data.output, vals(State#bba_data.bin_values)]),
-                   io_lib:format("AUX sent ~p, CONF sent ~p~n", [State#bba_data.aux_sent, State#bba_data.conf_sent]),
-                   io_lib:format("BVAL witness ~p~n", [State#bba_data.witness]),
-                   io_lib:format("AUX witness ~p~n", [State#bba_data.aux_witness]),
-                   io_lib:format("CONF witness ~p~n", [State#bba_data.conf_witness]),
-                   io_lib:format("Broadcasted ~p~n", [vals(State#bba_data.broadcasted)])
-                  ]).
-
-vals(2#0) -> [];
-vals(2#1) -> [0];
-vals(2#10) -> [1];
-vals(2#11) -> [0, 1].
-
 init_test() ->
     N = 5,
     F = 1,
@@ -444,8 +429,7 @@ termination_test_() ->
                                                   {{J, NewState}, {J, Result}}
                                           end, MixedList),
                           {NewStates, Results} = lists:unzip(Res),
-                          {FinalStates, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
-                          [ io:format("~p ~s~n", [ID, dump_state(S)]) || {ID, S} <- FinalStates],
+                          {_FinalStates, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
                           DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
                           ?assertEqual(N, sets:size(ConvergedResults)),
                           ?assertEqual(1, sets:size(DistinctResults)),
@@ -499,28 +483,4 @@ two_dead_test() ->
     %% should not converge
     ?assertEqual(0, sets:size(ConvergedResults)),
     ok.
-
-%% https://github.com/amiller/HoneyBadgerBFT/issues/59
-%% constructive_attack_test_() ->
-%%     {timeout, 60, fun() ->
-%%                           N = 7,
-%%                           F = 2,
-%%                           dealer:start_link(N, F+1, 'SS512'),
-%%                           {ok, _PubKey, PrivateKeys} = dealer:deal(),
-%%                           gen_server:stop(dealer),
-%%                           States = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
-%%                           StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
-%%                           MixedList = lists:zip([1, 1, 1, 1, 0, 0, 0], StatesWithId),
-%%                           %% all valid members should call get_coin
-%%                           Res = lists:map(fun({I, {J, State}}) ->
-%%                                                   {NewState, Result} = input(State, I),
-%%                                                   {{J, NewState}, {J, Result}}
-%%                                           end, MixedList),
-%%                           {NewStates, Results} = lists:unzip(Res),
-%%                           {_, ConvergedResults} = hbbft_test_utils:do_send_outer(?MODULE, Results, NewStates, sets:new()),
-%%                           DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
-%%                           ?assertEqual(N, sets:size(ConvergedResults)),
-%%                           ?assertEqual(1, sets:size(DistinctResults)),
-%%                           ok
-%%                   end}.
 -endif.
