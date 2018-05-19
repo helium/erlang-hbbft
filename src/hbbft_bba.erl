@@ -58,7 +58,7 @@ init(SK, N, F) ->
 %% – bin_values  {}
 -spec input(bba_data(), 0 | 1) -> {bba_data(), ok | {send, [hbbft_utils:multicast(bval_msg())]}}.
 input(Data = #bba_data{state=init}, BInput) ->
-    {Data#bba_data{est = BInput, broadcasted=add(BInput, Data#bba_data.broadcasted)}, {send, [{multicast, {bval, Data#bba_data.round, BInput}}]}};
+    {Data#bba_data{est = BInput, broadcasted=add(BInput, Data#bba_data.broadcasted), coin=get_coin(Data)}, {send, [{multicast, {bval, Data#bba_data.round, BInput}}]}};
 input(Data = #bba_data{state=done}, _BInput) ->
     {Data, ok}.
 
@@ -111,6 +111,9 @@ handle_msg(Data = #bba_data{round=R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin
         {NewCoin, ok} ->
             {Data#bba_data{coin=NewCoin}, ok}
     end;
+handle_msg(Data = #bba_data{round=R, coin=Coin}, J, Msg = {{coin, R}, _CMsg}) when Coin == undefined ->
+    %% we have not called input() yet this round, so we need to manually init the coin
+    handle_msg(Data#bba_data{coin=hbbft_cc:init(Data#bba_data.secret_key, term_to_binary({Data#bba_data.round}), Data#bba_data.n, Data#bba_data.f)}, J, Msg);
 handle_msg(Data, _J, _Msg) ->
     {Data, ok}.
 
@@ -154,9 +157,10 @@ bval(Data=#bba_data{n=N, f=F}, Id, V) ->
                     %% check if we have n-f conf messages
                     case threshold(N, F, NewData3, conf) of
                         %% instantiate the common coin
-                        true when NewData3#bba_data.coin == undefined ->
+                        true ->
                             %% TODO need more entropy for the SID
-                            {CoinData, {send, CoinSend}} = hbbft_cc:get_coin(hbbft_cc:init(NewData3#bba_data.secret_key, term_to_binary({NewData3#bba_data.round}), N, F)),
+                            %% TODO send this only once
+                            {CoinData, {send, CoinSend}} = hbbft_cc:get_coin(get_coin(NewData3)),
                             {NewData3#bba_data{coin=CoinData}, {send, hbbft_utils:wrap({coin, Data#bba_data.round}, CoinSend) ++ ToSend2}};
                         _ ->
                             {NewData3, {send, ToSend2}}
@@ -193,10 +197,11 @@ conf(Data = #bba_data{n=N, f=F}, Id, V) ->
     case threshold(N, F, NewData, aux) of
         true->
             case threshold(N, F, NewData, conf) of
-                true when NewData#bba_data.coin == undefined ->
+                true ->
                     %% instantiate the common coin
                     %% TODO need more entropy for the SID
-                    {CoinData, {send, ToSend}} = hbbft_cc:get_coin(hbbft_cc:init(NewData#bba_data.secret_key, term_to_binary({NewData#bba_data.round}), N, F)),
+                    %% TODO send this only once
+                    {CoinData, {send, ToSend}} = hbbft_cc:get_coin(get_coin(NewData)),
                     {NewData#bba_data{coin=CoinData}, {send, hbbft_utils:wrap({coin, NewData#bba_data.round}, ToSend)}};
                 _ ->
                     {NewData, ok}
@@ -293,6 +298,13 @@ check(N, F, ToCheck, Map, Fun) ->
                           false -> Acc
                       end
               end, 0, Map) >= N - F.
+
+get_coin(Data) ->
+    case Data#bba_data.coin of
+        undefined ->
+            hbbft_cc:init(Data#bba_data.secret_key, term_to_binary({Data#bba_data.round}), Data#bba_data.n, Data#bba_data.f);
+        C -> C
+    end.
 
 %% add X to set Y
 add(X, Y) ->
