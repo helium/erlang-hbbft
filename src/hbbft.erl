@@ -94,9 +94,12 @@ next_round(Data = #hbbft_data{secret_key=SK, n=N, f=F, j=J}) ->
     maybe_start_acs(NewData).
 
 -spec handle_msg(hbbft_data(), non_neg_integer(), acs_msg() | dec_msg() | sign_msg()) -> {hbbft_data(), ok |
+                                                                                          defer |
                                                                                           {send, [hbbft_utils:multicast(dec_msg() | sign_msg()) | rbc_wrapped_output() | bba_wrapped_output()]} |
                                                                                           {result, {transactions, [binary()]}} |
                                                                                           {result, {signature, binary()}}}.
+handle_msg(Data = #hbbft_data{round=R}, _J, {{acs, R2}, _ACSMsg}) when R2 > R ->
+    {Data, defer};
 handle_msg(Data = #hbbft_data{round=R}, J, {{acs, R}, ACSMsg}) ->
     %% ACS message for this round
     case hbbft_acs:handle_msg(Data#hbbft_data.acs, J, ACSMsg) of
@@ -113,7 +116,9 @@ handle_msg(Data = #hbbft_data{round=R}, J, {{acs, R}, ACSMsg}) ->
                                         SerializedShare = hbbft_utils:share_to_binary(Share),
                                         {multicast, {dec, Data#hbbft_data.round, I, SerializedShare}}
                                 end, Results),
-            {Data#hbbft_data{acs=NewACS, acs_results=Results}, {send, Replies}}
+            {Data#hbbft_data{acs=NewACS, acs_results=Results}, {send, Replies}};
+        {NewACS, defer} ->
+            {Data#hbbft_data{acs=NewACS}, defer}
     end;
 handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
     %% the Share now is a binary, deserialize it and then store in the dec_shares map
