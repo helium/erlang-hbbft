@@ -75,6 +75,7 @@ input(Data, Input) ->
     {store_rbc_state(Data, Data#acs_data.j, MyRBC), {send, hbbft_utils:wrap({rbc, Data#acs_data.j}, Responses)}}.
 
 -spec handle_msg(acs_data(), non_neg_integer(), rbc_msg() | bba_msg()) -> {acs_data(), ok |
+                                                                           defer |
                                                                            {send, [rbc_wrapped_output() | hbbft_utils:multicast(bba_msg())]} |
                                                                            {result, [{non_neg_integer(), binary()}]}}.
 handle_msg(Data, J, {{rbc, I}, RBCMsg}) ->
@@ -127,7 +128,9 @@ handle_msg(Data = #acs_data{n=N, f=F}, J, {{bba, I}, BBAMsg}) ->
                     check_completion(NewData)
             end;
         {NewBBA, ok} ->
-            {store_bba_state(Data, I, NewBBA), ok}
+            {store_bba_state(Data, I, NewBBA), ok};
+        {NewBBA, defer} ->
+            {store_bba_state(Data, I, NewBBA), defer}
     end.
 
 check_completion(Data = #acs_data{n=N}) ->
