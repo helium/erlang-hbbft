@@ -156,15 +156,23 @@ handle_msg(Data = #hbbft_data{round=R, thingtosign=ThingToSign}, J, {sign, R, Bi
     %% Note: this is an extension to the HoneyBadger BFT specification
     Share = hbbft_utils:binary_to_share(BinShare, Data#hbbft_data.secret_key),
     %% verify the share
-    case tpke_pubkey:verify_signature_share(tpke_privkey:public_key(Data#hbbft_data.secret_key), Share, ThingToSign) of
+    PubKey = tpke_privkey:public_key(Data#hbbft_data.secret_key),
+    case tpke_pubkey:verify_signature_share(PubKey, Share, ThingToSign) of
         true ->
             NewSigShares = maps:put(J, Share, Data#hbbft_data.sig_shares),
             %% check if we have at least f+1 shares
             case maps:size(NewSigShares) > Data#hbbft_data.f andalso not Data#hbbft_data.sent_sig of
                 true ->
-                    %% ok, we have enough people agreeing with us we can return the signature
-                    Sig = tpke_pubkey:combine_signature_shares(tpke_privkey:public_key(Data#hbbft_data.secret_key), maps:values(NewSigShares)),
-                    {Data#hbbft_data{sig_shares=NewSigShares, sent_sig=true}, {result, {signature, erlang_pbc:element_to_binary(Sig)}}};
+                    %% ok, we have enough people agreeing with us we can combine the signature shares
+                    {ok, Sig} = tpke_pubkey:combine_signature_shares(PubKey, maps:values(NewSigShares), ThingToSign),
+                    case tpke_pubkey:verify_signature(PubKey, Sig, ThingToSign) of
+                        true ->
+                            %% verified signature, send the signature
+                            {Data#hbbft_data{sig_shares=NewSigShares, sent_sig=true}, {result, {signature, erlang_pbc:element_to_binary(Sig)}}};
+                        false ->
+                            %% must have duplicate signature shares, keep waiting
+                            {Data#hbbft_data{sig_shares=NewSigShares}, ok}
+                    end;
                 false ->
                     {Data#hbbft_data{sig_shares=NewSigShares}, ok}
             end;
