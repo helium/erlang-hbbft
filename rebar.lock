@@ -5,7 +5,7 @@
   1},
  {<<"erlang_tpke">>,
   {git,"https://github.com/helium/erlang_tpke.git",
-       {ref,"dcf6ae931f970969c045be71f1d7b0c41e5078a0"}},
+       {ref,"053c83f3ac1a9f63dbd9fc8dbb303c94c06cadaa"}},
   0},
  {<<"leo_erasure">>,
   {git,"https://github.com/helium/leo_erasure.git",
