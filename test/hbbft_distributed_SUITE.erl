@@ -57,9 +57,9 @@ simple_test(Config) ->
     N = length(Nodes),
     F = (N div 3),
     BatchSize = 20,
-    dealer:start_link(N, F+1, 'SS512'),
-    {ok, PubKey, PrivateKeys} = dealer:deal(),
-    gen_server:stop(dealer),
+    {ok, Dealer} = dealer:start_link(N, F+1, 'SS512'),
+    {ok, PubKey, PrivateKeys} = dealer:deal(Dealer),
+    gen_server:stop(Dealer),
 
     %% each node gets a secret key
     NodesSKs = lists:zip(Nodes, PrivateKeys),
@@ -139,9 +139,9 @@ serialization_test(Config) ->
     N = length(Nodes),
     F = (N div 3),
     BatchSize = 20,
-    dealer:start_link(N, F+1, 'SS512'),
-    {ok, PubKey, PrivateKeys} = dealer:deal(),
-    gen_server:stop(dealer),
+    {ok, Dealer} = dealer:start_link(N, F+1, 'SS512'),
+    {ok, PubKey, PrivateKeys} = dealer:deal(Dealer),
+    gen_server:stop(Dealer),
 
     %% each node gets a secret key
     NodesSKs = lists:zip(Nodes, PrivateKeys),
