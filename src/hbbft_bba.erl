@@ -59,7 +59,7 @@ init(SK, N, F) ->
 %% – bin_values  {}
 -spec input(bba_data(), 0 | 1) -> {bba_data(), ok | {send, [hbbft_utils:multicast(bval_msg())]}}.
 input(Data = #bba_data{state=init}, BInput) ->
-    {Data#bba_data{est = BInput, broadcasted=add(BInput, Data#bba_data.broadcasted), coin=get_coin(Data)}, {send, [{multicast, {bval, Data#bba_data.round, BInput}}]}};
+    {Data#bba_data{est = BInput, broadcasted=add(BInput, Data#bba_data.broadcasted), coin=maybe_init_coin(Data)}, {send, [{multicast, {bval, Data#bba_data.round, BInput}}]}};
 input(Data = #bba_data{state=done}, _BInput) ->
     {Data, ok}.
 
@@ -127,7 +127,7 @@ handle_msg(Data = #bba_data{round=R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin
     end;
 handle_msg(Data = #bba_data{round=R, coin=Coin}, J, Msg = {{coin, R}, _CMsg}) when Coin == undefined ->
     %% we have not called input() yet this round, so we need to manually init the coin
-    handle_msg(Data#bba_data{coin=get_coin(Data)}, J, Msg);
+    handle_msg(Data#bba_data{coin=maybe_init_coin(Data)}, J, Msg);
 handle_msg(Data, _J, _Msg) ->
     {Data, ok}.
 
@@ -174,7 +174,7 @@ bval(Data=#bba_data{n=N, f=F}, Id, V) ->
                         true ->
                             %% TODO need more entropy for the SID
                             %% We have enough AUX and CON messages to reveal our share of the coin
-                            {CoinData, {send, CoinSend}} = hbbft_cc:get_coin(get_coin(NewData3)),
+                            {CoinData, {send, CoinSend}} = hbbft_cc:get_coin(maybe_init_coin(NewData3)),
                             {NewData3#bba_data{coin=CoinData, coin_sent=true}, {send, hbbft_utils:wrap({coin, Data#bba_data.round}, CoinSend) ++ ToSend2}};
                         _ ->
                             {NewData3, {send, ToSend2}}
@@ -215,7 +215,7 @@ conf(Data = #bba_data{n=N, f=F}, Id, V) ->
                     %% instantiate the common coin
                     %% TODO need more entropy for the SID
                     %% We have enough AUX and CON messages to reveal our share of the coin
-                    {CoinData, {send, ToSend}} = hbbft_cc:get_coin(get_coin(NewData)),
+                    {CoinData, {send, ToSend}} = hbbft_cc:get_coin(maybe_init_coin(NewData)),
                     {NewData#bba_data{coin=CoinData, coin_sent=true}, {send, hbbft_utils:wrap({coin, NewData#bba_data.round}, ToSend)}};
                 _ ->
                     {NewData, ok}
@@ -313,7 +313,7 @@ check(N, F, ToCheck, Map, Fun) ->
                       end
               end, 0, Map) >= N - F.
 
-get_coin(Data) ->
+maybe_init_coin(Data) ->
     case Data#bba_data.coin of
         undefined ->
             hbbft_cc:init(Data#bba_data.secret_key, term_to_binary({Data#bba_data.round}), Data#bba_data.n, Data#bba_data.f);
