@@ -130,6 +130,7 @@ handle_msg(Data = #acs_data{n=N, f=F}, J, {{bba, I}, BBAMsg}) ->
         {NewBBA, ok} ->
             {store_bba_state(Data, I, NewBBA), ok};
         {NewBBA, defer} ->
+            %% BBA requested we defer this message for now
             {store_bba_state(Data, I, NewBBA), defer}
     end.
 

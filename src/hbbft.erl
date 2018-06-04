@@ -99,6 +99,7 @@ next_round(Data = #hbbft_data{secret_key=SK, n=N, f=F, j=J}) ->
                                                                                           {result, {transactions, [binary()]}} |
                                                                                           {result, {signature, binary()}}}.
 handle_msg(Data = #hbbft_data{round=R}, _J, {{acs, R2}, _ACSMsg}) when R2 > R ->
+    %% ACS requested we defer this message for now
     {Data, defer};
 handle_msg(Data = #hbbft_data{round=R}, J, {{acs, R}, ACSMsg}) ->
     %% ACS message for this round
