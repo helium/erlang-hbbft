@@ -250,9 +250,9 @@ init_test_() ->
                    fun() ->
                            N = 5,
                            F = N div 4,
-                           dealer:start_link(N, F+1, 'SS512'),
-                           {ok, _PubKey, PrivateKeys} = dealer:deal(),
-                           gen_server:stop(dealer),
+                           {ok, Dealer} = dealer:start_link(N, F+1, 'SS512'),
+                           {ok, _PubKey, PrivateKeys} = dealer:deal(Dealer),
+                           gen_server:stop(Dealer),
                            Msgs = [ crypto:strong_rand_bytes(512) || _ <- lists:seq(1, N)],
                            StatesWithId = [{J, hbbft_acs:init(Sk, N, F, J)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
                            MixedList = lists:zip(Msgs, StatesWithId),

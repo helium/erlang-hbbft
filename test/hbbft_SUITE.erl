@@ -18,9 +18,9 @@ simple_test(_Config) ->
     N=5,
     F=(N div 3),
     BatchSize = 20,
-    dealer:start_link(N, F+1, 'SS512'),
-    {ok, PubKey, PrivateKeys} = dealer:deal(),
-    gen_server:stop(dealer),
+    {ok, Dealer} = dealer:start_link(N, F+1, 'SS512'),
+    {ok, PubKey, PrivateKeys} = dealer:deal(Dealer),
+    gen_server:stop(Dealer),
     Workers = [ element(2, hbbft_worker:start_link(N, F, I, tpke_privkey:serialize(SK), BatchSize, false)) || {I, SK} <- enumerate(PrivateKeys) ],
     Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*20)],
     %% feed the badgers some msgs
