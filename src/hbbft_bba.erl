@@ -16,6 +16,7 @@
           conf_witness = maps:new() :: #{non_neg_integer() => 0 | 1},
           aux_sent = false :: boolean(),
           conf_sent = false :: boolean(),
+          coin_sent = false :: boolean(),
           broadcasted = 2#0 :: 0 | 1 | 2 | 3,
           bin_values = 2#00 :: 0 | 1 | 2 | 3
          }).
@@ -79,12 +80,16 @@ handle_msg(Data = #bba_data{round=R}, J, {aux, R, V}) ->
 handle_msg(Data = #bba_data{round=R}, J, {conf, R, V}) ->
     conf(Data, J, V);
 handle_msg(Data = #bba_data{round=R}, _J, {bval, R2, _V}) when R2 > R ->
+    %% message is from a future round
     {Data, defer};
 handle_msg(Data = #bba_data{round=R}, _J, {aux, R2, _V}) when R2 > R ->
+    %% message is from a future round
     {Data, defer};
 handle_msg(Data = #bba_data{round=R}, _J, {conf, R2, _V}) when R2 > R ->
+    %% message is from a future round
     {Data, defer};
 handle_msg(Data = #bba_data{round=R}, _J, {{coin, R2}, _CMsg}) when R2 > R ->
+    %% message is from a future round
     {Data, defer};
 handle_msg(Data = #bba_data{round=R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin /= undefined ->
     %% dispatch the message to the nested coin protocol
@@ -122,7 +127,7 @@ handle_msg(Data = #bba_data{round=R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin
     end;
 handle_msg(Data = #bba_data{round=R, coin=Coin}, J, Msg = {{coin, R}, _CMsg}) when Coin == undefined ->
     %% we have not called input() yet this round, so we need to manually init the coin
-    handle_msg(Data#bba_data{coin=hbbft_cc:init(Data#bba_data.secret_key, term_to_binary({Data#bba_data.round}), Data#bba_data.n, Data#bba_data.f)}, J, Msg);
+    handle_msg(Data#bba_data{coin=get_coin(Data)}, J, Msg);
 handle_msg(Data, _J, _Msg) ->
     {Data, ok}.
 
@@ -164,13 +169,13 @@ bval(Data=#bba_data{n=N, f=F}, Id, V) ->
             case threshold(N, F, NewData3, aux) of
                 true ->
                     %% check if we have n-f conf messages
-                    case threshold(N, F, NewData3, conf) of
+                    case threshold(N, F, NewData3, conf) andalso not NewData3#bba_data.coin_sent of
                         %% instantiate the common coin
                         true ->
                             %% TODO need more entropy for the SID
-                            %% TODO send this only once
+                            %% We have enough AUX and CON messages to reveal our share of the coin
                             {CoinData, {send, CoinSend}} = hbbft_cc:get_coin(get_coin(NewData3)),
-                            {NewData3#bba_data{coin=CoinData}, {send, hbbft_utils:wrap({coin, Data#bba_data.round}, CoinSend) ++ ToSend2}};
+                            {NewData3#bba_data{coin=CoinData, coin_sent=true}, {send, hbbft_utils:wrap({coin, Data#bba_data.round}, CoinSend) ++ ToSend2}};
                         _ ->
                             {NewData3, {send, ToSend2}}
                     end;
@@ -205,13 +210,13 @@ conf(Data = #bba_data{n=N, f=F}, Id, V) ->
     NewData = Data#bba_data{conf_witness = Witness},
     case threshold(N, F, NewData, aux) of
         true->
-            case threshold(N, F, NewData, conf) of
+            case threshold(N, F, NewData, conf) andalso not NewData#bba_data.coin_sent of
                 true ->
                     %% instantiate the common coin
                     %% TODO need more entropy for the SID
-                    %% TODO send this only once
+                    %% We have enough AUX and CON messages to reveal our share of the coin
                     {CoinData, {send, ToSend}} = hbbft_cc:get_coin(get_coin(NewData)),
-                    {NewData#bba_data{coin=CoinData}, {send, hbbft_utils:wrap({coin, NewData#bba_data.round}, ToSend)}};
+                    {NewData#bba_data{coin=CoinData, coin_sent=true}, {send, hbbft_utils:wrap({coin, NewData#bba_data.round}, ToSend)}};
                 _ ->
                     {NewData, ok}
             end;
