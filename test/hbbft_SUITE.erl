@@ -1,26 +1,51 @@
 -module(hbbft_SUITE).
 
 -include_lib("common_test/include/ct.hrl").
+-include_lib("eunit/include/eunit.hrl").
 
 -export([all/0, init_per_testcase/2, end_per_testcase/2]).
--export([simple_test/1]).
+-export([
+         init_test/1,
+         one_actor_no_txns_test/1,
+         two_actors_no_txns_test/1,
+         one_actor_missing_test/1,
+         two_actors_missing_test/1,
+         encrypt_decrypt_test/1
+        ]).
 
 all() ->
-    [simple_test].
+    [
+     init_test,
+     one_actor_no_txns_test,
+     two_actors_no_txns_test,
+     one_actor_missing_test,
+     two_actors_missing_test,
+     encrypt_decrypt_test
+    ].
 
 init_per_testcase(_, Config) ->
-    Config.
-
-end_per_testcase(_, _) ->
-    ok.
-
-simple_test(_Config) ->
-    N=5,
-    F=(N div 3),
+    N = 5,
+    F = N div 4,
+    Module = hbbft,
     BatchSize = 20,
     {ok, Dealer} = dealer:start_link(N, F+1, 'SS512'),
     {ok, PubKey, PrivateKeys} = dealer:deal(Dealer),
-    gen_server:stop(Dealer),
+    [{n, N}, {f, F}, {batchsize, BatchSize}, {module, Module}, {pubkey, PubKey}, {privatekeys, PrivateKeys} | Config].
+
+end_per_testcase(_, Config) ->
+    Dealer = proplists:get_value(dealer, Config, undefined),
+    case Dealer of
+        undefined -> ok;
+        Pid ->
+            gen_server:stop(Pid)
+    end.
+
+init_test(Config) ->
+    N = proplists:get_value(n, Config),
+    F = proplists:get_value(f, Config),
+    BatchSize = proplists:get_value(batchsize, Config),
+    PubKey = proplists:get_value(pubkey, Config),
+    PrivateKeys = proplists:get_value(privatekeys, Config),
     Workers = [ element(2, hbbft_worker:start_link(N, F, I, tpke_privkey:serialize(SK), BatchSize, false)) || {I, SK} <- enumerate(PrivateKeys) ],
     Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*20)],
     %% feed the badgers some msgs
@@ -61,6 +86,143 @@ simple_test(_Config) ->
     io:format("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
     ok.
 
+one_actor_no_txns_test(Config) ->
+    N = proplists:get_value(n, Config),
+    F = proplists:get_value(f, Config),
+    BatchSize = proplists:get_value(batchsize, Config),
+    Module = proplists:get_value(module, Config),
+    PrivateKeys = proplists:get_value(privatekeys, Config),
+
+    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
+    Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*10)],
+    %% send each message to a random subset of the HBBFT actors
+    {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
+                                               Destinations = hbbft_utils:random_n(rand:uniform(N-1), lists:sublist(States, N-1)),
+                                               {NewStates, NewReplies} = lists:unzip(lists:map(fun({J, Data}) ->
+                                                                                                       {NewData, Reply} = hbbft:input(Data, Msg),
+                                                                                                       {{J, NewData}, {J, Reply}}
+                                                                                               end, lists:keysort(1, Destinations))),
+                                               {lists:ukeymerge(1, NewStates, States), merge_replies(N, NewReplies, Replies)}
+                                       end, {StatesWithIndex, []}, Msgs),
+    %% check that at least N-F actors have started ACS:
+    ?assert(length(Replies) >= N - F),
+    %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
+    ?assert(lists:all(fun(E) -> E end, [ length(R) == N || {_, {send, R}} <- Replies ])),
+    %% start it on runnin'
+    {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, Replies, NewStates, sets:new()),
+    %% check all N actors returned a result
+    ?assertEqual(N, sets:size(ConvergedResults)),
+    DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
+    %% check all N actors returned the same result
+    ?assertEqual(1, sets:size(DistinctResults)),
+    {_, AcceptedMsgs} = lists:unzip(lists:flatten(sets:to_list(DistinctResults))),
+    %% check all the Msgs are actually from the original set
+    ?assert(sets:is_subset(sets:from_list(lists:flatten(AcceptedMsgs)), sets:from_list(Msgs))),
+    ok.
+
+two_actors_no_txns_test(Config) ->
+    N = proplists:get_value(n, Config),
+    F = proplists:get_value(f, Config),
+    BatchSize = proplists:get_value(batchsize, Config),
+    Module = proplists:get_value(module, Config),
+    PrivateKeys = proplists:get_value(privatekeys, Config),
+
+    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
+    Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*10)],
+    %% send each message to a random subset of the HBBFT actors
+    {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
+                                               Destinations = hbbft_utils:random_n(rand:uniform(N-2), lists:sublist(States, N-2)),
+                                               {NewStates, NewReplies} = lists:unzip(lists:map(fun({J, Data}) ->
+                                                                                                       {NewData, Reply} = hbbft:input(Data, Msg),
+                                                                                                       {{J, NewData}, {J, Reply}}
+                                                                                               end, lists:keysort(1, Destinations))),
+                                               {lists:ukeymerge(1, NewStates, States), merge_replies(N, NewReplies, Replies)}
+                                       end, {StatesWithIndex, []}, Msgs),
+    %% check that at least N-F actors have started ACS:
+    ?assert(length(Replies) =< N - F),
+    %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
+    ?assert(lists:all(fun(E) -> E end, [ length(R) == N || {_, {send, R}} <- Replies ])),
+    %% start it on runnin'
+    {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, Replies, NewStates, sets:new()),
+    %% check no actors returned a result
+    ?assertEqual(0, sets:size(ConvergedResults)),
+    ok.
+
+one_actor_missing_test(Config) ->
+    N = proplists:get_value(n, Config),
+    F = proplists:get_value(f, Config),
+    BatchSize = proplists:get_value(batchsize, Config),
+    Module = proplists:get_value(module, Config),
+    PrivateKeys = proplists:get_value(privatekeys, Config),
+
+    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize)} || {J, Sk} <- lists:zip(lists:seq(0, N - 2), lists:sublist(PrivateKeys, N-1))],
+    Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*10)],
+    %% send each message to a random subset of the HBBFT actors
+    {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
+                                               Destinations = hbbft_utils:random_n(rand:uniform(N-1), States),
+                                               {NewStates, NewReplies} = lists:unzip(lists:map(fun({J, Data}) ->
+                                                                                                       {NewData, Reply} = hbbft:input(Data, Msg),
+                                                                                                       {{J, NewData}, {J, Reply}}
+                                                                                               end, lists:keysort(1, Destinations))),
+                                               {lists:ukeymerge(1, NewStates, States), merge_replies(N, NewReplies, Replies)}
+                                       end, {StatesWithIndex, []}, Msgs),
+    %% check that at least N-F actors have started ACS:
+    ?assert(length(Replies) >= N - F),
+    %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
+    ?assert(lists:all(fun(E) -> E end, [ length(R) == N || {_, {send, R}} <- Replies ])),
+    %% start it on runnin'
+    {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, Replies, NewStates, sets:new()),
+    %% check no actors returned a result
+    ?assertEqual(4, sets:size(ConvergedResults)),
+    DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
+    %% check all N actors returned the same result
+    ?assertEqual(1, sets:size(DistinctResults)),
+    {_, AcceptedMsgs} = lists:unzip(lists:flatten(sets:to_list(DistinctResults))),
+    %% check all the Msgs are actually from the original set
+    ?assert(sets:is_subset(sets:from_list(lists:flatten(AcceptedMsgs)), sets:from_list(Msgs))),
+    ok.
+
+two_actors_missing_test(Config) ->
+    N = proplists:get_value(n, Config),
+    F = proplists:get_value(f, Config),
+    BatchSize = proplists:get_value(batchsize, Config),
+    Module = proplists:get_value(module, Config),
+    PrivateKeys = proplists:get_value(privatekeys, Config),
+
+    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize)} || {J, Sk} <- lists:zip(lists:seq(0, N - 3), lists:sublist(PrivateKeys, N-2))],
+    Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*10)],
+    %% send each message to a random subset of the HBBFT actors
+    {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
+                                               Destinations = hbbft_utils:random_n(rand:uniform(N-2), States),
+                                               {NewStates, NewReplies} = lists:unzip(lists:map(fun({J, Data}) ->
+                                                                                                       {NewData, Reply} = hbbft:input(Data, Msg),
+                                                                                                       {{J, NewData}, {J, Reply}}
+                                                                                               end, lists:keysort(1, Destinations))),
+                                               {lists:ukeymerge(1, NewStates, States), merge_replies(N, NewReplies, Replies)}
+                                       end, {StatesWithIndex, []}, Msgs),
+    %% check that at least N-F actors have started ACS:
+    ?assert(length(Replies) =< N - F),
+    %% all the nodes that have started ACS should have tried to send messages to all N peers (including themselves)
+    ?assert(lists:all(fun(E) -> E end, [ length(R) == N || {_, {send, R}} <- Replies ])),
+    %% start it on runnin'
+    {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, Replies, NewStates, sets:new()),
+    %% check no actors returned a result
+    ?assertEqual(0, sets:size(ConvergedResults)),
+    ok.
+
+encrypt_decrypt_test(Config) ->
+    PubKey = proplists:get_value(pubkey, Config),
+    PrivateKeys = proplists:get_value(privatekeys, Config),
+
+    PlainText = crypto:strong_rand_bytes(24),
+    Enc = hbbft:encrypt(PubKey, PlainText),
+    EncKey = hbbft:get_encrypted_key(hd(PrivateKeys), Enc),
+    DecKey = tpke_pubkey:combine_shares(PubKey, EncKey, [ tpke_privkey:decrypt_share(SK, EncKey) || SK <- PrivateKeys]),
+    ?assertEqual(PlainText, hbbft:decrypt(DecKey, Enc)),
+    ok.
+
+%% helper functions
+
 enumerate(List) ->
     lists:zip(lists:seq(0, length(List) - 1), List).
 
@@ -69,4 +231,22 @@ random_n(N, List) ->
 
 shuffle(List) ->
     [X || {_,X} <- lists:sort([{rand:uniform(), N} || N <- List])].
+
+merge_replies(N, NewReplies, Replies) when N < 0 orelse length(NewReplies) == 0 ->
+    Replies;
+merge_replies(N, NewReplies, Replies) ->
+    case lists:keyfind(N, 1, NewReplies) of
+        false ->
+            merge_replies(N-1, lists:keydelete(N, 1, NewReplies), Replies);
+        {N, ok} ->
+            merge_replies(N-1, lists:keydelete(N, 1, NewReplies), Replies);
+        {N, {send, ToSend}} ->
+            NewSend = case lists:keyfind(N, 1, Replies) of
+                          false ->
+                              {N, {send, ToSend}};
+                          {N, OldSend} ->
+                              {N, {send, OldSend ++ ToSend}}
+                      end,
+            merge_replies(N-1, lists:keydelete(N, 1, NewReplies), lists:keystore(N, 1, Replies, NewSend))
+    end.
 
