@@ -9,6 +9,7 @@
          send_incorrect_msg_test/1,
          incorrect_leader_test/1,
          pid_dying_test/1,
+         simple_test/1,
          two_pid_dying_test/1
         ]).
 
@@ -18,6 +19,7 @@ all() ->
      send_incorrect_msg_test,
      incorrect_leader_test,
      pid_dying_test,
+     simple_test,
      two_pid_dying_test
     ].
 
@@ -151,4 +153,25 @@ two_pid_dying_test(Config) ->
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, [{0, {send, MsgsToSend}}], StatesWithId, sets:new()),
     %% nobody should converge
     ?assertEqual(0, sets:size(ConvergedResults)),
+    ok.
+
+simple_test(Config) ->
+    N = proplists:get_value(n, Config),
+    F = proplists:get_value(f, Config),
+    Msg = proplists:get_value(msg, Config),
+    Leader = rand:uniform(N) - 1,
+    Workers = [element(2, rbc_worker:start_link(N, F, Id, Leader)) || Id <- lists:seq(0, N-1)],
+
+    %% the first guy is the leader
+    ok = rbc_worker:input(Msg, lists:nth(Leader+1, Workers)),
+
+    hbbft_ct_utils:wait_until(fun() ->
+                                      lists:all(fun(E) ->
+                                                        E /= undefined
+                                                end, [rbc_worker:get_results(W) || W <- Workers])
+                              end),
+
+    ConvergedResults = [rbc_worker:get_results(W) || W <- Workers],
+    1 = sets:size(sets:from_list(ConvergedResults)),
+    Msg = hd(ConvergedResults),
     ok.
