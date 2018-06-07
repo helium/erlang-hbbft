@@ -57,6 +57,7 @@ verify_chain(Chain, PubKey) ->
             false
     end.
 
+verify_block_fit([B], _) when B#block.prev_hash == <<>> -> true;
 verify_block_fit([A, B | _], PubKey) ->
     %% A should have the the prev_hash of B
     case A#block.prev_hash == hash_block(B) of
