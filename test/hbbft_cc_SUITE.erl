@@ -57,6 +57,8 @@ init_test(Config) ->
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, Results, NewStates, sets:new()),
+    ConvergedResultsList = sets:to_list(ConvergedResults),
+    ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
     %% everyone should converge
     ?assertEqual(N, sets:size(ConvergedResults)),
     ok.
@@ -77,6 +79,8 @@ one_dead_test(Config) ->
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, Results, NewStates, sets:new()),
+    ConvergedResultsList = sets:to_list(ConvergedResults),
+    ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
     %% everyone but one should converge
     ?assertEqual(N - 1, sets:size(ConvergedResults)),
     %% everyone should have the same value
@@ -100,6 +104,8 @@ two_dead_test(Config) ->
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, Results, NewStates, sets:new()),
+    ConvergedResultsList = sets:to_list(ConvergedResults),
+    ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
     %% everyone but two should converge
     ?assertEqual(N - 2, sets:size(ConvergedResults)),
     %% everyone should have the same value
@@ -123,6 +129,8 @@ too_many_dead_test(Config) ->
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, Results, NewStates, sets:new()),
+    ConvergedResultsList = sets:to_list(ConvergedResults),
+    ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
     %% nobody should converge
     ?assertEqual(0, sets:size(ConvergedResults)),
     ok.
@@ -145,6 +153,8 @@ key_mismatch_f1_test(Config) ->
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, Results, NewStates, sets:new()),
+    ConvergedResultsList = sets:to_list(ConvergedResults),
+    ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
     %% all 5 should converge, but there should be 2 distinct results
     ?assertEqual(5, sets:size(ConvergedResults)),
     DistinctResults = lists:usort([ Sig || {result, {_J, Sig}} <- sets:to_list(ConvergedResults) ]),
@@ -169,6 +179,8 @@ key_mismatch_f2_test(Config) ->
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, Results, NewStates, sets:new()),
+    ConvergedResultsList = sets:to_list(ConvergedResults),
+    ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
     %% the 3 with the right keys should converge to the same value
     ?assertEqual(3, sets:size(ConvergedResults)),
     DistinctResults = lists:usort([ Sig || {result, {_J, Sig}} <- sets:to_list(ConvergedResults) ]),
@@ -197,6 +209,8 @@ mixed_keys_test(Config) ->
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, Results, NewStates, sets:new()),
+    ConvergedResultsList = sets:to_list(ConvergedResults),
+    ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
 
     DistinctCoins = sets:from_list([Coin || {result, {_, Coin}} <- sets:to_list(ConvergedResults)]),
     %% two distinct sets have converged with different coins each

@@ -57,6 +57,8 @@ termination_test(Config) ->
                                   end, MixedList),
                   {NewStates, Results} = lists:unzip(Res),
                   {_FinalStates, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, Results, NewStates, sets:new()),
+                  ConvergedResultsList = sets:to_list(ConvergedResults),
+                  ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
                   DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
                   ?assertEqual(N, sets:size(ConvergedResults)),
                   ?assertEqual(1, sets:size(DistinctResults)),
@@ -87,6 +89,8 @@ init_test(Config) ->
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, Results, NewStates, sets:new()),
+    ConvergedResultsList = sets:to_list(ConvergedResults),
+    ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
     %% everyone should converge
     ?assertEqual(N, sets:size(ConvergedResults)),
     ok.
@@ -106,6 +110,8 @@ init_with_zeroes_test(Config) ->
                     end, ZeroList),
     {NewStates, Results} = lists:unzip(Res),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, Results, NewStates, sets:new()),
+    ConvergedResultsList = sets:to_list(ConvergedResults),
+    ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
     DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
     ?assertEqual(N, sets:size(ConvergedResults)),
     ?assertEqual([0], sets:to_list(DistinctResults)),
@@ -126,6 +132,8 @@ init_with_ones_test(Config) ->
                     end, OneList),
     {NewStates, Results} = lists:unzip(Res),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, Results, NewStates, sets:new()),
+    ConvergedResultsList = sets:to_list(ConvergedResults),
+    ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
     DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
     ?assertEqual(N, sets:size(ConvergedResults)),
     ?assertEqual([1], sets:to_list(DistinctResults)),
@@ -148,6 +156,8 @@ init_with_mixed_zeros_and_ones_test(Config) ->
                     end, MixedList),
     {NewStates, Results} = lists:unzip(Res),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, Results, NewStates, sets:new()),
+    ConvergedResultsList = sets:to_list(ConvergedResults),
+    ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
     DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
     ?assertEqual(N, sets:size(ConvergedResults)),
     ?assertEqual(1, sets:size(DistinctResults)),
@@ -167,6 +177,8 @@ one_dead_test(Config) ->
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, Results, NewStates, sets:new()),
+    ConvergedResultsList = sets:to_list(ConvergedResults),
+    ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
     %% everyone but one should converge
     ?assertEqual(N - 1, sets:size(ConvergedResults)),
     ok.
@@ -185,6 +197,8 @@ two_dead_test(Config) ->
                     end, StatesWithId),
     {NewStates, Results} = lists:unzip(Res),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, Results, NewStates, sets:new()),
+    ConvergedResultsList = sets:to_list(ConvergedResults),
+    ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
     %% should not converge
     ?assertEqual(0, sets:size(ConvergedResults)),
     ok.

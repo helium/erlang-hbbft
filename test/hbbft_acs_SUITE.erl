@@ -43,6 +43,8 @@ init_test(Config) ->
                     end, MixedList),
     {NewStates, Results} = lists:unzip(Res),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, Results, NewStates, sets:new()),
+    ConvergedResultsList = sets:to_list(ConvergedResults),
+    ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
     ?assertEqual(N, sets:size(ConvergedResults)),
     DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
     ?assertEqual(1, sets:size(DistinctResults)),

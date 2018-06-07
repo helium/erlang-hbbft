@@ -56,6 +56,7 @@ init_test(Config) ->
     ?assertEqual(N, sets:size(ConvergedResults)),
     %% the decoded result should be the original message
     ConvergedResultsList = sets:to_list(ConvergedResults),
+    ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
     ?assert(lists:all(fun({result, {_, Res}}) -> Res == Msg end, ConvergedResultsList)),
     ok.
 
@@ -94,6 +95,7 @@ send_incorrect_msg_test(Config) ->
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, [{0, {send, NewMsgsToSend}}], StatesWithId, sets:new()),
     ConvergedResultsList = sets:to_list(ConvergedResults),
+    ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
     ?assert(lists:all(fun({result, {_, Res}}) -> Res == aborted end, ConvergedResultsList)),
     ?assertEqual(0, sets:size(ConvergedResults)),
     ok.
@@ -115,6 +117,8 @@ incorrect_leader_test(Config) ->
     States = [NewS0, S1, S2, S3, S4],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, [{0, {send, MsgsToSend}}], StatesWithId, sets:new()),
+    ConvergedResultsList = sets:to_list(ConvergedResults),
+    ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
     %% no one should converge
     ?assertEqual(0, sets:size(ConvergedResults)),
     ok.
@@ -136,6 +140,7 @@ pid_dying_test(Config) ->
     ?assertEqual(N - 1, sets:size(ConvergedResults)),
     %% the decoded result should be the original message
     ConvergedResultsList = sets:to_list(ConvergedResults),
+    ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
     ?assert(lists:all(fun({result, {_, Res}}) -> Res == Msg end, ConvergedResultsList)),
     ok.
 
@@ -151,6 +156,8 @@ two_pid_dying_test(Config) ->
     States = [NewS0, S1, S3],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, [{0, {send, MsgsToSend}}], StatesWithId, sets:new()),
+    ConvergedResultsList = sets:to_list(ConvergedResults),
+    ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
     %% nobody should converge
     ?assertEqual(0, sets:size(ConvergedResults)),
     ok.
@@ -160,18 +167,19 @@ simple_test(Config) ->
     F = proplists:get_value(f, Config),
     Msg = proplists:get_value(msg, Config),
     Leader = rand:uniform(N) - 1,
-    Workers = [element(2, rbc_worker:start_link(N, F, Id, Leader)) || Id <- lists:seq(0, N-1)],
+    Workers = [element(2, hbbft_rbc_worker:start_link(N, F, Id, Leader)) || Id <- lists:seq(0, N-1)],
 
     %% the first guy is the leader
-    ok = rbc_worker:input(Msg, lists:nth(Leader+1, Workers)),
+    ok = hbbft_rbc_worker:input(Msg, lists:nth(Leader+1, Workers)),
 
     hbbft_ct_utils:wait_until(fun() ->
                                       lists:all(fun(E) ->
                                                         E /= undefined
-                                                end, [rbc_worker:get_results(W) || W <- Workers])
+                                                end, [hbbft_rbc_worker:get_results(W) || W <- Workers])
                               end),
 
-    ConvergedResults = [rbc_worker:get_results(W) || W <- Workers],
+    ConvergedResults = [hbbft_rbc_worker:get_results(W) || W <- Workers],
+    ct:pal("ConvergedResults: ~p~n", [ConvergedResults]),
     1 = sets:size(sets:from_list(ConvergedResults)),
     Msg = hd(ConvergedResults),
     ok.
