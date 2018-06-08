@@ -1,4 +1,4 @@
--module(rbc_worker).
+-module(hbbft_rbc_worker).
 
 -behaviour(gen_server).
 

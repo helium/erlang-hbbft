@@ -1,6 +1,7 @@
 -module(hbbft_ct_utils).
 
 -export([pmap/2,
+         wait_until/1,
          wait_until/3,
          wait_until_disconnected/2,
          start_node/3,
@@ -22,6 +23,8 @@ pmap(F, L) ->
     {_, L3} = lists:unzip(lists:keysort(1, L2)),
     L3.
 
+wait_until(Fun) ->
+    wait_until(Fun, 40, 100).
 wait_until(Fun, Retry, Delay) when Retry > 0 ->
     Res = Fun(),
     case Res of

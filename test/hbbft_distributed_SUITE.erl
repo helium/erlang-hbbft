@@ -82,7 +82,7 @@ simple_test(Config) ->
     %% feed the nodes some msgs
     lists:foreach(fun(Msg) ->
                           Destinations = random_n(rand:uniform(N), Workers),
-                          io:format("destinations ~p~n", [Destinations]),
+                          ct:pal("destinations ~p~n", [Destinations]),
                           [hbbft_worker:submit_transaction(Msg, Destination) || {_Node, {ok, Destination}} <- Destinations]
                   end, Msgs),
 
@@ -104,13 +104,13 @@ simple_test(Config) ->
                                               {ok, Blocks} = hbbft_worker:get_blocks(Worker),
                                               Blocks
                                       end, Workers)),
-    io:format("~p distinct chains~n", [sets:size(Chains)]),
+    ct:pal("~p distinct chains~n", [sets:size(Chains)]),
     %true = (2 > sets:size(Chains)),
     %true = (2 < length(hd(sets:to_list(Chains)))),
 
     lists:foreach(fun(Chain) ->
-                          %io:format("Chain: ~p~n", [Chain]),
-                          io:format("chain is of height ~p~n", [length(Chain)]),
+                          %ct:pal("Chain: ~p~n", [Chain]),
+                          ct:pal("chain is of height ~p~n", [length(Chain)]),
 
                           %% verify they are cryptographically linked,
                           true = hbbft_worker:verify_chain(Chain, PubKey),
@@ -121,7 +121,7 @@ simple_test(Config) ->
 
                           %% check they're all members of the original message list
                           true = sets:is_subset(sets:from_list(BlockTxns), sets:from_list(Msgs)),
-                          io:format("chain contains ~p distinct transactions~n", [length(BlockTxns)])
+                          ct:pal("chain contains ~p distinct transactions~n", [length(BlockTxns)])
                   end, sets:to_list(Chains)),
 
     %% check we actually converged and made a chain
@@ -164,7 +164,7 @@ serialization_test(Config) ->
     %% feed the nodes some msgs
     lists:foreach(fun(Msg) ->
                           Destinations = random_n(rand:uniform(N), Workers),
-                          io:format("destinations ~p~n", [Destinations]),
+                          ct:pal("destinations ~p~n", [Destinations]),
                           [hbbft_worker:submit_transaction(Msg, Destination) || {_Node, {ok, Destination}} <- Destinations]
                   end, Msgs),
 
@@ -186,13 +186,13 @@ serialization_test(Config) ->
                                               {ok, Blocks} = hbbft_worker:get_blocks(Worker),
                                               Blocks
                                       end, Workers)),
-    io:format("~p distinct chains~n", [sets:size(Chains)]),
+    ct:pal("~p distinct chains~n", [sets:size(Chains)]),
     %true = (2 > sets:size(Chains)),
     %true = (2 < length(hd(sets:to_list(Chains)))),
 
     lists:foreach(fun(Chain) ->
-                          %io:format("Chain: ~p~n", [Chain]),
-                          io:format("chain is of height ~p~n", [length(Chain)]),
+                          %ct:pal("Chain: ~p~n", [Chain]),
+                          ct:pal("chain is of height ~p~n", [length(Chain)]),
 
                           %% verify they are cryptographically linked,
                           true = hbbft_worker:verify_chain(Chain, PubKey),
@@ -203,7 +203,7 @@ serialization_test(Config) ->
 
                           %% check they're all members of the original message list
                           true = sets:is_subset(sets:from_list(BlockTxns), sets:from_list(Msgs)),
-                          io:format("chain contains ~p distinct transactions~n", [length(BlockTxns)])
+                          ct:pal("chain contains ~p distinct transactions~n", [length(BlockTxns)])
                   end, sets:to_list(Chains)),
 
     %% check we actually converged and made a chain
