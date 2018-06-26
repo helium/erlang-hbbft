@@ -56,7 +56,12 @@ status(BBAData) ->
       aux_sent => BBAData#bba_data.aux_sent,
       conf_sent => BBAData#bba_data.conf_sent,
       coin_sent => BBAData#bba_data.coin_sent,
-      output => BBAData#bba_data.output
+      output => BBAData#bba_data.output,
+      conf_witness => BBAData#bba_data.conf_witness,
+      aux_witness => BBAData#bba_data.aux_witness,
+      witness => BBAData#bba_data.witness,
+      bin_values => BBAData#bba_data.bin_values,
+      broadcasted => BBAData#bba_data.broadcasted
      }.
 
 -spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer()) -> bba_data().
@@ -120,7 +125,8 @@ handle_msg(Data = #bba_data{round=R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin
                     case B == Result rem 2 andalso Data#bba_data.output == B of
                         true ->
                             %% we are done
-                            {Data, {result, B}};
+                            NewData = Data#bba_data{state=done},
+                            {NewData, {result, B}};
                         false ->
                             %% increment round and continue
                             NewData = init(Data#bba_data.secret_key, Data#bba_data.n, Data#bba_data.f),
@@ -138,7 +144,8 @@ handle_msg(Data = #bba_data{round=R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin
 handle_msg(Data = #bba_data{round=R, coin=Coin}, J, Msg = {{coin, R}, _CMsg}) when Coin == undefined ->
     %% we have not called input() yet this round, so we need to manually init the coin
     handle_msg(Data#bba_data{coin=maybe_init_coin(Data)}, J, Msg);
-handle_msg(Data, _J, _Msg) ->
+handle_msg(Data = #bba_data{round=R}, J, Msg) ->
+    error_logger:info_msg("Skipped bba_msg: ~p from ~p for round: ~p~n", [Msg, J, R]),
     {Data, ok}.
 
 %% – upon receiving BVALr (b) messages from f + 1 nodes, if
