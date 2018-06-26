@@ -130,6 +130,7 @@ handle_info(Msg, State) ->
 
 dispatch({NewHBBFT, {send, ToSend}}, State) ->
     do_send(ToSend, State),
+    io:format("HBBFT Status: ~p~n", [hbbft:status(NewHBBFT)]),
     State#state{hbbft=maybe_serialize_HBBFT(NewHBBFT, State#state.to_serialize)};
 dispatch({NewHBBFT, {result, {transactions, Txns}}}, State) ->
     NewBlock = case State#state.blocks of
@@ -140,15 +141,19 @@ dispatch({NewHBBFT, {result, {transactions, Txns}}}, State) ->
                        #block{prev_hash=hash_block(PrevBlock), transactions=Txns, signature= <<>>}
                end,
     %% tell the badger to finish the round
+    io:format("HBBFT Status: ~p~n", [hbbft:status(NewHBBFT)]),
     dispatch(hbbft:finalize_round(maybe_deserialize_hbbft(NewHBBFT, State#state.sk), Txns, term_to_binary(NewBlock)), State#state{tempblock=NewBlock});
 dispatch({NewHBBFT, {result, {signature, Sig}}}, State = #state{tempblock=NewBlock0}) ->
     NewBlock = NewBlock0#block{signature=Sig},
     [ gen_server:cast({global, name(Dest)}, {block, NewBlock}) || Dest <- lists:seq(0, State#state.n - 1)],
+    io:format("HBBFT Status: ~p~n", [hbbft:status(NewHBBFT)]),
     dispatch(hbbft:next_round(maybe_deserialize_hbbft(NewHBBFT, State#state.sk)), State#state{blocks=[NewBlock|State#state.blocks], tempblock=undefined});
 dispatch({NewHBBFT, ok}, State) ->
+    io:format("HBBFT Status: ~p~n", [hbbft:status(NewHBBFT)]),
     State#state{hbbft=maybe_serialize_HBBFT(NewHBBFT, State#state.to_serialize)};
 dispatch({NewHBBFT, Other}, State) ->
     io:format("UNHANDLED ~p~n", [Other]),
+    io:format("HBBFT Status: ~p~n", [hbbft:status(NewHBBFT)]),
     State#state{hbbft=maybe_serialize_HBBFT(NewHBBFT, State#state.to_serialize)};
 dispatch(Other, State) ->
     io:format("UNHANDLED2 ~p~n", [Other]),

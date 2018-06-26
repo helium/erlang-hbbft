@@ -1,6 +1,6 @@
 -module(hbbft_rbc).
 
--export([init/4, input/2, handle_msg/3]).
+-export([init/4, input/2, handle_msg/3, status/1]).
 
 -record(rbc_data, {
           state = init :: init | waiting | done,
@@ -35,6 +35,15 @@
 -export_type([rbc_data/0, val_msg/0, echo_msg/0, ready_msg/0, msgs/0]).
 
 %% API.
+
+status(RBCData) ->
+    #{state => RBCData#rbc_data.state,
+      num_echoes => length(maps:values(RBCData#rbc_data.num_echoes)),
+      num_readies => length(maps:values(RBCData#rbc_data.num_readies)),
+      ready_sent => RBCData#rbc_data.ready_sent,
+      leader => RBCData#rbc_data.leader
+     }.
+
 -spec init(pos_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()) -> rbc_data().
 init(N, F, Pid, Leader) ->
     #rbc_data{n=N, f=F, pid=Pid, leader=Leader}.

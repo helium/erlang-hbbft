@@ -1,6 +1,6 @@
 -module(hbbft_bba).
 
--export([init/3, input/2, handle_msg/3, serialize/1, deserialize/2]).
+-export([init/3, input/2, handle_msg/3, serialize/1, deserialize/2, status/1]).
 
 -record(bba_data, {
           state = init :: init | waiting | done,
@@ -48,6 +48,16 @@
 -type msgs() :: bval_msg() | aux_msg() | conf_msg() | coin_msg().
 
 -export_type([bba_data/0, bba_serialized_data/0, bval_msg/0, aux_msg/0, coin_msg/0, msgs/0, conf_msg/0]).
+
+status(BBAData) ->
+    #{state => BBAData#bba_data.state,
+      round => BBAData#bba_data.round,
+      coin => hbbft_cc:status(BBAData#bba_data.coin),
+      aux_sent => BBAData#bba_data.aux_sent,
+      conf_sent => BBAData#bba_data.conf_sent,
+      coin_sent => BBAData#bba_data.coin_sent,
+      output => BBAData#bba_data.output
+     }.
 
 -spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer()) -> bba_data().
 init(SK, N, F) ->
