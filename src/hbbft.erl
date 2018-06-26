@@ -68,7 +68,8 @@ status(HBBFT) ->
       acs => hbbft_acs:status(HBBFT#hbbft_data.acs),
       sent_txns => HBBFT#hbbft_data.sent_txns,
       sent_sig => HBBFT#hbbft_data.sent_sig,
-      acs_results => length(HBBFT#hbbft_data.acs_results)
+      acs_results => length(HBBFT#hbbft_data.acs_results),
+      j => HBBFT#hbbft_data.j
      }.
 
 -spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer(), non_neg_integer(), pos_integer()) -> hbbft_data().
