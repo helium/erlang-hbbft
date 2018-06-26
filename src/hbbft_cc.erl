@@ -32,7 +32,7 @@ status(undefined) ->
     undefined;
 status(CCData) ->
     #{state => CCData#cc_data.state,
-      shares => CCData#cc_data.shares
+      shares => serialize_shares(CCData#cc_data.shares)
      }.
 
 %% Figure12. Bullet1
