@@ -49,6 +49,7 @@
 
 -export_type([bba_data/0, bba_serialized_data/0, bval_msg/0, aux_msg/0, coin_msg/0, msgs/0, conf_msg/0]).
 
+-spec status(bba_data()) -> map().
 status(BBAData) ->
     #{state => BBAData#bba_data.state,
       round => BBAData#bba_data.round,

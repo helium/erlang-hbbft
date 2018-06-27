@@ -36,6 +36,7 @@
 
 %% API.
 
+-spec status(rbc_data()) -> map().
 status(RBCData) ->
     #{state => RBCData#rbc_data.state,
       num_echoes => length(maps:values(RBCData#rbc_data.num_echoes)),

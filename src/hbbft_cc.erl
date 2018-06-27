@@ -27,7 +27,7 @@
 
 -export_type([cc_data/0, cc_serialized_data/0, share_msg/0]).
 
-
+-spec status(undefined | cc_data()) -> undefined | map().
 status(undefined) ->
     undefined;
 status(CCData) ->
