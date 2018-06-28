@@ -1,6 +1,6 @@
 -module(hbbft_cc).
 
--export([init/4, get_coin/1, handle_msg/3, serialize/1, deserialize/2]).
+-export([init/4, get_coin/1, handle_msg/3, serialize/1, deserialize/2, status/1]).
 
 -record(cc_data, {
           state = waiting :: waiting | done,
@@ -26,6 +26,14 @@
 -type share_msg() :: {share, serialized_share()}.
 
 -export_type([cc_data/0, cc_serialized_data/0, share_msg/0]).
+
+-spec status(undefined | cc_data()) -> undefined | map().
+status(undefined) ->
+    undefined;
+status(CCData) ->
+    #{state => CCData#cc_data.state,
+      shares => serialize_shares(CCData#cc_data.shares)
+     }.
 
 %% Figure12. Bullet1
 %% Trusted Setup Phase: A trusted dealer runs pk, {ski } ←

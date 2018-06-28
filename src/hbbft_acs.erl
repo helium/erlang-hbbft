@@ -1,6 +1,6 @@
 -module(hbbft_acs).
 
--export([init/4, input/2, handle_msg/3, serialize/1, deserialize/2]).
+-export([init/4, input/2, handle_msg/3, serialize/1, deserialize/2, status/1]).
 
 -record(rbc_state, {
           rbc_data :: hbbft_rbc:rbc_data(),
@@ -55,6 +55,11 @@
 -type msgs() :: bba_msg() | rbc_msg().
 
 -export_type([acs_data/0, msgs/0, bba_msg/0, acs_serialized_data/0, bba_state/0, rbc_state/0, bba_serialized_state/0, rbc_serialized_state/0]).
+
+-spec status(acs_data()) -> map().
+status(ACSData) ->
+    #{rbc => maps:map(fun(_K, #rbc_state{rbc_data=RBCData, result=R}) -> #{rbc => hbbft_rbc:status(RBCData), result => is_binary(R)} end, ACSData#acs_data.rbc),
+      bba => maps:map(fun(_K, #bba_state{bba_data=BBAData, result=R, input=I}) -> #{bba => hbbft_bba:status(BBAData), result => R, input => I} end, ACSData#acs_data.bba)}.
 
 -spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer(), non_neg_integer()) -> acs_data().
 init(SK, N, F, J) ->

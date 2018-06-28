@@ -11,6 +11,7 @@
          serialize/1,
          serialize/2,
          deserialize/2,
+         status/1,
          is_serialized/1]).
 
 -record(hbbft_data, {
@@ -57,6 +58,19 @@
 -type sign_msg() :: {sign, non_neg_integer(), binary()}.
 -type rbc_wrapped_output() :: hbbft_utils:unicast({{acs, non_neg_integer()}, {{rbc, non_neg_integer()}, hbbft_rbc:val_msg()}}) | hbbft_utils:multicast({{acs, non_neg_integer()}, {{rbc, non_neg_integer()}, hbbft_rbc:echo_msg() | hbbft_rbc:ready_msg()}}).
 -type bba_wrapped_output() :: hbbft_utils:multicast({{acs, non_neg_integer()}, hbbft_acs:bba_msg()}).
+
+-spec status(hbbft_data()) -> map().
+status(HBBFTData) ->
+    #{batch_size => HBBFTData#hbbft_data.batch_size,
+      buf => length(HBBFTData#hbbft_data.buf),
+      round => HBBFTData#hbbft_data.round,
+      acs_init => HBBFTData#hbbft_data.acs_init,
+      acs => hbbft_acs:status(HBBFTData#hbbft_data.acs),
+      sent_txns => HBBFTData#hbbft_data.sent_txns,
+      sent_sig => HBBFTData#hbbft_data.sent_sig,
+      acs_results => length(HBBFTData#hbbft_data.acs_results),
+      j => HBBFTData#hbbft_data.j
+     }.
 
 -spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer(), non_neg_integer(), pos_integer()) -> hbbft_data().
 init(SK, N, F, J, BatchSize) ->
