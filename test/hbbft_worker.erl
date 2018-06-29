@@ -2,7 +2,7 @@
 
 -behaviour(gen_server).
 
--export([start_link/6, submit_transaction/2, get_blocks/1]).
+-export([start_link/6, submit_transaction/2, start_on_demand/1, get_blocks/1]).
 -export([verify_chain/2, block_transactions/1]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
@@ -29,6 +29,9 @@ start_link(N, F, ID, SK, BatchSize, ToSerialize) ->
 
 submit_transaction(Msg, Pid) ->
     gen_server:call(Pid, {submit_txn, Msg}, infinity).
+
+start_on_demand(Pid) ->
+    gen_server:call(Pid, start_on_demand, infinity).
 
 get_blocks(Pid) ->
     gen_server:call(Pid, get_blocks, infinity).
@@ -88,6 +91,9 @@ init([N, F, ID, SK, BatchSize, ToSerialize]) ->
     %% store the serialized state and serialized SK
     {ok, #state{hbbft=HBBFT, blocks=[], id=ID, n=N, sk=DSK, ssk=SK, to_serialize=ToSerialize}}.
 
+handle_call(start_on_demand, _From, State = #state{hbbft=HBBFT, sk=SK}) ->
+    NewState = dispatch(hbbft:start_on_demand(maybe_deserialize_hbbft(HBBFT, SK)), State),
+    {reply, ok, NewState};
 handle_call({submit_txn, Txn}, _From, State = #state{hbbft=HBBFT, sk=SK}) ->
     NewState = dispatch(hbbft:input(maybe_deserialize_hbbft(HBBFT, SK), Txn), State),
     {reply, ok, NewState};
