@@ -122,8 +122,12 @@ handle_msg(Data = #acs_data{n=N, f=F}, J, {{bba, I}, BBAMsg}) ->
                                                               ThisBBA = get_bba(DataAcc, E),
                                                               case bba_has_had_input(ThisBBA) of
                                                                   false ->
-                                                                      {FailedBBA, {send, ToSend}} = hbbft_bba:input(ThisBBA#bba_state.bba_data, 0),
-                                                                      {store_bba_input(store_bba_state(Data, E, FailedBBA), E, 0), [hbbft_utils:wrap({bba, E}, ToSend)|MsgAcc]};
+                                                                      case hbbft_bba:input(ThisBBA#bba_state.bba_data, 0) of
+                                                                          {FailedBBA, {send, ToSend}} ->
+                                                                              {store_bba_input(store_bba_state(Data, E, FailedBBA), E, 0), [hbbft_utils:wrap({bba, E}, ToSend)|MsgAcc]};
+                                                                          {DoneBBA, ok} ->
+                                                                              {store_bba_state(Data, E, DoneBBA), ok}
+                                                                      end;
                                                                   true ->
                                                                       Acc
                                                               end
