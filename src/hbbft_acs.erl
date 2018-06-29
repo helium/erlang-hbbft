@@ -98,9 +98,13 @@ handle_msg(Data, J, {{rbc, I}, RBCMsg}) ->
                 false ->
                     %% ok, start the BBA for this RBC
                     BBA = get_bba(NewData, I),
-                    {NewBBA, {send, ToSend}} = hbbft_bba:input(BBA#bba_state.bba_data, 1),
-                    {store_bba_input(store_bba_state(NewData, I, NewBBA), I, 1),
-                     {send, hbbft_utils:wrap({bba, I}, ToSend)}}
+                    case hbbft_bba:input(BBA#bba_state.bba_data, 1) of
+                        {DoneBBA, ok} ->
+                            {store_bba_state(NewData, I, DoneBBA), ok};
+                        {NewBBA, {send, ToSend}} ->
+                            {store_bba_input(store_bba_state(NewData, I, NewBBA), I, 1),
+                            {send, hbbft_utils:wrap({bba, I}, ToSend)}}
+                    end
             end;
         {NewRBC, ok} ->
             {store_rbc_state(Data, I, NewRBC), ok}
@@ -122,8 +126,12 @@ handle_msg(Data = #acs_data{n=N, f=F}, J, {{bba, I}, BBAMsg}) ->
                                                               ThisBBA = get_bba(DataAcc, E),
                                                               case bba_has_had_input(ThisBBA) of
                                                                   false ->
-                                                                      {FailedBBA, {send, ToSend}} = hbbft_bba:input(ThisBBA#bba_state.bba_data, 0),
-                                                                      {store_bba_input(store_bba_state(Data, E, FailedBBA), E, 0), [hbbft_utils:wrap({bba, E}, ToSend)|MsgAcc]};
+                                                                      case hbbft_bba:input(ThisBBA#bba_state.bba_data, 0) of
+                                                                          {FailedBBA, {send, ToSend}} ->
+                                                                              {store_bba_input(store_bba_state(Data, E, FailedBBA), E, 0), [hbbft_utils:wrap({bba, E}, ToSend)|MsgAcc]};
+                                                                          {DoneBBA, ok} ->
+                                                                              {store_bba_state(Data, E, DoneBBA), ok}
+                                                                      end;
                                                                   true ->
                                                                       Acc
                                                               end
