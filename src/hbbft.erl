@@ -1,6 +1,7 @@
 -module(hbbft).
 
--export([init/5,
+-export([init/6,
+         start_on_demand/1,
          input/2,
          finalize_round/3,
          next_round/1,
@@ -22,6 +23,7 @@
           j :: non_neg_integer(),
           round = 0 :: non_neg_integer(),
           buf = [] :: [binary()],
+          max_buf = infinity :: infinity | pos_integer(),
           acs :: hbbft_acs:acs_data(),
           acs_init = false :: boolean(),
           sent_txns = false :: boolean(),
@@ -40,6 +42,7 @@
           j :: non_neg_integer(),
           round = 0 :: non_neg_integer(),
           buf = [] :: [binary()],
+          max_buf = infinity :: infinity | pos_integer(),
           acs :: hbbft_acs:acs_serialized_data(),
           acs_init = false :: boolean(),
           sent_txns = false :: boolean(),
@@ -63,6 +66,7 @@
 status(HBBFTData) ->
     #{batch_size => HBBFTData#hbbft_data.batch_size,
       buf => length(HBBFTData#hbbft_data.buf),
+      max_buf => HBBFTData#hbbft_data.max_buf,
       round => HBBFTData#hbbft_data.round,
       acs_init => HBBFTData#hbbft_data.acs_init,
       acs => hbbft_acs:status(HBBFTData#hbbft_data.acs),
@@ -72,16 +76,34 @@ status(HBBFTData) ->
       j => HBBFTData#hbbft_data.j
      }.
 
--spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer(), non_neg_integer(), pos_integer()) -> hbbft_data().
-init(SK, N, F, J, BatchSize) ->
-    #hbbft_data{secret_key=SK, n=N, f=F, j=J, batch_size=BatchSize, acs=hbbft_acs:init(SK, N, F, J)}.
+-spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer(), non_neg_integer(), pos_integer(), infinity | pos_integer()) -> hbbft_data().
+init(SK, N, F, J, BatchSize, MaxBuf) ->
+    #hbbft_data{secret_key=SK, n=N, f=F, j=J, batch_size=BatchSize, acs=hbbft_acs:init(SK, N, F, J), max_buf=MaxBuf}.
+
+%% start acs on demand
+-spec start_on_demand(hbbft_data()) -> {hbbft_data(), already_started | {send, [rbc_wrapped_output()]}}.
+start_on_demand(Data = #hbbft_data{buf=Buf, n=N, secret_key=SK, batch_size=BatchSize, acs_init=false}) ->
+    %% pick proposed whichever is lesser from batchsize/n or buffer
+    Proposed = hbbft_utils:random_n(min((BatchSize div N), length(Buf)), lists:sublist(Buf, BatchSize)),
+    %% encrypt x -> tpke.enc(pk, proposed)
+    EncX = encrypt(tpke_privkey:public_key(SK), term_to_binary(Proposed)),
+    %% time to kick off a round
+    {NewACSState, {send, ACSResponse}} = hbbft_acs:input(Data#hbbft_data.acs, EncX),
+    %% add this to acs set in data and send out the ACS response(s)
+    {Data#hbbft_data{acs=NewACSState, acs_init=true},
+     {send, hbbft_utils:wrap({acs, Data#hbbft_data.round}, ACSResponse)}};
+start_on_demand(Data) ->
+    {Data, already_started}.
 
 %% someone submitting a transaction to the replica set
--spec input(hbbft_data(), binary()) -> {hbbft_data(), ok | {send, [rbc_wrapped_output()]}}.
-input(Data = #hbbft_data{buf=Buf}, Txn) ->
+-spec input(hbbft_data(), binary()) -> {hbbft_data(), ok | {send, [rbc_wrapped_output()]} | full}.
+input(Data = #hbbft_data{buf=Buf, max_buf=MaxBuf}, Txn) when length(Buf) < MaxBuf->
     %% add this txn to the the buffer
     NewBuf = [Txn | Buf],
-    maybe_start_acs(Data#hbbft_data{buf=NewBuf}).
+    maybe_start_acs(Data#hbbft_data{buf=NewBuf});
+input(Data = #hbbft_data{buf=_Buf}, _Txn) ->
+    %% drop the txn
+    {Data, full}.
 
 %% The user has constructed something that looks like a block and is telling us which transactions
 %% to remove from the buffer (accepted or invalid). Transactions missing causal context
@@ -274,6 +296,7 @@ deserialize(#hbbft_serialized_data{batch_size=BatchSize,
                                    j=J,
                                    round=Round,
                                    buf=Buf,
+                                   max_buf=MaxBuf,
                                    acs=ACSData,
                                    acs_init=ACSInit,
                                    sent_txns=SentTxns,
@@ -295,6 +318,7 @@ deserialize(#hbbft_serialized_data{batch_size=BatchSize,
                 j=J,
                 round=Round,
                 buf=Buf,
+                max_buf=MaxBuf,
                 acs=hbbft_acs:deserialize(ACSData, SK),
                 acs_init=ACSInit,
                 sent_txns=SentTxns,
@@ -321,6 +345,7 @@ serialize_hbbft_data(#hbbft_data{batch_size=BatchSize,
                                  j=J,
                                  round=Round,
                                  buf=Buf,
+                                 max_buf=MaxBuf,
                                  acs=ACSData,
                                  acs_init=ACSInit,
                                  sent_txns=SentTxns,
@@ -341,6 +366,7 @@ serialize_hbbft_data(#hbbft_data{batch_size=BatchSize,
                            f=F,
                            round=Round,
                            buf=Buf,
+                           max_buf=MaxBuf,
                            acs=hbbft_acs:serialize(ACSData),
                            acs_init=ACSInit,
                            sent_txns=SentTxns,

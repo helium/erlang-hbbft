@@ -10,7 +10,8 @@
          two_actors_no_txns_test/1,
          one_actor_missing_test/1,
          two_actors_missing_test/1,
-         encrypt_decrypt_test/1
+         encrypt_decrypt_test/1,
+         start_on_demand_test/1
         ]).
 
 all() ->
@@ -20,7 +21,8 @@ all() ->
      two_actors_no_txns_test,
      one_actor_missing_test,
      two_actors_missing_test,
-     encrypt_decrypt_test
+     encrypt_decrypt_test,
+     start_on_demand_test
     ].
 
 init_per_testcase(_, Config) ->
@@ -93,7 +95,7 @@ one_actor_no_txns_test(Config) ->
     Module = proplists:get_value(module, Config),
     PrivateKeys = proplists:get_value(privatekeys, Config),
 
-    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
+    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize, infinity)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
     Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*10)],
     %% send each message to a random subset of the HBBFT actors
     {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
@@ -127,7 +129,7 @@ two_actors_no_txns_test(Config) ->
     Module = proplists:get_value(module, Config),
     PrivateKeys = proplists:get_value(privatekeys, Config),
 
-    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
+    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize, infinity)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
     Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*10)],
     %% send each message to a random subset of the HBBFT actors
     {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
@@ -155,7 +157,7 @@ one_actor_missing_test(Config) ->
     Module = proplists:get_value(module, Config),
     PrivateKeys = proplists:get_value(privatekeys, Config),
 
-    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize)} || {J, Sk} <- lists:zip(lists:seq(0, N - 2), lists:sublist(PrivateKeys, N-1))],
+    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize, infinity)} || {J, Sk} <- lists:zip(lists:seq(0, N - 2), lists:sublist(PrivateKeys, N-1))],
     Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*10)],
     %% send each message to a random subset of the HBBFT actors
     {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
@@ -189,7 +191,7 @@ two_actors_missing_test(Config) ->
     Module = proplists:get_value(module, Config),
     PrivateKeys = proplists:get_value(privatekeys, Config),
 
-    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize)} || {J, Sk} <- lists:zip(lists:seq(0, N - 3), lists:sublist(PrivateKeys, N-2))],
+    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize, infinity)} || {J, Sk} <- lists:zip(lists:seq(0, N - 3), lists:sublist(PrivateKeys, N-2))],
     Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*10)],
     %% send each message to a random subset of the HBBFT actors
     {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
@@ -219,6 +221,62 @@ encrypt_decrypt_test(Config) ->
     EncKey = hbbft:get_encrypted_key(hd(PrivateKeys), Enc),
     DecKey = tpke_pubkey:combine_shares(PubKey, EncKey, [ tpke_privkey:decrypt_share(SK, EncKey) || SK <- PrivateKeys]),
     ?assertEqual(PlainText, hbbft:decrypt(DecKey, Enc)),
+    ok.
+
+start_on_demand_test(Config) ->
+    N = proplists:get_value(n, Config),
+    F = proplists:get_value(f, Config),
+    BatchSize = proplists:get_value(batchsize, Config),
+    PubKey = proplists:get_value(pubkey, Config),
+    PrivateKeys = proplists:get_value(privatekeys, Config),
+    Workers = [ element(2, hbbft_worker:start_link(N, F, I, tpke_privkey:serialize(SK), BatchSize, false)) || {I, SK} <- enumerate(PrivateKeys) ],
+
+    [W1, _W2 | RemainingWorkers] = Workers,
+
+    Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*20)],
+
+    KnownMsg = crypto:strong_rand_bytes(128),
+    %% feed the badgers some msgs
+    lists:foreach(fun(Msg) ->
+                          Destinations = random_n(rand:uniform(length(RemainingWorkers)), RemainingWorkers),
+                          io:format("destinations ~p~n", [Destinations]),
+                          [ok = hbbft_worker:submit_transaction(Msg, D) || D <- Destinations]
+                  end, Msgs),
+
+    ok = hbbft_worker:submit_transaction(KnownMsg, W1),
+
+    _ = hbbft_worker:start_on_demand(W1),
+
+    %% wait for all the worker's mailboxes to settle and
+    %% wait for the chains to converge
+    ok = hbbft_ct_utils:wait_until(fun() ->
+                                           Chains = sets:from_list(lists:map(fun(W) ->
+                                                                                     {ok, Blocks} = hbbft_worker:get_blocks(W),
+                                                                                     Blocks
+                                                                             end, Workers)),
+
+                                           0 == lists:sum([element(2, erlang:process_info(W, message_queue_len)) || W <- Workers ]) andalso
+                                           1 == sets:size(Chains) andalso
+                                           0 /= length(hd(sets:to_list(Chains)))
+                                   end, 60*2, 500),
+
+
+    Chains = sets:from_list(lists:map(fun(W) ->
+                                              {ok, Blocks} = hbbft_worker:get_blocks(W),
+                                              Blocks
+                                      end, Workers)),
+    1 = sets:size(Chains),
+    [Chain] = sets:to_list(Chains),
+    io:format("chain is of height ~p~n", [length(Chain)]),
+    %% verify they are cryptographically linked
+    true = hbbft_worker:verify_chain(Chain, PubKey),
+    %% check all the transactions are unique
+    BlockTxns = lists:flatten([ hbbft_worker:block_transactions(B) || B <- Chain ]),
+    true = lists:member(KnownMsg, BlockTxns),
+    true = length(BlockTxns) == sets:size(sets:from_list(BlockTxns)),
+    %% check they're all members of the original message list
+    true = sets:is_subset(sets:from_list(BlockTxns), sets:from_list([KnownMsg | Msgs])),
+    io:format("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
     ok.
 
 %% helper functions
