@@ -95,7 +95,7 @@ one_actor_no_txns_test(Config) ->
     Module = proplists:get_value(module, Config),
     PrivateKeys = proplists:get_value(privatekeys, Config),
 
-    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
+    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize, infinity)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
     Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*10)],
     %% send each message to a random subset of the HBBFT actors
     {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
@@ -129,7 +129,7 @@ two_actors_no_txns_test(Config) ->
     Module = proplists:get_value(module, Config),
     PrivateKeys = proplists:get_value(privatekeys, Config),
 
-    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
+    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize, infinity)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
     Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*10)],
     %% send each message to a random subset of the HBBFT actors
     {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
@@ -157,7 +157,7 @@ one_actor_missing_test(Config) ->
     Module = proplists:get_value(module, Config),
     PrivateKeys = proplists:get_value(privatekeys, Config),
 
-    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize)} || {J, Sk} <- lists:zip(lists:seq(0, N - 2), lists:sublist(PrivateKeys, N-1))],
+    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize, infinity)} || {J, Sk} <- lists:zip(lists:seq(0, N - 2), lists:sublist(PrivateKeys, N-1))],
     Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*10)],
     %% send each message to a random subset of the HBBFT actors
     {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
@@ -191,7 +191,7 @@ two_actors_missing_test(Config) ->
     Module = proplists:get_value(module, Config),
     PrivateKeys = proplists:get_value(privatekeys, Config),
 
-    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize)} || {J, Sk} <- lists:zip(lists:seq(0, N - 3), lists:sublist(PrivateKeys, N-2))],
+    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize, infinity)} || {J, Sk} <- lists:zip(lists:seq(0, N - 3), lists:sublist(PrivateKeys, N-2))],
     Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*10)],
     %% send each message to a random subset of the HBBFT actors
     {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->

@@ -1,6 +1,6 @@
 -module(hbbft).
 
--export([init/5,
+-export([init/6,
          start_on_demand/1,
          input/2,
          finalize_round/3,
@@ -23,7 +23,7 @@
           j :: non_neg_integer(),
           round = 0 :: non_neg_integer(),
           buf = [] :: [binary()],
-          max_buf = infinity :: infinity,
+          max_buf = infinity :: infinity | pos_integer(),
           acs :: hbbft_acs:acs_data(),
           acs_init = false :: boolean(),
           sent_txns = false :: boolean(),
@@ -42,7 +42,7 @@
           j :: non_neg_integer(),
           round = 0 :: non_neg_integer(),
           buf = [] :: [binary()],
-          max_buf = infinity :: infinity,
+          max_buf = infinity :: infinity | pos_integer(),
           acs :: hbbft_acs:acs_serialized_data(),
           acs_init = false :: boolean(),
           sent_txns = false :: boolean(),
@@ -76,9 +76,9 @@ status(HBBFTData) ->
       j => HBBFTData#hbbft_data.j
      }.
 
--spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer(), non_neg_integer(), pos_integer()) -> hbbft_data().
-init(SK, N, F, J, BatchSize) ->
-    #hbbft_data{secret_key=SK, n=N, f=F, j=J, batch_size=BatchSize, acs=hbbft_acs:init(SK, N, F, J)}.
+-spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer(), non_neg_integer(), pos_integer(), infinity | pos_integer()) -> hbbft_data().
+init(SK, N, F, J, BatchSize, MaxBuf) ->
+    #hbbft_data{secret_key=SK, n=N, f=F, j=J, batch_size=BatchSize, acs=hbbft_acs:init(SK, N, F, J), max_buf=MaxBuf}.
 
 %% start acs on demand
 -spec start_on_demand(hbbft_data()) -> {hbbft_data(), already_started | {send, [rbc_wrapped_output()]}}.
