@@ -145,8 +145,7 @@ handle_msg(Data = #bba_data{round=R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin
 handle_msg(Data = #bba_data{round=R, coin=Coin}, J, Msg = {{coin, R}, _CMsg}) when Coin == undefined ->
     %% we have not called input() yet this round, so we need to manually init the coin
     handle_msg(Data#bba_data{coin=maybe_init_coin(Data)}, J, Msg);
-handle_msg(Data = #bba_data{round=R}, J, Msg) ->
-    error_logger:info_msg("Skipped bba_msg: ~p from ~p for round: ~p~n", [Msg, J, R]),
+handle_msg(Data, _J, _Msg) ->
     {Data, ok}.
 
 %% – upon receiving BVALr (b) messages from f + 1 nodes, if
