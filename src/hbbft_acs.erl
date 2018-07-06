@@ -130,7 +130,7 @@ handle_msg(Data = #acs_data{n=N, f=F}, J, {{bba, I}, BBAMsg}) ->
                                                                           {FailedBBA, {send, ToSend}} ->
                                                                               {store_bba_input(store_bba_state(Data, E, FailedBBA), E, 0), [hbbft_utils:wrap({bba, E}, ToSend)|MsgAcc]};
                                                                           {DoneBBA, ok} ->
-                                                                              {store_bba_state(Data, E, DoneBBA), ok}
+                                                                              {store_bba_state(Data, E, DoneBBA), MsgAcc}
                                                                       end;
                                                                   true ->
                                                                       Acc
