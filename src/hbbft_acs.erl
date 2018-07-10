@@ -136,6 +136,7 @@ handle_msg(Data = #acs_data{n=N, f=F}, J, {{bba, I}, BBAMsg}) ->
                                                                       Acc
                                                               end
                                                       end, {NewData, []}, lists:seq(0, N - 1)),
+                    %% each BBA is independant, so the total ordering here is unimportant
                     {NextData#acs_data{done=true}, {send, lists:flatten(Replies)}};
                 false ->
                     check_completion(NewData)
