@@ -177,7 +177,7 @@ bval(Data=#bba_data{n=N, f=F}, Id, V) ->
                                       true ->
                                           %% XXX How many times do we send AUX per round? I think just once
                                           Random = rand_val(NewData2#bba_data.bin_values),
-                                          {NewData2#bba_data{aux_sent = true}, [{multicast, {aux, NewData2#bba_data.round, Random}} | ToSend]};
+                                          {NewData2#bba_data{aux_sent = true}, ToSend ++ [{multicast, {aux, NewData2#bba_data.round, Random}}]};
                                       false ->
                                           {NewData2, ToSend}
                                   end,
@@ -190,9 +190,9 @@ bval(Data=#bba_data{n=N, f=F}, Id, V) ->
                         %% instantiate the common coin
                         true ->
                             %% TODO need more entropy for the SID
-                            %% We have enough AUX and CON messages to reveal our share of the coin
+                            %% We have enough AUX and CONF messages to reveal our share of the coin
                             {CoinData, {send, CoinSend}} = hbbft_cc:get_coin(maybe_init_coin(NewData3)),
-                            {NewData3#bba_data{coin=CoinData, coin_sent=true}, {send, hbbft_utils:wrap({coin, Data#bba_data.round}, CoinSend) ++ ToSend2}};
+                            {NewData3#bba_data{coin=CoinData, coin_sent=true}, {send, ToSend2 ++ hbbft_utils:wrap({coin, Data#bba_data.round}, CoinSend)}};
                         _ ->
                             {NewData3, {send, ToSend2}}
                     end;
@@ -231,7 +231,7 @@ conf(Data = #bba_data{n=N, f=F}, Id, V) ->
                 true ->
                     %% instantiate the common coin
                     %% TODO need more entropy for the SID
-                    %% We have enough AUX and CON messages to reveal our share of the coin
+                    %% We have enough AUX and CONF messages to reveal our share of the coin
                     {CoinData, {send, ToSend}} = hbbft_cc:get_coin(maybe_init_coin(NewData)),
                     {NewData#bba_data{coin=CoinData, coin_sent=true}, {send, hbbft_utils:wrap({coin, NewData#bba_data.round}, ToSend)}};
                 _ ->
