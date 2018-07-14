@@ -61,17 +61,15 @@ input(Data = #rbc_data{state=init, n=N, f=F, pid=Pid, leader=Leader}, Msg) when 
     M = N - 2*F,
     K = 2*F,
     %% Shards represent sj from the whitepaper
-    {ok, Shards} = leo_erasure:encode({K, M}, Msg),
+    {ok, Shards} = erasure:encode(K, M, Msg),
     %% Need to know the size of the msg for decoding
-    MsgSize = byte_size(Msg),
-    ShardsWithSize = [{MsgSize, Shard} || Shard <- Shards],
-    Merkle = merkerl:new(ShardsWithSize, fun merkerl:hash_value/1),
+    Merkle = merkerl:new(Shards, fun merkerl:hash_value/1),
     MerkleRootHash = merkerl:root_hash(Merkle),
     %% gen_proof = branches for each merkle node (Hash(shard))
     BranchesForShards = [merkerl:gen_proof(Hash, Merkle) || {Hash, _} <- merkerl:leaves(Merkle)],
     %% TODO add our identity to the ready/echo sets?
     NewData = Data#rbc_data{msg=Msg},
-    Result = [ {unicast, J, {val, MerkleRootHash, lists:nth(J+1, BranchesForShards), lists:nth(J+1, ShardsWithSize)}} || J <- lists:seq(0, N-1)],
+    Result = [ {unicast, J, {val, MerkleRootHash, lists:nth(J+1, BranchesForShards), lists:nth(J+1, Shards)}} || J <- lists:seq(0, N-1)],
     %% unicast all the VAL packets and multicast the ECHO for our own share
     {NewData#rbc_data{state=waiting}, {send, Result}}; % ++ [{multicast, {echo, MerkleRootHash, hd(BranchesForShards), hd(ShardsWithSize)}}]}}.
 input(Data, _Msg) ->
@@ -206,22 +204,18 @@ has_ready(_Data = #rbc_data{num_readies = Readies}, Sender) ->
 check_completion(Data = #rbc_data{n=N, f=F}, H) ->
     %% interpolate Sj from any N-2f leaves received
 
-    %% From leo_erasure:
     %% Object would be encoded into {k + m} blocks, any {k} blocks could be used to decode back
     %% K: The number of data chunks - The number of chunks in which the original object is divided
-    %% M: The number of coding chunks - The number of additional chunks computed by leo_erasure's encoding functions
+    %% M: The number of coding chunks - The number of additional chunks computed by erasure's encoding functions
     M = N - 2*F, %% Note: M = Threshold (specified in RBC protocol)
     K = 2*F,
 
-    ShardsWithSize = maps:values(maps:get(H, Data#rbc_data.stripes, [])),
-    {_, Shards} = lists:unzip(ShardsWithSize),
-    case leo_erasure:decode({K, M}, Shards, element(1, hd(ShardsWithSize))) of
+    Shards = maps:values(maps:get(H, Data#rbc_data.stripes, [])),
+    case erasure:decode(K, M, Shards) of
         {ok, Msg} ->
             %% recompute merkle root H
-            MsgSize = byte_size(Msg),
-            {ok, AllShards} = leo_erasure:encode({K, M}, Msg),
-            AllShardsWithSize = [{MsgSize, Shard} || Shard <- AllShards],
-            Merkle = merkerl:new(AllShardsWithSize, fun merkerl:hash_value/1),
+            {ok, AllShards} = erasure:encode(K, M, Msg),
+            Merkle = merkerl:new(AllShards, fun merkerl:hash_value/1),
             MerkleRootHash = merkerl:root_hash(Merkle),
             case H == MerkleRootHash of
                 true ->
