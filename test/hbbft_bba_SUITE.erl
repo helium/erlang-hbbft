@@ -24,7 +24,7 @@ all() ->
     ].
 
 init_per_testcase(_, Config) ->
-    N = list_to_integer(os:getenv("N", 34)),
+    N = list_to_integer(os:getenv("N", "34")),
     F = (N - 1) div 3,
     Module = hbbft_bba,
     {ok, Dealer} = dealer:start_link(N, F+1, 'SS512'),
