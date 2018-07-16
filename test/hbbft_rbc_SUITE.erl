@@ -8,9 +8,9 @@
          init_test/1,
          send_incorrect_msg_test/1,
          incorrect_leader_test/1,
-         pid_dying_test/1,
+         f_dying_test/1,
          simple_test/1,
-         two_pid_dying_test/1
+         twof_dying_test/1
         ]).
 
 all() ->
@@ -18,9 +18,9 @@ all() ->
      init_test,
      send_incorrect_msg_test,
      incorrect_leader_test,
-     pid_dying_test,
+     f_dying_test,
      simple_test,
-     two_pid_dying_test
+     twof_dying_test
     ].
 
 init_per_testcase(_, Config) ->
@@ -113,25 +113,26 @@ incorrect_leader_test(Config) ->
     ?assertEqual(0, sets:size(ConvergedResults)),
     ok.
 
-pid_dying_test(Config) ->
+f_dying_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
     Module = proplists:get_value(module, Config),
     Msg = proplists:get_value(msg, Config),
-    [S0, S1, _S2 | SN] = [ hbbft_rbc:init(N, F, I, 0) || I <- lists:seq(0, N-1) ],
+    [S0 | SN] = lists:sublist([ hbbft_rbc:init(N, F, I, 0) || I <- lists:seq(0, N-1) ], 1, N - F),
     {NewS0, {send, MsgsToSend}} = hbbft_rbc:input(S0, Msg),
-    States = [NewS0, S1 | SN],
+    States = [NewS0 | SN],
+    ?assertEqual(N - F, length(States)),
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, [{0, {send, MsgsToSend}}], StatesWithId, sets:new()),
     %% everyone but the dead node should converge
-    ?assertEqual(N - 1, sets:size(ConvergedResults)),
+    ?assertEqual(N - F, sets:size(ConvergedResults)),
     %% the decoded result should be the original message
     ConvergedResultsList = sets:to_list(ConvergedResults),
     ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
     ?assert(lists:all(fun({result, {_, Res}}) -> Res == Msg end, ConvergedResultsList)),
     ok.
 
-two_pid_dying_test(Config) ->
+twof_dying_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
     Module = proplists:get_value(module, Config),
