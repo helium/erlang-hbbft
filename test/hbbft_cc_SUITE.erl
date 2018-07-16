@@ -6,27 +6,27 @@
 -export([all/0, init_per_testcase/2, end_per_testcase/2]).
 -export([
          init_test/1,
-         one_dead_test/1,
-         two_dead_test/1,
+         f_dead_test/1,
+         fplusone_dead_test/1,
          too_many_dead_test/1,
-         key_mismatch_f1_test/1,
-         key_mismatch_f2_test/1,
+         key_mismatch_f9_test/1,
+         key_mismatch_f10_test/1,
          mixed_keys_test/1
         ]).
 
 all() ->
     [
      init_test,
-     one_dead_test,
-     two_dead_test,
+     f_dead_test,
+     fplusone_dead_test,
      too_many_dead_test,
-     key_mismatch_f1_test,
-     key_mismatch_f2_test,
+     key_mismatch_f9_test,
+     key_mismatch_f10_test,
      mixed_keys_test
     ].
 
 init_per_testcase(_, Config) ->
-    N = 5,
+    N = list_to_integer(os:getenv("N", 34)),
     F = N div 4,
     Module = hbbft_cc,
     {ok, Dealer} = dealer:start_link(N, F+1, 'SS512'),
@@ -63,15 +63,18 @@ init_test(Config) ->
     ?assertEqual(N, sets:size(ConvergedResults)),
     ok.
 
-one_dead_test(Config) ->
+f_dead_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
     Module = proplists:get_value(module, Config),
     PubKey = proplists:get_value(pubkey, Config),
     PrivateKeys = proplists:get_value(privatekeys, Config),
     Sid = tpke_pubkey:hash_message(PubKey, crypto:strong_rand_bytes(32)),
-    [S0, S1, _S2, S3, S4] = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- PrivateKeys],
-    StatesWithId = lists:zip(lists:seq(0, N - 2), [S0, S1, S3, S4]),
+    InitialStates = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- PrivateKeys],
+    ToCrash = hbbft_test_utils:random_n(F, InitialStates),
+    StatesAfterCrash = ordsets:to_list(ordsets:subtract(ordsets:from_list(InitialStates),ordsets:from_list(ToCrash))),
+    StatesWithId = lists:zip(lists:seq(0, N-F-1), StatesAfterCrash),
+    ct:pal("StatesWithId: ~p, len: ~p", [StatesWithId, length(StatesWithId)]),
     %% all valid members should call get_coin
     Res = lists:map(fun({J, State}) ->
                             {NewState, Result} = hbbft_cc:get_coin(State),
@@ -81,22 +84,24 @@ one_dead_test(Config) ->
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, Results, NewStates, sets:new()),
     ConvergedResultsList = sets:to_list(ConvergedResults),
     ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
-    %% everyone but one should converge
-    ?assertEqual(N - 1, sets:size(ConvergedResults)),
+    %% everyone except F should converge
+    ?assertEqual(N - F, sets:size(ConvergedResults)),
     %% everyone should have the same value
     DistinctResults = lists:usort([ Sig || {result, {_J, Sig}} <- sets:to_list(ConvergedResults) ]),
     ?assertEqual(1, length(DistinctResults)),
     ok.
 
-two_dead_test(Config) ->
+fplusone_dead_test(Config) ->
     N = proplists:get_value(n, Config),
-    F = proplists:get_value(f, Config),
+    F = proplists:get_value(f, Config) + 1,
     Module = proplists:get_value(module, Config),
     PubKey = proplists:get_value(pubkey, Config),
     PrivateKeys = proplists:get_value(privatekeys, Config),
     Sid = tpke_pubkey:hash_message(PubKey, crypto:strong_rand_bytes(32)),
-    [S0, S1, _S2, S3, _S4] = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- PrivateKeys],
-    StatesWithId = lists:zip(lists:seq(0, N - 3), [S0, S1, S3]),
+    InitialStates = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- PrivateKeys],
+    ToCrash = hbbft_test_utils:random_n(F+1, InitialStates),
+    StatesAfterCrash = ordsets:to_list(ordsets:subtract(ordsets:from_list(InitialStates),ordsets:from_list(ToCrash))),
+    StatesWithId = lists:zip(lists:seq(0, N-(F+1)-1), StatesAfterCrash),
     %% all valid members should call get_coin
     Res = lists:map(fun({J, State}) ->
                             {NewState, Result} = hbbft_cc:get_coin(State),
@@ -106,8 +111,8 @@ two_dead_test(Config) ->
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, Results, NewStates, sets:new()),
     ConvergedResultsList = sets:to_list(ConvergedResults),
     ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
-    %% everyone but two should converge
-    ?assertEqual(N - 2, sets:size(ConvergedResults)),
+    %% everyone except F + 1 should converge
+    ?assertEqual(N - (F+1), sets:size(ConvergedResults)),
     %% everyone should have the same value
     DistinctResults = lists:usort([ Sig || {result, {_J, Sig}} <- sets:to_list(ConvergedResults) ]),
     ?assertEqual(1, length(DistinctResults)),
@@ -115,13 +120,17 @@ two_dead_test(Config) ->
 
 too_many_dead_test(Config) ->
     N = proplists:get_value(n, Config),
-    F = 4,
+    F = proplists:get_value(f, Config) + 10,
     Module = proplists:get_value(module, Config),
     PubKey = proplists:get_value(pubkey, Config),
     PrivateKeys = proplists:get_value(privatekeys, Config),
     Sid = tpke_pubkey:hash_message(PubKey, crypto:strong_rand_bytes(32)),
-    [S0, S1, _S2, S3, _S4] = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- PrivateKeys],
-    StatesWithId = lists:zip(lists:seq(0, N - 3), [S0, S1, S3]),
+
+    InitialStates = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- PrivateKeys],
+    ToCrash = hbbft_test_utils:random_n(F, InitialStates),
+    StatesAfterCrash = ordsets:to_list(ordsets:subtract(ordsets:from_list(InitialStates), ordsets:from_list(ToCrash))),
+    StatesWithId = lists:zip(lists:seq(0, N-F-1), StatesAfterCrash),
+
     %% all valid members should call get_coin
     Res = lists:map(fun({J, State}) ->
                             {NewState, Result} = hbbft_cc:get_coin(State),
@@ -135,7 +144,7 @@ too_many_dead_test(Config) ->
     ?assertEqual(0, sets:size(ConvergedResults)),
     ok.
 
-key_mismatch_f1_test(Config) ->
+key_mismatch_f9_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
     Module = proplists:get_value(module, Config),
@@ -144,8 +153,10 @@ key_mismatch_f1_test(Config) ->
     PrivateKeys = proplists:get_value(privatekeys, Config),
     {ok, _, PrivateKeys2} = dealer:deal(Dealer),
     Sid = tpke_pubkey:hash_message(PubKey, crypto:strong_rand_bytes(32)),
-    [S0, S1, S2, S3, S4] = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- lists:sublist(PrivateKeys, 3) ++ lists:sublist(PrivateKeys2, 2)],
-    StatesWithId = lists:zip(lists:seq(0, N - 1), [S0, S1, S2, S3, S4]),
+    %% choose 20 from pk1
+    %% choose 17 from pk2
+    InitialStates = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- lists:sublist(PrivateKeys, (N-2*F)) ++ lists:sublist(PrivateKeys2, 2*F)],
+    StatesWithId = lists:zip(lists:seq(0, N - 1), InitialStates),
     %% all valid members should call get_coin
     Res = lists:map(fun({J, State}) ->
                             {NewState, Result} = hbbft_cc:get_coin(State),
@@ -155,23 +166,23 @@ key_mismatch_f1_test(Config) ->
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, Results, NewStates, sets:new()),
     ConvergedResultsList = sets:to_list(ConvergedResults),
     ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
-    %% all 5 should converge, but there should be 2 distinct results
-    ?assertEqual(5, sets:size(ConvergedResults)),
+    %% all N should converge, but there should be 2 distinct results
+    ?assertEqual(N, sets:size(ConvergedResults)),
     DistinctResults = lists:usort([ Sig || {result, {_J, Sig}} <- sets:to_list(ConvergedResults) ]),
     ?assertEqual(2, length(DistinctResults)),
     ok.
 
-key_mismatch_f2_test(Config) ->
+key_mismatch_f10_test(Config) ->
     N = proplists:get_value(n, Config),
-    F = 2,
+    F = proplists:get_value(f, Config) + 1,
     Module = proplists:get_value(module, Config),
     PubKey = proplists:get_value(pubkey, Config),
     Dealer = proplists:get_value(dealer, Config),
     PrivateKeys = proplists:get_value(privatekeys, Config),
     {ok, _, PrivateKeys2} = dealer:deal(Dealer),
     Sid = tpke_pubkey:hash_message(PubKey, crypto:strong_rand_bytes(32)),
-    [S0, S1, S2, S3, S4] = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- lists:sublist(PrivateKeys, 3) ++ lists:sublist(PrivateKeys2, 2)],
-    StatesWithId = lists:zip(lists:seq(0, N - 1), [S0, S1, S2, S3, S4]),
+    InitialStates = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- lists:sublist(PrivateKeys, N-F) ++ lists:sublist(PrivateKeys2, F)],
+    StatesWithId = lists:zip(lists:seq(0, N - 1), InitialStates),
     %% all valid members should call get_coin
     Res = lists:map(fun({J, State}) ->
                             {NewState, Result} = hbbft_cc:get_coin(State),
@@ -181,8 +192,9 @@ key_mismatch_f2_test(Config) ->
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, Results, NewStates, sets:new()),
     ConvergedResultsList = sets:to_list(ConvergedResults),
     ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
-    %% the 3 with the right keys should converge to the same value
-    ?assertEqual(3, sets:size(ConvergedResults)),
+    %% the N-F with the right keys should converge
+    %% and there should be one distinct result
+    ?assertEqual(N-F, sets:size(ConvergedResults)),
     DistinctResults = lists:usort([ Sig || {result, {_J, Sig}} <- sets:to_list(ConvergedResults) ]),
     ?assertEqual(1, length(DistinctResults)),
     ok.
@@ -198,10 +210,12 @@ mixed_keys_test(Config) ->
 
     Sid = tpke_pubkey:hash_message(PubKey, crypto:strong_rand_bytes(32)),
 
-    [S0, S1, S2, _, _] = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- PrivateKeys],
-    [_, _, _, S3, S4] = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- PrivateKeys2],
+    InitialState1 = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- PrivateKeys],
+    InitialState2 = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- PrivateKeys2],
 
-    StatesWithId = lists:zip(lists:seq(0, N - 1), [S0, S1, S2, S3, S4]),
+    InitialStates = hbbft_test_utils:random_n(2*F, InitialState1) ++ hbbft_test_utils:random_n(N-2*F, InitialState2),
+
+    StatesWithId = lists:zip(lists:seq(0, N - 1), InitialStates),
     %% all valid members should call get_coin
     Res = lists:map(fun({J, State}) ->
                             {NewState, Result} = hbbft_cc:get_coin(State),
