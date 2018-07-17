@@ -29,17 +29,12 @@ init_per_testcase(_, Config) ->
     N = list_to_integer(os:getenv("N", "34")),
     F = N div 4,
     Module = hbbft_cc,
-    {ok, Dealer} = dealer:start_link(N, F+1, 'SS512'),
-    {ok, PubKey, PrivateKeys} = dealer:deal(Dealer),
+    {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
+    {ok, {PubKey, PrivateKeys}} = dealer:deal(Dealer),
     [{n, N}, {f, F}, {dealer, Dealer}, {module, Module}, {pubkey, PubKey}, {privatekeys, PrivateKeys} | Config].
 
-end_per_testcase(_, Config) ->
-    Dealer = proplists:get_value(dealer, Config, undefined),
-    case Dealer of
-        undefined -> ok;
-        Pid ->
-            gen_server:stop(Pid)
-    end.
+end_per_testcase(_, _Config) ->
+    ok.
 
 init_test(Config) ->
     N = proplists:get_value(n, Config),
@@ -120,7 +115,7 @@ fplusone_dead_test(Config) ->
 
 too_many_dead_test(Config) ->
     N = proplists:get_value(n, Config),
-    F = proplists:get_value(f, Config) + 10,
+    F = proplists:get_value(f, Config) + (N div 2),
     Module = proplists:get_value(module, Config),
     PubKey = proplists:get_value(pubkey, Config),
     PrivateKeys = proplists:get_value(privatekeys, Config),
@@ -151,7 +146,7 @@ key_mismatch_f9_test(Config) ->
     PubKey = proplists:get_value(pubkey, Config),
     Dealer = proplists:get_value(dealer, Config),
     PrivateKeys = proplists:get_value(privatekeys, Config),
-    {ok, _, PrivateKeys2} = dealer:deal(Dealer),
+    {ok, {_, PrivateKeys2}} = dealer:deal(Dealer),
     Sid = tpke_pubkey:hash_message(PubKey, crypto:strong_rand_bytes(32)),
     %% choose 20 from pk1
     %% choose 17 from pk2
@@ -179,7 +174,7 @@ key_mismatch_f10_test(Config) ->
     PubKey = proplists:get_value(pubkey, Config),
     Dealer = proplists:get_value(dealer, Config),
     PrivateKeys = proplists:get_value(privatekeys, Config),
-    {ok, _, PrivateKeys2} = dealer:deal(Dealer),
+    {ok, {_, PrivateKeys2}} = dealer:deal(Dealer),
     Sid = tpke_pubkey:hash_message(PubKey, crypto:strong_rand_bytes(32)),
     InitialStates = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- lists:sublist(PrivateKeys, N-F) ++ lists:sublist(PrivateKeys2, F)],
     StatesWithId = lists:zip(lists:seq(0, N - 1), InitialStates),
@@ -206,7 +201,7 @@ mixed_keys_test(Config) ->
     PubKey = proplists:get_value(pubkey, Config),
     Dealer = proplists:get_value(dealer, Config),
     PrivateKeys = proplists:get_value(privatekeys, Config),
-    {ok, _, PrivateKeys2} = dealer:deal(Dealer),
+    {ok, {_, PrivateKeys2}} = dealer:deal(Dealer),
 
     Sid = tpke_pubkey:hash_message(PubKey, crypto:strong_rand_bytes(32)),
 

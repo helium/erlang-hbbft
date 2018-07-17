@@ -27,26 +27,20 @@ init_per_testcase(_, Config) ->
     N = list_to_integer(os:getenv("N", "34")),
     F = (N - 1) div 3,
     Module = hbbft_bba,
-    {ok, Dealer} = dealer:start_link(N, F+1, 'SS512'),
-    {ok, PubKey, PrivateKeys} = dealer:deal(Dealer),
+    {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
+    {ok, {PubKey, PrivateKeys}} = dealer:deal(Dealer),
     [{n, N}, {f, F}, {dealer, Dealer}, {module, Module}, {pubkey, PubKey}, {privatekeys, PrivateKeys} | Config].
 
-end_per_testcase(_, Config) ->
-    Dealer = proplists:get_value(dealer, Config, undefined),
-    case Dealer of
-        undefined -> ok;
-        Pid ->
-            gen_server:stop(Pid)
-    end.
+end_per_testcase(_, _Config) ->
+    ok.
 
 termination_test(Config) ->
     Module = proplists:get_value(module, Config),
     Fun = fun(Vals) ->
                   N = 7,
                   F = 2,
-                  {ok, Dealer} = dealer:start_link(N, F+1, 'SS512'),
-                  {ok, _PubKey, PrivateKeys} = dealer:deal(Dealer),
-                  gen_server:stop(Dealer),
+                  {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
+                  {ok, {_PubKey, PrivateKeys}} = dealer:deal(Dealer),
                   States = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
                   StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
                   MixedList = lists:zip(Vals, StatesWithId),
@@ -77,9 +71,8 @@ init_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
     Module = proplists:get_value(module, Config),
-    {ok, Dealer} = dealer:start_link(N, F+1, 'SS512'),
-    {ok, _PubKey, PrivateKeys} = dealer:deal(Dealer),
-    gen_server:stop(Dealer),
+    {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
+    {ok, {_PubKey, PrivateKeys}} = dealer:deal(Dealer),
     States = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
     %% all valid members should call get_coin
@@ -143,9 +136,8 @@ init_with_mixed_zeros_and_ones_test(Config) ->
     Module = proplists:get_value(module, Config),
     N = 10,
     F = 2,
-    {ok, Dealer} = dealer:start_link(N, F+1, 'SS512'),
-    {ok, _PubKey, PrivateKeys} = dealer:deal(Dealer),
-    gen_server:stop(Dealer),
+    {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
+    {ok, {_PubKey, PrivateKeys}} = dealer:deal(Dealer),
     States = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
     MixedList = lists:zip([1, 1, 1, 0, 1, 0, 0, 0, 0, 0], StatesWithId),

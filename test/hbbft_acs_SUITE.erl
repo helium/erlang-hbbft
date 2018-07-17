@@ -17,17 +17,12 @@ init_per_testcase(_, Config) ->
     N = list_to_integer(os:getenv("N", "34")),
     F = N div 4,
     Module = hbbft_acs,
-    {ok, Dealer} = dealer:start_link(N, F+1, 'SS512'),
-    {ok, _PubKey, PrivateKeys} = dealer:deal(Dealer),
+    {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
+    {ok, {_PubKey, PrivateKeys}} = dealer:deal(Dealer),
     [{n, N}, {f, F}, {module, Module}, {privatekeys, PrivateKeys} | Config].
 
-end_per_testcase(_, Config) ->
-    Dealer = proplists:get_value(dealer, Config, undefined),
-    case Dealer of
-        undefined -> ok;
-        Pid ->
-            gen_server:stop(Pid)
-    end.
+end_per_testcase(_, _Config) ->
+    ok.
 
 init_test(Config) ->
     N = proplists:get_value(n, Config),
