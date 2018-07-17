@@ -112,33 +112,8 @@ handle_msg(Data = #bba_data{round=R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin
     case hbbft_cc:handle_msg(Data#bba_data.coin, J, CMsg) of
         {_NewCoin, {result, Result}} ->
             %% ok, we've obtained the common coin
-            case count(Data#bba_data.bin_values) == 1 of
-                true ->
-                    %% if vals = {b}, then
-                    B = val(Data#bba_data.bin_values),
-                    Output = case Result rem 2 == B of
-                                 true ->
-                                     %% if (b = s%2) then output b
-                                     B;
-                                 false ->
-                                     undefined
-                             end,
-                    case B == Result rem 2 andalso Data#bba_data.output == B of
-                        true ->
-                            %% we are done
-                            NewData = Data#bba_data{state=done},
-                            {NewData, {result, B}};
-                        false ->
-                            %% increment round and continue
-                            NewData = init(Data#bba_data.secret_key, Data#bba_data.n, Data#bba_data.f),
-                            input(NewData#bba_data{round=Data#bba_data.round + 1, output=Output}, B)
-                    end;
-                false ->
-                    %% else estr+1 := s%2
-                    B = Result rem 2,
-                    NewData = init(Data#bba_data.secret_key, Data#bba_data.n, Data#bba_data.f),
-                    input(NewData#bba_data{round=Data#bba_data.round + 1}, B)
-            end;
+            Flip = Result rem 2,
+            check_coin_flip(Data, Flip);
         {NewCoin, ok} ->
             {Data#bba_data{coin=NewCoin}, ok}
     end;
@@ -185,16 +160,21 @@ bval(Data=#bba_data{n=N, f=F}, Id, V) ->
             %% check if we have n-f aux messages
             case threshold(N, F, NewData3, aux) of
                 true ->
-                    %% check if we have n-f conf messages
-                    case threshold(N, F, NewData3, conf) andalso not NewData3#bba_data.coin_sent of
-                        %% instantiate the common coin
-                        true ->
-                            %% TODO need more entropy for the SID
-                            %% We have enough AUX and CONF messages to reveal our share of the coin
-                            {CoinData, {send, CoinSend}} = hbbft_cc:get_coin(maybe_init_coin(NewData3)),
-                            {NewData3#bba_data{coin=CoinData, coin_sent=true}, {send, ToSend2 ++ hbbft_utils:wrap({coin, Data#bba_data.round}, CoinSend)}};
-                        _ ->
-                            {NewData3, {send, ToSend2}}
+                    case schedule(NewData3#bba_data.round) of
+                        coin ->
+                            %% check if we have n-f conf messages
+                            case threshold(N, F, NewData3, conf) andalso not NewData3#bba_data.coin_sent of
+                                true ->
+                                    %% instantiate the common coin
+                                    %% TODO need more entropy for the SID
+                                    %% We have enough AUX and CONF messages to reveal our share of the coin
+                                    {CoinData, {send, CoinSend}} = hbbft_cc:get_coin(maybe_init_coin(NewData3)),
+                                    {NewData3#bba_data{coin=CoinData, coin_sent=true}, {send, ToSend2 ++ hbbft_utils:wrap({coin, Data#bba_data.round}, CoinSend)}};
+                                _ ->
+                                    {NewData3, {send, ToSend2}}
+                            end;
+                        FixedValue ->
+                            check_coin_flip(NewData3, FixedValue)
                     end;
                 false ->
                     {NewData3, {send, ToSend2}}
@@ -209,13 +189,18 @@ aux(Data = #bba_data{n=N, f=F}, Id, V) ->
     NewData = Data#bba_data{aux_witness = Witness},
     case threshold(N, F, NewData, aux) of
         true->
-            %% only send conf after n-f aux messages
-            case NewData#bba_data.conf_sent of
-                false ->
-                    {NewData#bba_data{conf_sent=true}, {send, [{multicast, {conf, NewData#bba_data.round, NewData#bba_data.bin_values}}]}};
-                true ->
-                    %% conf was already sent
-                    {NewData, ok}
+            case schedule(NewData#bba_data.round) of
+                coin ->
+                    %% only send conf after n-f aux messages
+                    case NewData#bba_data.conf_sent of
+                        false ->
+                            {NewData#bba_data{conf_sent=true}, {send, [{multicast, {conf, NewData#bba_data.round, NewData#bba_data.bin_values}}]}};
+                        true ->
+                            %% conf was already sent
+                            {NewData, ok}
+                    end;
+                FixedValue ->
+                    check_coin_flip(NewData, FixedValue)
             end;
         _ ->
             {NewData, ok}
@@ -367,3 +352,44 @@ val(2#10) -> 1.
 add_witness(Id, Value, Witness) ->
     Old = maps:get(Id, Witness, 0),
     maps:put(Id, add(Value, Old), Witness).
+
+schedule(0) -> 1;
+schedule(1) -> 1;
+schedule(2) -> 0;
+schedule(3) -> 0;
+schedule(4) -> coin;
+schedule(N) ->
+    case (N - 5) rem 3 of
+        0 -> 1;
+        1 -> 0;
+        2 -> coin
+    end.
+
+check_coin_flip(Data, Flip) ->
+    case count(Data#bba_data.bin_values) == 1 of
+        true ->
+            %% if vals = {b}, then
+            B = val(Data#bba_data.bin_values),
+            Output = case Flip == B of
+                         true ->
+                             %% if (b = s%2) then output b
+                             B;
+                         false ->
+                             undefined
+                     end,
+            case B == Flip andalso Data#bba_data.output == B of
+                true ->
+                    %% we are done
+                    NewData = Data#bba_data{state=done},
+                    {NewData, {result, B}};
+                false ->
+                    %% increment round and continue
+                    NewData = init(Data#bba_data.secret_key, Data#bba_data.n, Data#bba_data.f),
+                    input(NewData#bba_data{round=Data#bba_data.round + 1, output=Output}, B)
+            end;
+        false ->
+            %% else estr+1 := s%2
+            B = Flip,
+            NewData = init(Data#bba_data.secret_key, Data#bba_data.n, Data#bba_data.f),
+            input(NewData#bba_data{round=Data#bba_data.round + 1}, B)
+    end.
