@@ -301,10 +301,11 @@ deserialize(#bba_serialized_data{state=State,
 -spec threshold(pos_integer(), non_neg_integer(), bba_data(), aux | conf) -> boolean().
 threshold(N, F, Data, Msg) ->
     case Msg of
-        aux -> check(N, F, Data#bba_data.bin_values, Data#bba_data.aux_witness);%, fun subset/2);
+        aux -> check(N, F, Data#bba_data.bin_values, Data#bba_data.aux_witness);
         conf -> check(N, F, Data#bba_data.bin_values, Data#bba_data.conf_witness, fun subset/2)
     end.
 
+-spec check(pos_integer(), non_neg_integer(), 0 | 1 | 2 | 3, #{non_neg_integer() => 0 | 1}) -> boolean().
 check(N, F, ToCheck, Witness) ->
     case ToCheck of
         0 ->
@@ -320,7 +321,6 @@ check(N, F, ToCheck, Witness) ->
             Ones = maps:get({val, 1}, Witness, 0),
             Both + (Zeros - Both) + (Ones - Both) >= N - F
     end.
-
 
 -spec check(pos_integer(), non_neg_integer(), 0 | 1 | 2 | 3, #{non_neg_integer() => 0 | 1}, fun((0|1|2|3, 0|1|2|3) -> boolean())) -> boolean().
 check(N, F, ToCheck, Map, Fun) ->

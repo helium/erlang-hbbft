@@ -113,7 +113,4 @@ fplusone_dead_test(Config) ->
     ConvergedResultsList = sets:to_list(ConvergedResults),
     ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
     ?assertEqual(0, sets:size(ConvergedResults)),
-    DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
-    ?assertEqual(0, sets:size(DistinctResults)),
-    ?assert(sets:is_subset(sets:from_list([ X || {_, X} <- lists:flatten(sets:to_list(DistinctResults))]), sets:from_list(Msgs))),
     ok.
