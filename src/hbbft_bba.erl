@@ -75,7 +75,7 @@ init(SK, N, F) ->
 %% – bin_values  {}
 -spec input(bba_data(), 0 | 1) -> {bba_data(), ok | {send, [hbbft_utils:multicast(bval_msg())]}}.
 input(Data = #bba_data{state=init}, BInput) ->
-    {Data#bba_data{est = BInput, broadcasted=add(BInput, Data#bba_data.broadcasted), coin=maybe_init_coin(Data)}, {send, [{multicast, {bval, Data#bba_data.round, BInput}}]}};
+    {Data#bba_data{est = BInput, broadcasted=add(BInput, Data#bba_data.broadcasted)}, {send, [{multicast, {bval, Data#bba_data.round, BInput}}]}};
 input(Data = #bba_data{state=done}, _BInput) ->
     {Data, ok}.
 

@@ -207,7 +207,7 @@ handle_msg(Data = #hbbft_data{round=R, thingtosign=ThingToSign}, J, {sign, R, Bi
             case maps:size(NewSigShares) > Data#hbbft_data.f andalso not Data#hbbft_data.sent_sig of
                 true ->
                     %% ok, we have enough people agreeing with us we can combine the signature shares
-                    {ok, Sig} = tpke_pubkey:combine_signature_shares(PubKey, maps:values(NewSigShares), ThingToSign),
+                    {ok, Sig} = tpke_pubkey:combine_verified_signature_shares(PubKey, maps:values(NewSigShares)),
                     case tpke_pubkey:verify_signature(PubKey, Sig, ThingToSign) of
                         true ->
                             %% verified signature, send the signature
