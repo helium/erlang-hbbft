@@ -307,14 +307,12 @@ deserialize(#bba_serialized_data{state=State,
 
 -spec threshold(pos_integer(), non_neg_integer(), bba_data(), aux | conf) -> boolean().
 threshold(N, F, Data, Msg) ->
-    ct:pal("Msg ~p", [Msg]),
     case Msg of
         aux -> check(N, F, Data#bba_data.bin_values, Data#bba_data.aux_witness);%, fun subset/2);
         conf -> check(N, F, Data#bba_data.bin_values, Data#bba_data.conf_witness, fun subset/2)
     end.
 
 check(N, F, ToCheck, Witness) ->
-    ct:pal("Checking ~p is a superset ~p", [ToCheck, Witness]),
     case ToCheck of
         0 ->
             false;
