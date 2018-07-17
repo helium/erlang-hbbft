@@ -129,7 +129,14 @@ handle_msg(Data, _J, _Msg) ->
 bval(Data=#bba_data{n=N, f=F}, Id, V) ->
     %% add to witnesses
     Witness = add_witness(Id, V, Data#bba_data.witness),
-    WitnessCount = lists:sum([ 1 || {_, Val} <- maps:to_list(Witness), has(V, Val) ]),
+    %WitnessCount = lists:sum([ 1 || {_, Val} <- maps:to_list(Witness), has(V, Val) ]),
+    %WitnessCount = maps:fold(fun(_K, Val, Acc) -> 
+                                     %case has(V, Val) of
+                                         %true -> Acc + 1;
+                                         %false -> Acc
+                                     %end
+                             %end, 0, Witness),
+    WitnessCount = maps:get({val, V}, Witness, 0),
 
     {NewData, ToSend} = case WitnessCount >= F+1 andalso not has(V, Data#bba_data.broadcasted) of
                             true ->
@@ -300,10 +307,29 @@ deserialize(#bba_serialized_data{state=State,
 
 -spec threshold(pos_integer(), non_neg_integer(), bba_data(), aux | conf) -> boolean().
 threshold(N, F, Data, Msg) ->
+    ct:pal("Msg ~p", [Msg]),
     case Msg of
-        aux -> check(N, F, Data#bba_data.bin_values, Data#bba_data.aux_witness, fun subset/2);
+        aux -> check(N, F, Data#bba_data.bin_values, Data#bba_data.aux_witness);%, fun subset/2);
         conf -> check(N, F, Data#bba_data.bin_values, Data#bba_data.conf_witness, fun subset/2)
     end.
+
+check(N, F, ToCheck, Witness) ->
+    ct:pal("Checking ~p is a superset ~p", [ToCheck, Witness]),
+    case ToCheck of
+        0 ->
+            false;
+        1 ->
+            maps:get({val, 0}, Witness, 0) >= N - F;
+        2 ->
+            maps:get({val, 1}, Witness, 0) >= N - F;
+        3 ->
+            %% both
+            Both = maps:get({val, both}, Witness, 0),
+            Zeros = maps:get({val, 0}, Witness, 0),
+            Ones = maps:get({val, 1}, Witness, 0),
+            Both + (Zeros - Both) + (Ones - Both) >= N - F
+    end.
+
 
 -spec check(pos_integer(), non_neg_integer(), 0 | 1 | 2 | 3, #{non_neg_integer() => 0 | 1}, fun((0|1|2|3, 0|1|2|3) -> boolean())) -> boolean().
 check(N, F, ToCheck, Map, Fun) ->
@@ -351,7 +377,18 @@ val(2#10) -> 1.
 
 add_witness(Id, Value, Witness) ->
     Old = maps:get(Id, Witness, 0),
-    maps:put(Id, add(Value, Old), Witness).
+    New = add(Value, Old),
+    case Old /= New of
+        true when New == 3 ->
+            OldCount = maps:get({val, Value}, Witness, 0),
+            OldBothCount = maps:get({val, both}, Witness, 0),
+            maps:merge(Witness, #{{val, Value} => OldCount + 1, Id => New, {val, both} => OldBothCount + 1});
+        true  ->
+            OldCount = maps:get({val, Value}, Witness, 0),
+            maps:merge(Witness, #{{val, Value} => OldCount + 1, Id => New});
+        false ->
+            Witness
+    end.
 
 schedule(0) -> 1;
 schedule(1) -> 1;
