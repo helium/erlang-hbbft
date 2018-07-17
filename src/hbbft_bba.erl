@@ -129,13 +129,6 @@ handle_msg(Data, _J, _Msg) ->
 bval(Data=#bba_data{n=N, f=F}, Id, V) ->
     %% add to witnesses
     Witness = add_witness(Id, V, Data#bba_data.witness),
-    %WitnessCount = lists:sum([ 1 || {_, Val} <- maps:to_list(Witness), has(V, Val) ]),
-    %WitnessCount = maps:fold(fun(_K, Val, Acc) -> 
-                                     %case has(V, Val) of
-                                         %true -> Acc + 1;
-                                         %false -> Acc
-                                     %end
-                             %end, 0, Witness),
     WitnessCount = maps:get({val, V}, Witness, 0),
 
     {NewData, ToSend} = case WitnessCount >= F+1 andalso not has(V, Data#bba_data.broadcasted) of
