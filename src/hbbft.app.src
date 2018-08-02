@@ -6,7 +6,7 @@
    [kernel,
     stdlib,
     merkerl,
-    leo_erasure,
+    erasure,
     erlang_tpke
    ]},
   {env,[]},

@@ -92,7 +92,7 @@ handle_msg(Data, J, {{rbc, I}, RBCMsg}) ->
             %% Figure4, Bullet2
             %% upon delivery of vj from RBCj, if input has not yet been provided to BAj, then provide input 1 to BAj
             NewData = store_rbc_result(store_rbc_state(Data, I, NewRBC), I, Result),
-            case bba_has_had_input(maps:get(I, Data#acs_data.bba)) of
+            case bba_has_had_input(maps:get(I, NewData#acs_data.bba)) of
                 true ->
                     check_completion(NewData);
                 false ->
@@ -128,9 +128,9 @@ handle_msg(Data = #acs_data{n=N, f=F}, J, {{bba, I}, BBAMsg}) ->
                                                                   false ->
                                                                       case hbbft_bba:input(ThisBBA#bba_state.bba_data, 0) of
                                                                           {FailedBBA, {send, ToSend}} ->
-                                                                              {store_bba_input(store_bba_state(Data, E, FailedBBA), E, 0), [hbbft_utils:wrap({bba, E}, ToSend)|MsgAcc]};
+                                                                              {store_bba_input(store_bba_state(DataAcc, E, FailedBBA), E, 0), [hbbft_utils:wrap({bba, E}, ToSend)|MsgAcc]};
                                                                           {DoneBBA, ok} ->
-                                                                              {store_bba_state(Data, E, DoneBBA), MsgAcc}
+                                                                              {store_bba_state(DataAcc, E, DoneBBA), MsgAcc}
                                                                       end;
                                                                   true ->
                                                                       Acc
@@ -184,8 +184,8 @@ bba_has_had_input(#bba_state{input=Input}) ->
 
 -spec get_bba_result(acs_data(), non_neg_integer()) -> undefined | boolean().
 get_bba_result(Data, I) ->
-    RBC = get_bba(Data, I),
-    RBC#bba_state.result.
+    BBA = get_bba(Data, I),
+    BBA#bba_state.result.
 
 -spec store_bba_state(acs_data(), non_neg_integer(), hbbft_bba:bba_data()) -> acs_data().
 store_bba_state(Data, I, State) ->

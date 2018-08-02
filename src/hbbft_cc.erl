@@ -85,7 +85,7 @@ share(Data, J, Share) ->
                     case maps:size(NewData#cc_data.shares) > Data#cc_data.f of
                         true ->
                             %% combine shares
-                            {ok, Sig} = tpke_pubkey:combine_signature_shares(tpke_privkey:public_key(NewData#cc_data.sk), maps:values(NewData#cc_data.shares), Data#cc_data.sid),
+                            {ok, Sig} = tpke_pubkey:combine_verified_signature_shares(tpke_privkey:public_key(NewData#cc_data.sk), maps:values(NewData#cc_data.shares)),
                             %% check if the signature is valid
                             case tpke_pubkey:verify_signature(tpke_privkey:public_key(NewData#cc_data.sk), Sig, NewData#cc_data.sid) of
                                 true ->

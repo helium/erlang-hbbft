@@ -8,9 +8,9 @@
          init_test/1,
          send_incorrect_msg_test/1,
          incorrect_leader_test/1,
-         pid_dying_test/1,
+         f_dying_test/1,
          simple_test/1,
-         two_pid_dying_test/1
+         twof_dying_test/1
         ]).
 
 all() ->
@@ -18,38 +18,29 @@ all() ->
      init_test,
      send_incorrect_msg_test,
      incorrect_leader_test,
-     pid_dying_test,
+     f_dying_test,
      simple_test,
-     two_pid_dying_test
+     twof_dying_test
     ].
 
 init_per_testcase(_, Config) ->
-    N = 5,
-    F = N div 4,
+    N = list_to_integer(os:getenv("N", "34")),
+    F = (N - 1) div 3,
     Module = hbbft_rbc,
     Msg = crypto:strong_rand_bytes(512),
     [{n, N}, {f, F}, {module, Module}, {msg, Msg}| Config].
 
-end_per_testcase(_, Config) ->
-    Dealer = proplists:get_value(dealer, Config, undefined),
-    case Dealer of
-        undefined -> ok;
-        Pid ->
-            gen_server:stop(Pid)
-    end.
+end_per_testcase(_, _Config) ->
+    ok.
 
 init_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
     Module = proplists:get_value(module, Config),
     Msg = proplists:get_value(msg, Config),
-    S0 = hbbft_rbc:init(N, F, 0, 0),
-    S1 = hbbft_rbc:init(N, F, 1, 0),
-    S2 = hbbft_rbc:init(N, F, 2, 0),
-    S3 = hbbft_rbc:init(N, F, 3, 0),
-    S4 = hbbft_rbc:init(N, F, 4, 0),
+    [S0 | SN] = [ hbbft_rbc:init(N, F, I, 0) || I <- lists:seq(0, N-1) ],
     {NewS0, {send, MsgsToSend}} = hbbft_rbc:input(S0, Msg),
-    States = [NewS0, S1, S2, S3, S4],
+    States = [NewS0 | SN],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, [{0, {send, MsgsToSend}}], StatesWithId, sets:new()),
     %% everyone should converge
@@ -65,33 +56,29 @@ send_incorrect_msg_test(Config) ->
     F = proplists:get_value(f, Config),
     Module = proplists:get_value(module, Config),
     Msg = proplists:get_value(msg, Config),
-    S0 = hbbft_rbc:init(N, F, 0, 0),
-    S1 = hbbft_rbc:init(N, F, 1, 0),
-    S2 = hbbft_rbc:init(N, F, 2, 0),
-    S3 = hbbft_rbc:init(N, F, 3, 0),
-    S4 = hbbft_rbc:init(N, F, 4, 0),
+    [S0 | SN] = [ hbbft_rbc:init(N, F, I, 0) || I <- lists:seq(0, N-1) ],
     {NewS0, {send, MsgsToSend}} = hbbft_rbc:input(S0, Msg),
 
     {unicast, _, {val, MerkleRootHash, _, _}} = hd(MsgsToSend),
 
     %% ====================================================
-    %% screw up 3 val messages in the MsgsToSend
+    %% screw up M val messages in the MsgsToSend
     %% TODO: something better but this works for now
     BadMsg = crypto:strong_rand_bytes(512),
     M = N - 2*F,
     K = 2*F,
-    {ok, Shards} = leo_erasure:encode({K, M}, BadMsg),
+    {ok, Shards} = erasure:encode(K, M, BadMsg),
     MsgSize = byte_size(BadMsg),
     ShardsWithSize = [{MsgSize, Shard} || Shard <- Shards],
     Merkle = merkerl:new(ShardsWithSize, fun merkerl:hash_value/1),
     BranchesForShards = [merkerl:gen_proof(Hash, Merkle) || {Hash, _} <- merkerl:leaves(Merkle)],
     BadMsgsToSend = [ {unicast, J, {val, MerkleRootHash, lists:nth(J+1, BranchesForShards), lists:nth(J+1, ShardsWithSize)}} || J <- lists:seq(0, N-1)],
-    [ First, Second | _ ] = MsgsToSend,
-    [ _, _, Third, Fourth, Fifth ] = BadMsgsToSend,
-    NewMsgsToSend = [First, Second, Third, Fourth, Fifth],
+    Msgs1 = lists:sublist(MsgsToSend, K),
+    Msgs2 = lists:sublist(BadMsgsToSend, K+1, M),
+    NewMsgsToSend = Msgs1 ++ Msgs2,
     %% ====================================================
 
-    States = [NewS0, S1, S2, S3, S4],
+    States = [NewS0 | SN],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, [{0, {send, NewMsgsToSend}}], StatesWithId, sets:new()),
     ConvergedResultsList = sets:to_list(ConvergedResults),
@@ -107,14 +94,12 @@ incorrect_leader_test(Config) ->
     F = proplists:get_value(f, Config),
     Module = proplists:get_value(module, Config),
     Msg = proplists:get_value(msg, Config),
-    S0 = hbbft_rbc:init(N, F, 0, 0),
-    S1 = hbbft_rbc:init(N, F, 1, 0),
-    S2 = hbbft_rbc:init(N, F, 2, 0),
+    [S0 | SN] = [ hbbft_rbc:init(N, F, I, 0) || I <- lists:seq(0, N-1 - F - 1) ],
     %% different leader than the one who proposed to start RBC
-    S3 = hbbft_rbc:init(N, F, 3, 1),
-    S4 = hbbft_rbc:init(N, F, 4, 1),
+    SN2 = [ hbbft_rbc:init(N, F, I, 1) || I <- lists:seq((2*F), N-1) ],
     {NewS0, {send, MsgsToSend}} = hbbft_rbc:input(S0, Msg),
-    States = [NewS0, S1, S2, S3, S4],
+    States = [NewS0] ++ SN ++ SN2,
+    ?assertEqual(N, length(States)),
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, [{0, {send, MsgsToSend}}], StatesWithId, sets:new()),
     ConvergedResultsList = sets:to_list(ConvergedResults),
@@ -123,37 +108,34 @@ incorrect_leader_test(Config) ->
     ?assertEqual(0, sets:size(ConvergedResults)),
     ok.
 
-pid_dying_test(Config) ->
+f_dying_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
     Module = proplists:get_value(module, Config),
     Msg = proplists:get_value(msg, Config),
-    S0 = hbbft_rbc:init(N, F, 0, 0),
-    S1 = hbbft_rbc:init(N, F, 1, 0),
-    S3 = hbbft_rbc:init(N, F, 3, 0),
-    S4 = hbbft_rbc:init(N, F, 4, 0),
+    [S0 | SN] = lists:sublist([ hbbft_rbc:init(N, F, I, 0) || I <- lists:seq(0, N-1) ], 1, N - F),
     {NewS0, {send, MsgsToSend}} = hbbft_rbc:input(S0, Msg),
-    States = [NewS0, S1, S3, S4],
+    States = [NewS0 | SN],
+    ?assertEqual(N - F, length(States)),
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, [{0, {send, MsgsToSend}}], StatesWithId, sets:new()),
     %% everyone but the dead node should converge
-    ?assertEqual(N - 1, sets:size(ConvergedResults)),
+    ?assertEqual(N - F, sets:size(ConvergedResults)),
     %% the decoded result should be the original message
     ConvergedResultsList = sets:to_list(ConvergedResults),
     ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
     ?assert(lists:all(fun({result, {_, Res}}) -> Res == Msg end, ConvergedResultsList)),
     ok.
 
-two_pid_dying_test(Config) ->
+twof_dying_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
     Module = proplists:get_value(module, Config),
     Msg = proplists:get_value(msg, Config),
-    S0 = hbbft_rbc:init(N, F, 0, 0),
-    S1 = hbbft_rbc:init(N, F, 1, 0),
-    S3 = hbbft_rbc:init(N, F, 3, 0),
+    [S0 | SN] = [ hbbft_rbc:init(N, F, I, 0) || I <- lists:seq(0, N-1 - (2*F)) ],
     {NewS0, {send, MsgsToSend}} = hbbft_rbc:input(S0, Msg),
-    States = [NewS0, S1, S3],
+    States = [NewS0 | SN],
+    ?assertEqual(N-(2*F), length(States)),
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, [{0, {send, MsgsToSend}}], StatesWithId, sets:new()),
     ConvergedResultsList = sets:to_list(ConvergedResults),

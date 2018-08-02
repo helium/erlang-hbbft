@@ -75,7 +75,7 @@ init(SK, N, F) ->
 %% – bin_values  {}
 -spec input(bba_data(), 0 | 1) -> {bba_data(), ok | {send, [hbbft_utils:multicast(bval_msg())]}}.
 input(Data = #bba_data{state=init}, BInput) ->
-    {Data#bba_data{est = BInput, broadcasted=add(BInput, Data#bba_data.broadcasted), coin=maybe_init_coin(Data)}, {send, [{multicast, {bval, Data#bba_data.round, BInput}}]}};
+    {Data#bba_data{est = BInput, broadcasted=add(BInput, Data#bba_data.broadcasted)}, {send, [{multicast, {bval, Data#bba_data.round, BInput}}]}};
 input(Data = #bba_data{state=done}, _BInput) ->
     {Data, ok}.
 
@@ -112,33 +112,8 @@ handle_msg(Data = #bba_data{round=R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin
     case hbbft_cc:handle_msg(Data#bba_data.coin, J, CMsg) of
         {_NewCoin, {result, Result}} ->
             %% ok, we've obtained the common coin
-            case count(Data#bba_data.bin_values) == 1 of
-                true ->
-                    %% if vals = {b}, then
-                    B = val(Data#bba_data.bin_values),
-                    Output = case Result rem 2 == B of
-                                 true ->
-                                     %% if (b = s%2) then output b
-                                     B;
-                                 false ->
-                                     undefined
-                             end,
-                    case B == Result rem 2 andalso Data#bba_data.output == B of
-                        true ->
-                            %% we are done
-                            NewData = Data#bba_data{state=done},
-                            {NewData, {result, B}};
-                        false ->
-                            %% increment round and continue
-                            NewData = init(Data#bba_data.secret_key, Data#bba_data.n, Data#bba_data.f),
-                            input(NewData#bba_data{round=Data#bba_data.round + 1, output=Output}, B)
-                    end;
-                false ->
-                    %% else estr+1 := s%2
-                    B = Result rem 2,
-                    NewData = init(Data#bba_data.secret_key, Data#bba_data.n, Data#bba_data.f),
-                    input(NewData#bba_data{round=Data#bba_data.round + 1}, B)
-            end;
+            Flip = Result rem 2,
+            check_coin_flip(Data, Flip);
         {NewCoin, ok} ->
             {Data#bba_data{coin=NewCoin}, ok}
     end;
@@ -154,7 +129,7 @@ handle_msg(Data, _J, _Msg) ->
 bval(Data=#bba_data{n=N, f=F}, Id, V) ->
     %% add to witnesses
     Witness = add_witness(Id, V, Data#bba_data.witness),
-    WitnessCount = lists:sum([ 1 || {_, Val} <- maps:to_list(Witness), has(V, Val) ]),
+    WitnessCount = maps:get({val, V}, Witness, 0),
 
     {NewData, ToSend} = case WitnessCount >= F+1 andalso not has(V, Data#bba_data.broadcasted) of
                             true ->
@@ -185,16 +160,21 @@ bval(Data=#bba_data{n=N, f=F}, Id, V) ->
             %% check if we have n-f aux messages
             case threshold(N, F, NewData3, aux) of
                 true ->
-                    %% check if we have n-f conf messages
-                    case threshold(N, F, NewData3, conf) andalso not NewData3#bba_data.coin_sent of
-                        %% instantiate the common coin
-                        true ->
-                            %% TODO need more entropy for the SID
-                            %% We have enough AUX and CONF messages to reveal our share of the coin
-                            {CoinData, {send, CoinSend}} = hbbft_cc:get_coin(maybe_init_coin(NewData3)),
-                            {NewData3#bba_data{coin=CoinData, coin_sent=true}, {send, ToSend2 ++ hbbft_utils:wrap({coin, Data#bba_data.round}, CoinSend)}};
-                        _ ->
-                            {NewData3, {send, ToSend2}}
+                    case schedule(NewData3#bba_data.round) of
+                        coin ->
+                            %% check if we have n-f conf messages
+                            case threshold(N, F, NewData3, conf) andalso not NewData3#bba_data.coin_sent of
+                                true ->
+                                    %% instantiate the common coin
+                                    %% TODO need more entropy for the SID
+                                    %% We have enough AUX and CONF messages to reveal our share of the coin
+                                    {CoinData, {send, CoinSend}} = hbbft_cc:get_coin(maybe_init_coin(NewData3)),
+                                    {NewData3#bba_data{coin=CoinData, coin_sent=true}, {send, ToSend2 ++ hbbft_utils:wrap({coin, Data#bba_data.round}, CoinSend)}};
+                                _ ->
+                                    {NewData3, {send, ToSend2}}
+                            end;
+                        FixedValue ->
+                            check_coin_flip(NewData3, FixedValue)
                     end;
                 false ->
                     {NewData3, {send, ToSend2}}
@@ -209,13 +189,18 @@ aux(Data = #bba_data{n=N, f=F}, Id, V) ->
     NewData = Data#bba_data{aux_witness = Witness},
     case threshold(N, F, NewData, aux) of
         true->
-            %% only send conf after n-f aux messages
-            case NewData#bba_data.conf_sent of
-                false ->
-                    {NewData#bba_data{conf_sent=true}, {send, [{multicast, {conf, NewData#bba_data.round, NewData#bba_data.bin_values}}]}};
-                true ->
-                    %% conf was already sent
-                    {NewData, ok}
+            case schedule(NewData#bba_data.round) of
+                coin ->
+                    %% only send conf after n-f aux messages
+                    case NewData#bba_data.conf_sent of
+                        false ->
+                            {NewData#bba_data{conf_sent=true}, {send, [{multicast, {conf, NewData#bba_data.round, NewData#bba_data.bin_values}}]}};
+                        true ->
+                            %% conf was already sent
+                            {NewData, ok}
+                    end;
+                FixedValue ->
+                    check_coin_flip(NewData, FixedValue)
             end;
         _ ->
             {NewData, ok}
@@ -316,8 +301,25 @@ deserialize(#bba_serialized_data{state=State,
 -spec threshold(pos_integer(), non_neg_integer(), bba_data(), aux | conf) -> boolean().
 threshold(N, F, Data, Msg) ->
     case Msg of
-        aux -> check(N, F, Data#bba_data.bin_values, Data#bba_data.aux_witness, fun subset/2);
+        aux -> check(N, F, Data#bba_data.bin_values, Data#bba_data.aux_witness);
         conf -> check(N, F, Data#bba_data.bin_values, Data#bba_data.conf_witness, fun subset/2)
+    end.
+
+-spec check(pos_integer(), non_neg_integer(), 0 | 1 | 2 | 3, #{non_neg_integer() => 0 | 1}) -> boolean().
+check(N, F, ToCheck, Witness) ->
+    case ToCheck of
+        0 ->
+            false;
+        1 ->
+            maps:get({val, 0}, Witness, 0) >= N - F;
+        2 ->
+            maps:get({val, 1}, Witness, 0) >= N - F;
+        3 ->
+            %% both
+            Both = maps:get({val, both}, Witness, 0),
+            Zeros = maps:get({val, 0}, Witness, 0),
+            Ones = maps:get({val, 1}, Witness, 0),
+            Both + (Zeros - Both) + (Ones - Both) >= N - F
     end.
 
 -spec check(pos_integer(), non_neg_integer(), 0 | 1 | 2 | 3, #{non_neg_integer() => 0 | 1}, fun((0|1|2|3, 0|1|2|3) -> boolean())) -> boolean().
@@ -366,4 +368,56 @@ val(2#10) -> 1.
 
 add_witness(Id, Value, Witness) ->
     Old = maps:get(Id, Witness, 0),
-    maps:put(Id, add(Value, Old), Witness).
+    New = add(Value, Old),
+    case Old /= New of
+        true when New == 3 ->
+            OldCount = maps:get({val, Value}, Witness, 0),
+            OldBothCount = maps:get({val, both}, Witness, 0),
+            maps:merge(Witness, #{{val, Value} => OldCount + 1, Id => New, {val, both} => OldBothCount + 1});
+        true  ->
+            OldCount = maps:get({val, Value}, Witness, 0),
+            maps:merge(Witness, #{{val, Value} => OldCount + 1, Id => New});
+        false ->
+            Witness
+    end.
+
+schedule(0) -> 1;
+schedule(1) -> 1;
+schedule(2) -> 0;
+schedule(3) -> 0;
+schedule(4) -> coin;
+schedule(N) ->
+    case (N - 5) rem 3 of
+        0 -> 1;
+        1 -> 0;
+        2 -> coin
+    end.
+
+check_coin_flip(Data, Flip) ->
+    case count(Data#bba_data.bin_values) == 1 of
+        true ->
+            %% if vals = {b}, then
+            B = val(Data#bba_data.bin_values),
+            Output = case Flip == B of
+                         true ->
+                             %% if (b = s%2) then output b
+                             B;
+                         false ->
+                             undefined
+                     end,
+            case B == Flip andalso Data#bba_data.output == B of
+                true ->
+                    %% we are done
+                    NewData = Data#bba_data{state=done},
+                    {NewData, {result, B}};
+                false ->
+                    %% increment round and continue
+                    NewData = init(Data#bba_data.secret_key, Data#bba_data.n, Data#bba_data.f),
+                    input(NewData#bba_data{round=Data#bba_data.round + 1, output=Output}, B)
+            end;
+        false ->
+            %% else estr+1 := s%2
+            B = Flip,
+            NewData = init(Data#bba_data.secret_key, Data#bba_data.n, Data#bba_data.f),
+            input(NewData#bba_data{round=Data#bba_data.round + 1}, B)
+    end.

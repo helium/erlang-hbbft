@@ -1,6 +1,6 @@
 -module(hbbft_test_utils).
 
--export([do_send_outer/4]).
+-export([do_send_outer/4, random_n/2]).
 
 do_send_outer(_Mod, [], States, Acc) ->
     {States, Acc};
@@ -32,3 +32,8 @@ do_send(Mod, {Id, {send, [{multicast, Msg}|T]}}, Acc, States) ->
     {NewStates, Results} = lists:unzip(Res),
     do_send(Mod, {Id, {send, T}}, Results ++ Acc, lists:ukeymerge(1, NewStates, States)).
 
+random_n(N, List) ->
+    lists:sublist(shuffle(List), N).
+
+shuffle(List) ->
+    [X || {_,X} <- lists:sort([{rand:uniform(), N} || N <- List])].
