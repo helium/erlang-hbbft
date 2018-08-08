@@ -4,6 +4,7 @@
          start_on_demand/1,
          input/2,
          finalize_round/3,
+         finalize_round/2,
          next_round/1,
          next_round/2,
          get_encrypted_key/2,
@@ -119,6 +120,14 @@ finalize_round(Data, TransactionsToRemove, ThingToSign) ->
     BinShare = hbbft_utils:share_to_binary(tpke_privkey:sign(Data#hbbft_data.secret_key, HashThing)),
     %% multicast the signature to everyone
     {Data#hbbft_data{thingtosign=HashThing, buf=NewBuf}, {send, [{multicast, {sign, Data#hbbft_data.round, BinShare}}]}}.
+
+%% does not require a signed message
+-spec finalize_round(hbbft_data(), [binary()])-> hbbft_data().
+finalize_round(Data, TransactionsToRemove) ->
+    NewBuf = lists:filter(fun(Item) ->
+                                  not lists:member(Item, TransactionsToRemove)
+                          end, Data#hbbft_data.buf),
+    Data#hbbft_data{buf=NewBuf}.
 
 %% The user has obtained a signature and is ready to go to the next round
 -spec next_round(hbbft_data()) -> {hbbft_data(), ok | {send, []}}.
