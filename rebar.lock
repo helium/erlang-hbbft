@@ -5,11 +5,11 @@
   0},
  {<<"erlang_pbc">>,
   {git,"https://github.com/helium/erlang_pbc.git",
-       {ref,"6ad17668ef9bc8ac4be465e9011cbca49df32a34"}},
+       {ref,"de0aefe5ef014c6604c814163647d9bb1559a86f"}},
   1},
  {<<"erlang_tpke">>,
   {git,"https://github.com/helium/erlang_tpke.git",
-       {ref,"c62734c1f1bfa0990bf179ec28d2f780fb96427d"}},
+       {ref,"86f95bb1a6df20c53d454616d49c17cc84e1256d"}},
   0},
  {<<"merkerl">>,{pkg,<<"merkerl">>,<<"1.0.1">>},0}]}.
 [
