@@ -109,7 +109,7 @@ connect(_, Node, _Auto) ->
     attempt_connect(Node).
 
 attempt_connect(Node) ->
-    case net_kernel:connect(Node) of
+    case net_kernel:connect_node(Node) of
         false ->
             {error, not_reachable};
         true ->
