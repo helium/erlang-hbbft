@@ -114,7 +114,7 @@ handle_msg(Data = #acs_data{n=N, f=F}, J, {{bba, I}, BBAMsg}) ->
     case hbbft_bba:handle_msg(BBA#bba_state.bba_data, J, BBAMsg) of
         {NewBBA, {send, ToSend}} ->
             {store_bba_state(Data, I, NewBBA), {send, hbbft_utils:wrap({bba, I}, ToSend)}};
-        {NewBBA, {result, B}} ->
+        {NewBBA, {result_and_send, B, {send, ToSend0}}} ->
             NewData = store_bba_state(store_bba_result(Data, I, B), I, NewBBA),
             %% Figure4, Bullet3
             %% upon delivery of value 1 from at least N − f instances of BA , provide input 0 to each instance of BA that has not yet been provided input.
@@ -135,7 +135,7 @@ handle_msg(Data = #acs_data{n=N, f=F}, J, {{bba, I}, BBAMsg}) ->
                                                                   true ->
                                                                       Acc
                                                               end
-                                                      end, {NewData, []}, lists:seq(0, N - 1)),
+                                                      end, {NewData, hbbft_utils:wrap({bba, I}, ToSend0)}, lists:seq(0, N - 1)),
                     %% each BBA is independant, so the total ordering here is unimportant
                     {NextData#acs_data{done=true}, {send, lists:flatten(Replies)}};
                 false ->
