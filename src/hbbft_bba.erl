@@ -12,8 +12,8 @@
           f :: non_neg_integer(),
           n :: pos_integer(),
           %% XXX I think some of these witnesses can hold more values...
-          bval_witness = maps:new() :: #{non_neg_integer() => 0 | 1},
-          aux_witness = maps:new() :: #{non_neg_integer() => 0 | 1},
+          bval_witness = maps:new() :: #{non_neg_integer() => 0 | 1 | 2 | 3},
+          aux_witness = maps:new() :: #{non_neg_integer() => 0 | 1 | 2 | 3},
           conf_witness = maps:new() :: #{non_neg_integer() => 0 | 1},
           terminate_witness = maps:new() :: #{non_neg_integer() => 0 | 1},
           aux_sent = false :: boolean(),
@@ -47,10 +47,11 @@
 -type bval_msg() :: {bval, non_neg_integer(), 0 | 1}.
 -type aux_msg() :: {aux, non_neg_integer(), 0 | 1}.
 -type conf_msg() :: {conf, non_neg_integer(), 0 | 1}.
+-type term_msg() :: {term, 0 | 1}.
 -type coin_msg() :: {{coin, non_neg_integer()}, hbbft_cc:share_msg()}.
 -type msgs() :: bval_msg() | aux_msg() | conf_msg() | coin_msg().
 
--export_type([bba_data/0, bba_serialized_data/0, bval_msg/0, aux_msg/0, coin_msg/0, msgs/0, conf_msg/0]).
+-export_type([bba_data/0, bba_serialized_data/0, bval_msg/0, aux_msg/0, coin_msg/0, term_msg/0, msgs/0, conf_msg/0]).
 
 -spec status(bba_data()) -> map().
 status(BBAData) ->
@@ -89,7 +90,7 @@ input(Data = #bba_data{state=done}, _BInput) ->
                  conf_msg()) -> {bba_data(), ok} |
                                 {bba_data(), defer} |
                                 {bba_data(), {send, [hbbft_utils:multicast(bval_msg() | aux_msg() | conf_msg() | coin_msg())]}} |
-                                {bba_data(), {result, 0 | 1}}.
+                                {bba_data(), {result_and_send, 0 | 1, {send, [hbbft_utils:multicast(term_msg())]}}}.
 handle_msg(Data = #bba_data{state=done}, _J, _BInput) ->
     {Data, ok};
 handle_msg(Data = #bba_data{round=R}, J, {bval, R, V}) ->
@@ -143,7 +144,7 @@ handle_msg(Data, _J, _Msg) ->
 -spec bval(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), {send, [hbbft_utils:multicast(aux_msg() | coin_msg())]}}.
 bval(Data=#bba_data{n=N, f=F}, Id, V) ->
     %% add to witnesses
-    Witness = add_witness(Id, V, Data#bba_data.bval_witness, false),
+    Witness = add_witness(Id, V, Data#bba_data.bval_witness, true),
     WitnessCount = maps:get({val, V}, Witness, 0),
 
     {NewData, ToSend} = case WitnessCount >= F+1 andalso not has(V, Data#bba_data.broadcasted) of
@@ -348,7 +349,7 @@ check(N, F, ToCheck, Map, Terms, Fun) ->
                               Acc + 1;
                           false -> Acc
                       end
-              end, 0, maps:append(Map, Terms)) >= N - F.
+              end, 0, maps:merge(Map, Terms)) >= N - F.
 
 maybe_init_coin(Data) ->
     case Data#bba_data.coin of
