@@ -11,10 +11,10 @@
           output :: undefined | 0 | 1,
           f :: non_neg_integer(),
           n :: pos_integer(),
-          %% XXX I think some of these witnesses can hold more values...
-          bval_witness = maps:new() :: #{non_neg_integer() => 0 | 1 | 2 | 3},
-          aux_witness = maps:new() :: #{non_neg_integer() => 0 | 1 | 2 | 3},
-          conf_witness = maps:new() :: #{non_neg_integer() => 0 | 1},
+          %% XXX some of these also have the {val, _} keys...
+          bval_witness = maps:new() :: #{non_neg_integer() => 0 | 1 | 2 | 3, {val, 0 | 1 | both} => non_neg_integer()},
+          aux_witness = maps:new() :: #{non_neg_integer() => 0 | 1 | 2 | 3, {val, 0 | 1 | both} => non_neg_integer()},
+          conf_witness = maps:new() :: #{non_neg_integer() => 0 | 1 | 2 | 3},
           terminate_witness = maps:new() :: #{non_neg_integer() => 0 | 1},
           aux_sent = false :: boolean(),
           conf_sent = false :: boolean(),
@@ -117,7 +117,7 @@ handle_msg(Data = #bba_data{round=R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin
         {_NewCoin, {result, Result}} ->
             %% ok, we've obtained the common coin
             Flip = Result rem 2,
-            check_coin_flip(Data, Flip);
+            check_coin_flip({Data, []}, Flip);
         {NewCoin, ok} ->
             {Data#bba_data{coin=NewCoin}, ok}
     end;
@@ -133,8 +133,8 @@ handle_msg(Data, J, {term, B}) when B == 0; B == 1 ->
         Count when Count >= Data#bba_data.f + 1 ->
             {NewData#bba_data{state=done}, {result_and_send, B, {send, [{multicast, {term, B}}]}}};
         _ ->
-            %% TODO we need to check bval/aux/conf message thresholds in light of the new TERM message
-            {NewData, ok}
+            %% we need to check bval/aux/conf message thresholds in light of the new TERM message
+            decide(NewData, [])
     end;
 handle_msg(Data, _J, _Msg) ->
     {Data, ok}.
@@ -142,7 +142,7 @@ handle_msg(Data, _J, _Msg) ->
 %% – upon receiving BVALr (b) messages from f + 1 nodes, if
 %% BVALr (b) has not been sent, multicast BVALr (b)
 -spec bval(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), {send, [hbbft_utils:multicast(aux_msg() | coin_msg())]}}.
-bval(Data=#bba_data{n=N, f=F}, Id, V) ->
+bval(Data=#bba_data{f=F}, Id, V) ->
     %% add to witnesses
     Witness = add_witness(Id, V, Data#bba_data.bval_witness, true),
     WitnessCount = maps:get({val, V}, Witness, 0),
@@ -172,75 +172,22 @@ bval(Data=#bba_data{n=N, f=F}, Id, V) ->
                                       false ->
                                           {NewData2, ToSend}
                                   end,
-
-            %% check if we have n-f aux messages
-            case threshold(N, F, NewData3, aux) of
-                true ->
-                    case schedule(NewData3#bba_data.round) of
-                        coin ->
-                            %% check if we have n-f conf messages
-                            case threshold(N, F, NewData3, conf) andalso not NewData3#bba_data.coin_sent of
-                                true ->
-                                    %% instantiate the common coin
-                                    %% TODO need more entropy for the SID
-                                    %% We have enough AUX and CONF messages to reveal our share of the coin
-                                    {CoinData, {send, CoinSend}} = hbbft_cc:get_coin(maybe_init_coin(NewData3)),
-                                    {NewData3#bba_data{coin=CoinData, coin_sent=true}, {send, ToSend2 ++ hbbft_utils:wrap({coin, Data#bba_data.round}, CoinSend)}};
-                                _ ->
-                                    {NewData3, {send, ToSend2}}
-                            end;
-                        FixedValue ->
-                            check_coin_flip(NewData3, FixedValue)
-                    end;
-                false ->
-                    {NewData3, {send, ToSend2}}
-            end;
+            decide(NewData3, ToSend2);
         false ->
             {NewData, {send, ToSend}}
     end.
 
 -spec aux(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), ok | {send, [hbbft_utils:multicast(conf_msg())]}}.
-aux(Data = #bba_data{n=N, f=F}, Id, V) ->
+aux(Data, Id, V) ->
     Witness = add_witness(Id, V, Data#bba_data.aux_witness, true),
     NewData = Data#bba_data{aux_witness = Witness},
-    case threshold(N, F, NewData, aux) of
-        true->
-            case schedule(NewData#bba_data.round) of
-                coin ->
-                    %% only send conf after n-f aux messages
-                    case NewData#bba_data.conf_sent of
-                        false ->
-                            {NewData#bba_data{conf_sent=true}, {send, [{multicast, {conf, NewData#bba_data.round, NewData#bba_data.bin_values}}]}};
-                        true ->
-                            %% conf was already sent
-                            {NewData, ok}
-                    end;
-                FixedValue ->
-                    check_coin_flip(NewData, FixedValue)
-            end;
-        _ ->
-            {NewData, ok}
-    end.
+    decide(NewData, []).
 
 -spec conf(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), ok | {send, [hbbft_utils:multicast(coin_msg())]}}.
-conf(Data = #bba_data{n=N, f=F}, Id, V) ->
+conf(Data, Id, V) ->
     Witness = maps:put(Id, V, Data#bba_data.conf_witness),
     NewData = Data#bba_data{conf_witness = Witness},
-    case threshold(N, F, NewData, aux) of
-        true->
-            case threshold(N, F, NewData, conf) andalso not NewData#bba_data.coin_sent of
-                true ->
-                    %% instantiate the common coin
-                    %% TODO need more entropy for the SID
-                    %% We have enough AUX and CONF messages to reveal our share of the coin
-                    {CoinData, {send, ToSend}} = hbbft_cc:get_coin(maybe_init_coin(NewData)),
-                    {NewData#bba_data{coin=CoinData, coin_sent=true}, {send, hbbft_utils:wrap({coin, NewData#bba_data.round}, ToSend)}};
-                _ ->
-                    {NewData, ok}
-            end;
-        _ ->
-            {NewData, ok}
-    end.
+    decide(NewData, []).
 
 -spec serialize(bba_data()) -> bba_serialized_data().
 serialize(#bba_data{state=State,
@@ -313,6 +260,39 @@ deserialize(#bba_serialized_data{state=State,
 
 
 %% helper functions
+
+
+decide(Data=#bba_data{n=N, f=F}, ToSend0) ->
+    %% check if we have n-f aux messages
+    case threshold(N, F, Data, aux) of
+        true ->
+            case schedule(Data#bba_data.round) of
+                coin ->
+                    %% only send conf after n-f aux messages
+                    {NewData, ToSend} = case Data#bba_data.conf_sent of
+                                              false ->
+                                                  {Data#bba_data{conf_sent=true}, ToSend0 ++ [{multicast, {conf, Data#bba_data.round, Data#bba_data.bin_values}}]};
+                                              true ->
+                                                  %% conf was already sent
+                                                  {Data, ToSend0}
+                                          end,
+                    %% check if we have n-f conf messages
+                    case threshold(N, F, NewData, conf) andalso not NewData#bba_data.coin_sent of
+                        true ->
+                            %% instantiate the common coin
+                            %% TODO need more entropy for the SID
+                            %% We have enough AUX and CONF messages to reveal our share of the coin
+                            {CoinData, {send, CoinSend}} = hbbft_cc:get_coin(maybe_init_coin(NewData)),
+                            {NewData#bba_data{coin=CoinData, coin_sent=true}, {send, ToSend ++ hbbft_utils:wrap({coin, NewData#bba_data.round}, CoinSend)}};
+                        _ ->
+                            {NewData, {send, ToSend}}
+                    end;
+                FixedValue ->
+                    check_coin_flip({Data, ToSend0}, FixedValue)
+            end;
+        false ->
+            {Data, {send, ToSend0}}
+    end.
 
 -spec threshold(pos_integer(), non_neg_integer(), bba_data(), aux | conf) -> boolean().
 threshold(N, F, Data, Msg) ->
@@ -447,7 +427,7 @@ schedule(N) ->
         2 -> coin
     end.
 
-check_coin_flip(Data, Flip) ->
+check_coin_flip({Data, ToSend}, Flip) ->
     case count(Data#bba_data.bin_values) == 1 of
         true ->
             %% if vals = {b}, then
@@ -463,15 +443,17 @@ check_coin_flip(Data, Flip) ->
                 true ->
                     %% we are done
                     NewData = Data#bba_data{state=done},
-                    {NewData, {result_and_send, B, {send, [{multicast, {term, B}}]}} };
+                    {NewData, {result_and_send, B, {send, ToSend ++ [{multicast, {term, B}}]}} };
                 false ->
                     %% increment round and continue
                     NewData = init(Data#bba_data.secret_key, Data#bba_data.n, Data#bba_data.f),
-                    input(NewData#bba_data{round=Data#bba_data.round + 1, output=Output, terminate_witness=Data#bba_data.terminate_witness}, B)
+                    {NewData2, {send, NewToSend}} = input(NewData#bba_data{round=Data#bba_data.round + 1, output=Output, terminate_witness=Data#bba_data.terminate_witness}, B),
+                    {NewData2, {send, ToSend ++ NewToSend}}
             end;
         false ->
             %% else estr+1 := s%2
             B = Flip,
             NewData = init(Data#bba_data.secret_key, Data#bba_data.n, Data#bba_data.f),
-            input(NewData#bba_data{round=Data#bba_data.round + 1, terminate_witness=Data#bba_data.terminate_witness}, B)
+            {NewData2, {send, NewToSend}} = input(NewData#bba_data{round=Data#bba_data.round + 1, terminate_witness=Data#bba_data.terminate_witness}, B),
+            {NewData2, {send, ToSend ++ NewToSend}}
     end.
