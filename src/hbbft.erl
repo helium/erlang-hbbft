@@ -193,25 +193,30 @@ handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
             {I, Enc} = lists:keyfind(I, 1, Data#hbbft_data.acs_results),
             EncKey = get_encrypted_key(Data#hbbft_data.secret_key, Enc),
             %% TODO verify the shares with verify_share/3
-            DecKey = tpke_pubkey:combine_shares(tpke_privkey:public_key(Data#hbbft_data.secret_key), EncKey, SharesForThisBundle),
-            case decrypt(DecKey, Enc) of
-                error ->
+            case tpke_pubkey:combine_shares(tpke_privkey:public_key(Data#hbbft_data.secret_key), EncKey, SharesForThisBundle) of
+                undefined ->
+                    %% can't recover the key
                     {Data#hbbft_data{dec_shares=NewShares}, ok};
-                Decrypted ->
-                    NewDecrypted = maps:put(I, binary_to_term(Decrypted), Data#hbbft_data.decrypted),
-                    case maps:size(NewDecrypted) == length(Data#hbbft_data.acs_results) andalso not Data#hbbft_data.sent_txns of
-                        true ->
-                            %% we did it!
-                            %% Combine all unique messages into a single list
-                            TransactionsThisRound = lists:usort(lists:flatten(maps:values(NewDecrypted))),
-                            %% return the transactions we agreed on to the user
-                            %% we have no idea which transactions are valid, invalid, out of order or missing
-                            %% causal context (eg. a nonce is not monotonic) so we return them to the user to let them
-                            %% figure it out. We expect the user to call finalize_round/3 once they've decided what they want to accept
-                            %% from this set of transactions.
-                            {Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted, sent_txns=true}, {result, {transactions, TransactionsThisRound}}};
-                        false ->
-                            {Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted}, ok}
+                DecKey ->
+                    case decrypt(DecKey, Enc) of
+                        error ->
+                            {Data#hbbft_data{dec_shares=NewShares}, ok};
+                        Decrypted ->
+                            NewDecrypted = maps:put(I, binary_to_term(Decrypted), Data#hbbft_data.decrypted),
+                            case maps:size(NewDecrypted) == length(Data#hbbft_data.acs_results) andalso not Data#hbbft_data.sent_txns of
+                                true ->
+                                    %% we did it!
+                                    %% Combine all unique messages into a single list
+                                    TransactionsThisRound = lists:usort(lists:flatten(maps:values(NewDecrypted))),
+                                    %% return the transactions we agreed on to the user
+                                    %% we have no idea which transactions are valid, invalid, out of order or missing
+                                    %% causal context (eg. a nonce is not monotonic) so we return them to the user to let them
+                                    %% figure it out. We expect the user to call finalize_round/3 once they've decided what they want to accept
+                                    %% from this set of transactions.
+                                    {Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted, sent_txns=true}, {result, {transactions, TransactionsThisRound}}};
+                                false ->
+                                    {Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted}, ok}
+                            end
                     end
             end;
         false ->
