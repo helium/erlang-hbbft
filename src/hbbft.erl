@@ -7,6 +7,7 @@
          finalize_round/2,
          next_round/1,
          next_round/2,
+         round/1,
          get_encrypted_key/2,
          encrypt/2,
          decrypt/2,
@@ -153,6 +154,10 @@ next_round(Data = #hbbft_data{secret_key=SK, n=N, f=F, j=J, buf=Buf}, Transactio
                               dec_shares=#{}, decrypted=#{}, buf=NewBuf,
                               sig_shares=#{}, thingtosign=undefined},
     maybe_start_acs(NewData).
+
+-spec round(hbbft_data()) -> non_neg_integer().
+round(_Data=#hbbft_data{round=Round}) ->
+    Round.
 
 -spec handle_msg(hbbft_data(), non_neg_integer(), acs_msg() | dec_msg() | sign_msg()) -> {hbbft_data(), ok |
                                                                                           defer |
