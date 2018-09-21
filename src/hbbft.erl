@@ -6,7 +6,7 @@
          finalize_round/3,
          finalize_round/2,
          next_round/1,
-         next_round/2,
+         next_round/3,
          round/1,
          get_encrypted_key/2,
          encrypt/2,
@@ -141,14 +141,14 @@ next_round(Data = #hbbft_data{secret_key=SK, n=N, f=F, j=J}) ->
                               sig_shares=#{}, thingtosign=undefined},
     maybe_start_acs(NewData).
 
--spec next_round(hbbft_data(), [binary()]) -> {hbbft_data(), ok | {send, []}}.
-next_round(Data = #hbbft_data{secret_key=SK, n=N, f=F, j=J, buf=Buf}, TransactionsToRemove) ->
+-spec next_round(hbbft_data(), pos_integer(), [binary()]) -> {hbbft_data(), ok | {send, []}}.
+next_round(Data = #hbbft_data{secret_key=SK, n=N, f=F, j=J, buf=Buf}, NextRound, TransactionsToRemove) ->
     %% remove the request transactions
     NewBuf = lists:filter(fun(Item) ->
                                   not lists:member(Item, TransactionsToRemove)
                           end, Buf),
     %% reset all the round-dependant bits of the state and increment the round
-    NewData = Data#hbbft_data{round=Data#hbbft_data.round + 1, acs=hbbft_acs:init(SK, N, F, J),
+    NewData = Data#hbbft_data{round=NextRound, acs=hbbft_acs:init(SK, N, F, J),
                               acs_init=false, acs_results=[],
                               sent_txns=false, sent_sig=false,
                               dec_shares=#{}, decrypted=#{}, buf=NewBuf,
