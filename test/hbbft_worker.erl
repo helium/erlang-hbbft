@@ -137,7 +137,7 @@ handle_info(Msg, State) ->
 dispatch({NewHBBFT, {send, ToSend}}, State) ->
     do_send(ToSend, State),
     State#state{hbbft=maybe_serialize_HBBFT(NewHBBFT, State#state.to_serialize)};
-dispatch({NewHBBFT, {result, {transactions, Txns}}}, State) ->
+dispatch({NewHBBFT, {result, {transactions, _, Txns}}}, State) ->
     NewBlock = case State#state.blocks of
                    [] ->
                        %% genesis block
