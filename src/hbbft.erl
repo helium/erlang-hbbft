@@ -38,7 +38,7 @@
           sig_shares = #{} :: #{non_neg_integer() => {non_neg_integer(), erlang_pbc:element()}},
           thingtosign :: undefined | erlang_pbc:element(),
           stampfun :: undefined | {atom(), atom(), list()},
-          stamps = [] :: list()
+          stamps = [] :: [{non_neg_integer(), any()}]
          }).
 
 -record(hbbft_serialized_data, {
@@ -59,7 +59,7 @@
           dec_shares = #{} :: #{non_neg_integer() => {non_neg_integer(), binary()}},
           thingtosign :: undefined | binary(),
           stampfun :: undefined | {atom(), atom(), list()},
-          stamps = [] :: list()
+          stamps = [] :: [{non_neg_integer(), any()}]
          }).
 
 -type hbbft_data() :: #hbbft_data{}.
