@@ -112,7 +112,7 @@ one_actor_no_txns_test(Config) ->
     DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
     %% check all N actors returned the same result
     ?assertEqual(1, sets:size(DistinctResults)),
-    {_, AcceptedMsgs} = lists:unzip(lists:flatten(sets:to_list(DistinctResults))),
+    {_, _, AcceptedMsgs} = lists:unzip3(lists:flatten(sets:to_list(DistinctResults))),
     %% check all the Msgs are actually from the original set
     ?assert(sets:is_subset(sets:from_list(lists:flatten(AcceptedMsgs)), sets:from_list(Msgs))),
     ok.
@@ -174,7 +174,7 @@ one_actor_missing_test(Config) ->
     DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
     %% check all N actors returned the same result
     ?assertEqual(1, sets:size(DistinctResults)),
-    {_, AcceptedMsgs} = lists:unzip(lists:flatten(sets:to_list(DistinctResults))),
+    {_, _, AcceptedMsgs} = lists:unzip3(lists:flatten(sets:to_list(DistinctResults))),
     %% check all the Msgs are actually from the original set
     ?assert(sets:is_subset(sets:from_list(lists:flatten(AcceptedMsgs)), sets:from_list(Msgs))),
     ok.
