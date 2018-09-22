@@ -81,6 +81,8 @@ status(HBBFTData) ->
       sent_txns => HBBFTData#hbbft_data.sent_txns,
       sent_sig => HBBFTData#hbbft_data.sent_sig,
       acs_results => length(HBBFTData#hbbft_data.acs_results),
+      decryption_shares => group_by(maps:keys(HBBFTData#hbbft_data.dec_shares)),
+      decrypted => maps:size(HBBFTData#hbbft_data.decrypted),
       j => HBBFTData#hbbft_data.j
      }.
 
@@ -443,3 +445,11 @@ serialize_hbbft_data(#hbbft_data{batch_size=BatchSize,
 -spec is_serialized(hbbft_data() | hbbft_serialized_data()) -> boolean().
 is_serialized(Data) when is_record(Data, hbbft_serialized_data) -> true;
 is_serialized(Data) when is_record(Data, hbbft_data) -> false.
+
+group_by(Tuples) ->
+    group_by(Tuples, dict:new()).
+
+group_by([], D) ->
+    lists:keysort(1, [{K, lists:sort(V)} || {K, V} <- dict:to_list(D)]);
+group_by([{K, V}|T], D) ->
+    group_by(T, dict:append(K, V, D)).
