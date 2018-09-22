@@ -359,7 +359,9 @@ deserialize(#hbbft_serialized_data{batch_size=BatchSize,
                                    decrypted=Decrypted,
                                    sig_shares=SigShares,
                                    dec_shares=DecShares,
-                                   thingtosign=ThingToSign}, SK) ->
+                                   thingtosign=ThingToSign,
+                                   stampfun=Stampfun,
+                                   stamps=Stamps}, SK) ->
 
     NewThingToSign = case ThingToSign of
                          undefined -> undefined;
@@ -381,7 +383,9 @@ deserialize(#hbbft_serialized_data{batch_size=BatchSize,
                 decrypted=Decrypted,
                 dec_shares=deserialize_shares(DecShares, SK),
                 sig_shares=deserialize_shares(SigShares, SK),
-                thingtosign=NewThingToSign}.
+                thingtosign=NewThingToSign,
+                stampfun=Stampfun,
+                stamps=Stamps}.
 
 %% TODO: better spec for this
 -spec serialize_shares(#{}) -> #{}.
@@ -408,7 +412,9 @@ serialize_hbbft_data(#hbbft_data{batch_size=BatchSize,
                                  dec_shares=DecShares,
                                  sig_shares=SigShares,
                                  decrypted=Decrypted,
-                                 thingtosign=ThingToSign}) ->
+                                 thingtosign=ThingToSign,
+                                 stampfun=Stampfun,
+                                 stamps=Stamps}) ->
 
     NewThingToSign = case ThingToSign of
                          undefined -> undefined;
