@@ -39,8 +39,8 @@
 -spec status(rbc_data()) -> map().
 status(RBCData) ->
     #{state => RBCData#rbc_data.state,
-      num_echoes => length(maps:values(RBCData#rbc_data.num_echoes)),
-      num_readies => length(maps:values(RBCData#rbc_data.num_readies)),
+      echoes => maps:values(RBCData#rbc_data.num_echoes),
+      readies => maps:values(RBCData#rbc_data.num_readies),
       ready_sent => RBCData#rbc_data.ready_sent,
       leader => RBCData#rbc_data.leader
      }.

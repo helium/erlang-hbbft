@@ -58,7 +58,8 @@
 
 -spec status(acs_data()) -> map().
 status(ACSData) ->
-    #{rbc => maps:map(fun(_K, #rbc_state{rbc_data=RBCData, result=R}) -> #{rbc => hbbft_rbc:status(RBCData), result => is_binary(R)} end, ACSData#acs_data.rbc),
+    #{acs_done => ACSData#acs_data.done,
+      rbc => maps:map(fun(_K, #rbc_state{rbc_data=RBCData, result=R}) -> #{rbc => hbbft_rbc:status(RBCData), result => is_binary(R)} end, ACSData#acs_data.rbc),
       bba => maps:map(fun(_K, #bba_state{bba_data=BBAData, result=R, input=I}) -> #{bba => hbbft_bba:status(BBAData), result => R, input => I} end, ACSData#acs_data.bba)}.
 
 -spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer(), non_neg_integer()) -> acs_data().
