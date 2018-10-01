@@ -63,15 +63,16 @@ init_test(Config) ->
                                   [W | Acc]
                           end, [], hbbft_test_utils:enumerate(PrivateKeys)),
 
-    ct:pal("Worker: ~p", [Workers]),
+    ct:pal("Workers: ~p", [Workers]),
 
     Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*20)],
     %% feed the badgers some msgs
     lists:foreach(fun(Msg) ->
                           Destinations = hbbft_test_utils:random_n(rand:uniform(N), Workers),
-                          io:format("destinations ~p~n", [Destinations]),
                           [ok = hbbft_worker:submit_transaction(Msg, D) || D <- Destinations]
                   end, Msgs),
+
+    timer:sleep(timer:seconds(60)),
 
     %% %% wait for all the worker's mailboxes to settle and
     %% %% wait for the chains to converge
