@@ -1,6 +1,6 @@
 -module(hbbft_test_utils).
 
--export([do_send_outer/4, random_n/2]).
+-export([do_send_outer/4, random_n/2, enumerate/1, merge_replies/3]).
 
 do_send_outer(_Mod, [], States, Acc) ->
     {States, Acc};
@@ -39,3 +39,25 @@ random_n(N, List) ->
 
 shuffle(List) ->
     [X || {_,X} <- lists:sort([{rand:uniform(), N} || N <- List])].
+
+enumerate(List) ->
+    lists:zip(lists:seq(1, length(List)), List).
+
+merge_replies(N, NewReplies, Replies) when N < 0 orelse length(NewReplies) == 0 ->
+    Replies;
+merge_replies(N, NewReplies, Replies) ->
+    case lists:keyfind(N, 1, NewReplies) of
+        false ->
+            merge_replies(N-1, lists:keydelete(N, 1, NewReplies), Replies);
+        {N, ok} ->
+            merge_replies(N-1, lists:keydelete(N, 1, NewReplies), Replies);
+        {N, {send, ToSend}} ->
+            NewSend = case lists:keyfind(N, 1, Replies) of
+                          false ->
+                              {N, {send, ToSend}};
+                          {N, OldSend} ->
+                              {N, {send, OldSend ++ ToSend}}
+                      end,
+            merge_replies(N-1, lists:keydelete(N, 1, NewReplies), lists:keystore(N, 1, Replies, NewSend))
+    end.
+
