@@ -26,8 +26,6 @@ init(HBBFTArgs) ->
 
     {ok, #state{hbbft=HBBFT}}.
 
-handle_command({txn, Txn}, State) ->
-
 handle_command(Msg, State) ->
     io:format("handle_command, Msg: ~p", [Msg]),
     {reply, ok, [], State}.
