@@ -46,13 +46,15 @@ handle_command(start_on_demand, State) ->
         {HBBFT, already_started} ->
             {reply, {error, already_started}, [], State#state{hbbft=HBBFT}};
         {HBBFT, {send, ToSend}} ->
+            %ct:pal("started hbbft on demand", []),
             {reply, ok, fixup_msgs(ToSend), State#state{hbbft=HBBFT}}
     end;
-handle_command(Msg, State) ->
-    ct:pal("unhandled handle_command, Msg: ~p", [Msg]),
+handle_command(_Msg, State) ->
+    %ct:pal("unhandled handle_command, Msg: ~p", [_Msg]),
     {reply, ok, [], State}.
 
 handle_message(Msg, Actor, State) ->
+    %ct:pal("Msg ~p", [binary_to_term(Msg)]),
     case hbbft:handle_msg(State#state.hbbft, Actor-1, binary_to_term(Msg)) of
         {HBBFT, ok} ->
             {State#state{hbbft=HBBFT}, []};

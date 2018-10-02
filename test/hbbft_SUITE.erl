@@ -25,7 +25,7 @@ all() ->
      start_on_demand_test
     ].
 
-init_per_testcase(_, Config) ->
+init_per_testcase(TestCase, Config) ->
     N = 5,
     F = N div 4,
     Module = hbbft,
@@ -39,7 +39,7 @@ init_per_testcase(_, Config) ->
      {module, Module},
      {pubkey, PubKey},
      {privatekeys, PrivateKeys},
-     {data_dir, "data"} | Config].
+     {data_dir, atom_to_list(TestCase)++"data"} | Config].
 
 end_per_testcase(_, _Config) ->
     ok.
@@ -48,6 +48,7 @@ init_test(Config) ->
     PubKey = proplists:get_value(pubkey, Config),
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
+    DataDir = proplists:get_value(data_dir, Config),
     BatchSize = proplists:get_value(batchsize, Config),
 
     PrivateKeys = proplists:get_value(privatekeys, Config),
@@ -58,6 +59,7 @@ init_test(Config) ->
                                                                      {sk, tpke_privkey:serialize(SK)},
                                                                      {n, N},
                                                                      {f, F},
+                                                                     {data_dir, DataDir},
                                                                      {batchsize, BatchSize}
                                                                     ]),
                                   [W | Acc]
@@ -100,6 +102,7 @@ init_test(Config) ->
     %% check they're all members of the original message list
     true = sets:is_subset(sets:from_list(BlockTxns), sets:from_list(Msgs)),
     ct:pal("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
+    [gen_server:stop(W) || W <- Workers],
     ok.
 
 one_actor_no_txns_test(Config) ->
@@ -241,6 +244,7 @@ start_on_demand_test(Config) ->
     PubKey = proplists:get_value(pubkey, Config),
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
+    DataDir = proplists:get_value(data_dir, Config),
     BatchSize = proplists:get_value(batchsize, Config),
 
     PrivateKeys = proplists:get_value(privatekeys, Config),
@@ -251,6 +255,7 @@ start_on_demand_test(Config) ->
                                                                      {sk, tpke_privkey:serialize(SK)},
                                                                      {n, N},
                                                                      {f, F},
+                                                                     {data_dir, DataDir},
                                                                      {batchsize, BatchSize}
                                                                     ]),
                                   [W | Acc]
@@ -262,6 +267,7 @@ start_on_demand_test(Config) ->
     Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*20)],
 
     KnownMsg = crypto:strong_rand_bytes(128),
+
     %% feed the badgers some msgs
     lists:foreach(fun(Msg) ->
                           Destinations = hbbft_test_utils:random_n(rand:uniform(length(RemainingWorkers)), RemainingWorkers),
@@ -275,7 +281,7 @@ start_on_demand_test(Config) ->
 
     %% wait for all the worker's mailboxes to settle and
     %% wait for the chains to converge
-    ok = hbbft_ct_utils:wait_until(fun() ->
+    WaitRes = hbbft_ct_utils:wait_until(fun() ->
                                            Chains = sets:from_list(lists:map(fun(W) ->
                                                                                      {ok, Blocks} = hbbft_worker:get_blocks(W),
                                                                                      Blocks
@@ -285,6 +291,17 @@ start_on_demand_test(Config) ->
                                            1 == sets:size(Chains) andalso
                                            0 /= length(hd(sets:to_list(Chains)))
                                    end, 60*2, 500),
+    case WaitRes of
+        ok ->
+            ok;
+        _ ->
+            [begin
+                 {_State, Inbound, Outbound} = hbbft_worker:relcast_status(W),
+                 ct:pal("~p Inbound : ~p", [W, [{K, binary_to_term(V)} || {K, V} <- Inbound]]),
+                 ct:pal("~p Outbound : ~p", [W, maps:map(fun(_K, V) -> [binary_to_term(X) || X <- V] end, Outbound)])
+             end || W <- Workers ],
+             ok = WaitRes
+    end,
 
 
     Chains = sets:from_list(lists:map(fun(W) ->
@@ -303,5 +320,6 @@ start_on_demand_test(Config) ->
     %% check they're all members of the original message list
     true = sets:is_subset(sets:from_list(BlockTxns), sets:from_list([KnownMsg | Msgs])),
     io:format("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
+    [gen_server:stop(W) || W <- Workers],
     ok.
 

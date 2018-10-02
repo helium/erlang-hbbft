@@ -15,7 +15,7 @@
 
 %% common test callbacks
 
-all() -> [simple_test, serialization_test].
+all() -> [simple_test].%, serialization_test].
 
 init_per_suite(Config) ->
     os:cmd(os:find_executable("epmd")++" -daemon"),
@@ -41,7 +41,7 @@ init_per_testcase(TestCase, Config) ->
     _ = [hbbft_ct_utils:connect(Node) || Node <- NodeNames],
 
     {ok, _} = ct_cover:add_nodes(Nodes),
-    [{nodes, Nodes} | Config].
+    [{nodes, Nodes}, {data_dir, atom_to_list(TestCase)++"data"} | Config].
 
 end_per_testcase(_TestCase, Config) ->
     Nodes = proplists:get_value(nodes, Config),
@@ -52,6 +52,7 @@ end_per_testcase(_TestCase, Config) ->
 
 simple_test(Config) ->
     Nodes = proplists:get_value(nodes, Config),
+    DataDir = proplists:get_value(data_dir, Config),
 
     %% master starts the dealer
     N = length(Nodes),
@@ -74,7 +75,7 @@ simple_test(Config) ->
     Workers = [{Node, ct_rpc:call(Node,
                                hbbft_worker,
                                start_link,
-                               [[{id, I}, {sk, tpke_privkey:serialize(SK)}, {n, N}, {f, F}, {batchsize, BatchSize}]]
+                               [[{id, I}, {sk, tpke_privkey:serialize(SK)}, {n, N}, {f, F}, {batchsize, BatchSize}, {data_dir, DataDir}]]
                               )} || {I, {Node, SK}} <- hbbft_test_utils:enumerate(NodesSKs)],
     ok = global:sync(),
 
