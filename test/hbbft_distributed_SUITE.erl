@@ -66,11 +66,16 @@ simple_test(Config) ->
     %% load hbbft_worker on each node
     {Mod, Bin, _} = code:get_object_code(hbbft_worker),
     _ = hbbft_ct_utils:pmap(fun(Node) ->
-                                    rpc:call(Node, erlang, load_module, [Mod, Bin])
+                                    ct_rpc:call(Node, erlang, load_module, [Mod, Bin]),
+                                    ct_rpc:call(Node, application, load, [ct])
                             end, Nodes),
 
     %% start a hbbft_worker on each node
-    Workers = [{Node, rpc:call(Node, hbbft_worker, start_link, [N, F, I, tpke_privkey:serialize(SK), BatchSize, false])} || {I, {Node, SK}} <- enumerate(NodesSKs)],
+    Workers = [{Node, ct_rpc:call(Node,
+                               hbbft_worker,
+                               start_link,
+                               [[{id, I}, {sk, tpke_privkey:serialize(SK)}, {n, N}, {f, F}, {batchsize, BatchSize}]]
+                              )} || {I, {Node, SK}} <- hbbft_test_utils:enumerate(NodesSKs)],
     ok = global:sync(),
 
     [ link(W) || {_, {ok, W}} <- Workers ],
@@ -80,7 +85,7 @@ simple_test(Config) ->
 
     %% feed the nodes some msgs
     lists:foreach(fun(Msg) ->
-                          Destinations = random_n(rand:uniform(N), Workers),
+                          Destinations = hbbft_test_utils:random_n(rand:uniform(N), Workers),
                           ct:pal("destinations ~p~n", [Destinations]),
                           [hbbft_worker:submit_transaction(Msg, Destination) || {_Node, {ok, Destination}} <- Destinations]
                   end, Msgs),
@@ -93,7 +98,7 @@ simple_test(Config) ->
                                                                                      Blocks
                                                                              end, Workers)),
 
-                                           0 == lists:sum([element(2, rpc:call(Node, erlang, process_info, [W, message_queue_len])) || {Node, {ok, W}} <- Workers ]) andalso
+                                           0 == lists:sum([element(2, ct_rpc:call(Node, erlang, process_info, [W, message_queue_len])) || {Node, {ok, W}} <- Workers ]) andalso
                                            1 == sets:size(Chains) andalso
                                            0 /= length(hd(sets:to_list(Chains)))
                                    end, 60*2, 500),
@@ -147,11 +152,16 @@ serialization_test(Config) ->
     %% load hbbft_worker on each node
     {Mod, Bin, _} = code:get_object_code(hbbft_worker),
     _ = hbbft_ct_utils:pmap(fun(Node) ->
-                                    rpc:call(Node, erlang, load_module, [Mod, Bin])
+                                    ct_rpc:call(Node, erlang, load_module, [Mod, Bin]),
+                                    ct_rpc:call(Node, application, load, [ct])
                             end, Nodes),
 
     %% start a hbbft_worker on each node
-    Workers = [{Node, rpc:call(Node, hbbft_worker, start_link, [N, F, I, tpke_privkey:serialize(SK), BatchSize, true])} || {I, {Node, SK}} <- enumerate(NodesSKs)],
+    Workers = [{Node, ct_rpc:call(Node,
+                               hbbft_worker,
+                               start_link,
+                               [[{id, I}, {sk, tpke_privkey:serialize(SK)}, {n, N}, {f, F}, {batchsize, BatchSize}]]
+                              )} || {I, {Node, SK}} <- hbbft_test_utils:enumerate(NodesSKs)],
     ok = global:sync(),
 
     [ link(W) || {_, {ok, W}} <- Workers ],
@@ -161,7 +171,7 @@ serialization_test(Config) ->
 
     %% feed the nodes some msgs
     lists:foreach(fun(Msg) ->
-                          Destinations = random_n(rand:uniform(N), Workers),
+                          Destinations = hbbft_test_utils:random_n(rand:uniform(N), Workers),
                           ct:pal("destinations ~p~n", [Destinations]),
                           [hbbft_worker:submit_transaction(Msg, Destination) || {_Node, {ok, Destination}} <- Destinations]
                   end, Msgs),
@@ -174,7 +184,7 @@ serialization_test(Config) ->
                                                                                      Blocks
                                                                              end, Workers)),
 
-                                           0 == lists:sum([element(2, rpc:call(Node, erlang, process_info, [W, message_queue_len])) || {Node, {ok, W}} <- Workers ]) andalso
+                                           0 == lists:sum([element(2, ct_rpc:call(Node, erlang, process_info, [W, message_queue_len])) || {Node, {ok, W}} <- Workers ]) andalso
                                            1 == sets:size(Chains) andalso
                                            0 /= length(hd(sets:to_list(Chains)))
                                    end, 60*2, 500),
@@ -211,14 +221,3 @@ serialization_test(Config) ->
 
     [ unlink(W) || {_, {ok, W}} <- Workers ],
     ok.
-
-
-%% helpers
-enumerate(List) ->
-    lists:zip(lists:seq(0, length(List) - 1), List).
-
-random_n(N, List) ->
-    lists:sublist(shuffle(List), N).
-
-shuffle(List) ->
-    [X || {_,X} <- lists:sort([{rand:uniform(), N} || N <- List])].

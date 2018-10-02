@@ -65,7 +65,7 @@ handle_cast({hbbft, FromId, Msg}, State) ->
             {noreply, State}
     end;
 handle_cast({ack, Sender}, State) ->
-    ct:pal("ack, Sender: ~p", [Sender]),
+    %% ct:pal("ack, Sender: ~p", [Sender]),
     {ok, NewRelcast} = relcast:ack(Sender, maps:get(Sender, State#state.peers, undefined), State#state.relcast),
     {noreply, do_send(State#state{relcast=NewRelcast, peers=maps:put(Sender, undefined, State#state.peers)})};
 handle_cast({block, Block, PubKey}, State) ->
@@ -91,13 +91,13 @@ handle_cast(Msg, State) ->
     {noreply, State}.
 
 handle_info({transactions, Txns}, State) ->
-    ct:pal("Got transactions for creating a new block: ~p", [Txns]),
+    %% ct:pal("Got transactions for creating a new block: ~p", [Txns]),
     NewBlock = new_block(Txns, State),
     {ok, Relcast} = relcast:command({finalize_round, Txns, term_to_binary(NewBlock)}, State#state.relcast),
     {noreply, do_send(State#state{relcast=Relcast, tempblock=NewBlock})};
 handle_info({signature, Sig, Pubkey}, State=#state{tempblock=TempBlock, peers=Peers}) when TempBlock /= undefined ->
-    ct:pal("Got signature: ~p", [Sig]),
-    ct:pal("TempBlock: ~p", [TempBlock]),
+    %% ct:pal("Got signature: ~p", [Sig]),
+    %% ct:pal("TempBlock: ~p", [TempBlock]),
     NewBlock = TempBlock#block{signature=Sig},
     case lists:member(NewBlock, State#state.blocks) of
         false ->
