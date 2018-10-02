@@ -72,7 +72,7 @@ init_test(Config) ->
                           [ok = hbbft_worker:submit_transaction(Msg, D) || D <- Destinations]
                   end, Msgs),
 
-    timer:sleep(timer:seconds(60)),
+    timer:sleep(timer:seconds(10)),
 
     %% %% wait for all the worker's mailboxes to settle and
     %% %% wait for the chains to converge
