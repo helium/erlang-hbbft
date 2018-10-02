@@ -34,12 +34,14 @@ handle_command({txn, Txn}, State) ->
         {HBBFT, {send, ToSend}} ->
             {reply, ok, fixup_msgs(ToSend), State#state{hbbft=HBBFT}}
     end;
+handle_command({finalize_round, Txns, TempBlock}, State) ->
+    {HBBFT, {send, ToSend}} = hbbft:finalize_round(State#state.hbbft, Txns, TempBlock),
+    {reply, ok, fixup_msgs(ToSend), State#state{hbbft=HBBFT}};
 handle_command(Msg, State) ->
-    io:format("handle_command, Msg: ~p", [Msg]),
+    ct:pal("unhandled handle_command, Msg: ~p", [Msg]),
     {reply, ok, [], State}.
 
 handle_message(Msg, Actor, State) ->
-    ct:pal("handle_message, Msg: ~p, Actor: ~p~n", [binary_to_term(Msg), Actor]),
     case hbbft:handle_msg(State#state.hbbft, Actor-1, binary_to_term(Msg)) of
         {HBBFT, ok} ->
             {State#state{hbbft=HBBFT}, []};
@@ -47,8 +49,11 @@ handle_message(Msg, Actor, State) ->
             defer;
         {HBBFT, {send, ToSend}} ->
             {State#state{hbbft=HBBFT}, fixup_msgs(ToSend)};
-        {HBBFT, {result, Res}} ->
-            ct:pal("Result: ~p", [Res]),
+        {HBBFT, {result, {transactions, _, Txns}}} ->
+            self() ! {transactions, Txns},
+            {State#state{hbbft=HBBFT}, []};
+        {HBBFT, {result, {signature, Sig}}} ->
+            self() ! {signature, Sig},
             {State#state{hbbft=HBBFT}, []}
     end.
 

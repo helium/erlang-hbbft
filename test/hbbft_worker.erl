@@ -6,11 +6,21 @@
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
+-record(block, {
+          prev_hash :: binary(),
+          transactions :: [binary()],
+          signature :: binary()
+         }).
+
 -record(state, {
           relcast :: term(),
           id :: integer(),
-          peers :: map()
+          peers :: map(),
+          tempblock = undefined :: block(),
+          blocks = [] :: [block()]
          }).
+
+-type block() :: #block{}.
 
 start_link(Args) ->
     ID = proplists:get_value(id, Args),
@@ -53,6 +63,15 @@ handle_cast(Msg, State) ->
     io:format("unhandled msg ~p~n", [Msg]),
     {noreply, State}.
 
+handle_info({transactions, Txns}, State) ->
+    ct:pal("Got transactions for creating a new block: ~p", [Txns]),
+    NewBlock = new_block(Txns, State),
+    {_Resp, Relcast} = relcast:command({finalize_round, Txns, term_to_binary(NewBlock)}, State#state.relcast),
+    {noreply, do_send(State#state{relcast=Relcast, tempblock=NewBlock})};
+handle_info({signature, Sig}, State=#state{tempblock=TempBlock, peers=_Peers}) ->
+    ct:pal("Got signature: ~p", [Sig]),
+    _ = TempBlock#block{signature=Sig},
+    {noreply, State#state{tempblock=undefined}};
 handle_info(Msg, State) ->
     io:format("unhandled msg ~p~n", [Msg]),
     {noreply, State}.
@@ -77,17 +96,14 @@ do_send([{I, undefined} | Tail], State) ->
 do_send([_ | Tail], State) ->
     do_send(Tail, State).
 
-%% hash_block(Block) ->
-%%     crypto:hash(sha256, term_to_binary(Block)).
-%% 
-%% maybe_deserialize_hbbft(HBBFT, SK) ->
-%%     case hbbft:is_serialized(HBBFT) of
-%%         true -> hbbft:deserialize(HBBFT, SK);
-%%         false -> HBBFT
-%%     end.
-%% 
-%% maybe_serialize_HBBFT(HBBFT, ToSerialize) ->
-%%     case hbbft:is_serialized(HBBFT) orelse not ToSerialize of
-%%         true -> HBBFT;
-%%         false -> element(1, hbbft:serialize(HBBFT, false))
-%%     end.
+new_block(Txns, State) ->
+    case State#state.blocks of
+        [] ->
+            %% genesis block
+            #block{prev_hash= <<>>, transactions=Txns, signature= <<>>};
+        [PrevBlock|_Blocks] ->
+            #block{prev_hash=hash_block(PrevBlock), transactions=Txns, signature= <<>>}
+    end.
+
+hash_block(Block) ->
+    crypto:hash(sha256, term_to_binary(Block)).
