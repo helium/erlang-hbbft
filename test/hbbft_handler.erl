@@ -41,6 +41,13 @@ handle_command({finalize_round, Txns, TempBlock}, State) ->
 handle_command(next_round, State) ->
     {HBBFT, _} = hbbft:next_round(State#state.hbbft),
     {reply, ok, [new_epoch], State#state{hbbft=HBBFT}};
+handle_command(start_on_demand, State) ->
+    case hbbft:start_on_demand(State#state.hbbft) of
+        {HBBFT, already_started} ->
+            {reply, {error, already_started}, [], State#state{hbbft=HBBFT}};
+        {HBBFT, {send, ToSend}} ->
+            {reply, ok, fixup_msgs(ToSend), State#state{hbbft=HBBFT}}
+    end;
 handle_command(Msg, State) ->
     ct:pal("unhandled handle_command, Msg: ~p", [Msg]),
     {reply, ok, [], State}.
@@ -75,21 +82,6 @@ restore(OldState, _NewState) ->
     {ok, OldState}.
 
 %% helper functions
-
-%% hash_block(Block) ->
-%%     crypto:hash(sha256, term_to_binary(Block)).
-%% 
-%% maybe_deserialize_hbbft(HBBFT, SK) ->
-%%     case hbbft:is_serialized(HBBFT) of
-%%         true -> hbbft:deserialize(HBBFT, SK);
-%%         false -> HBBFT
-%%     end.
-%% 
-%% maybe_serialize_HBBFT(HBBFT, ToSerialize) ->
-%%     case hbbft:is_serialized(HBBFT) orelse not ToSerialize of
-%%         true -> HBBFT;
-%%         false -> element(1, hbbft:serialize(HBBFT, false))
-%%     end.
 fixup_msgs(Msgs) ->
     lists:map(fun({unicast, J, NextMsg}) ->
                       {unicast, J+1, term_to_binary(NextMsg)};

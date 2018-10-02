@@ -2,7 +2,7 @@
 
 -behaviour(gen_server).
 
--export([start_link/1, submit_transaction/2, get_blocks/1]).
+-export([start_link/1, submit_transaction/2, get_blocks/1, start_on_demand/1]).
 -export([verify_chain/2, block_transactions/1]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
@@ -33,6 +33,9 @@ submit_transaction(Txn, Pid) ->
 get_blocks(Pid) ->
     gen_server:call(Pid, get_blocks, infinity).
 
+start_on_demand(Pid) ->
+    gen_server:call(Pid, start_on_demand, infinity).
+
 init(Args) ->
     N = proplists:get_value(n, Args),
     ID = proplists:get_value(id, Args),
@@ -46,6 +49,9 @@ handle_call({submit_txn, Txn}, _From, State=#state{relcast=Relcast0}) ->
     {reply, Resp, do_send(State#state{relcast=Relcast})};
 handle_call(get_blocks, _From, State) ->
     {reply, {ok, State#state.blocks}, State};
+handle_call(start_on_demand, _From, State) ->
+    {Resp, Relcast} = relcast:command(start_on_demand, State#state.relcast),
+    {reply, Resp, do_send(State#state{relcast=Relcast})};
 handle_call(Msg, _From, State) ->
     io:format("unhandled msg ~p~n", [Msg]),
     {reply, ok, State}.
