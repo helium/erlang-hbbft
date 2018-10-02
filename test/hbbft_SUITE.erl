@@ -45,7 +45,7 @@ end_per_testcase(_, _Config) ->
     ok.
 
 init_test(Config) ->
-    %% PubKey = proplists:get_value(pubkey, Config),
+    PubKey = proplists:get_value(pubkey, Config),
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
     BatchSize = proplists:get_value(batchsize, Config),
@@ -72,37 +72,34 @@ init_test(Config) ->
                           [ok = hbbft_worker:submit_transaction(Msg, D) || D <- Destinations]
                   end, Msgs),
 
-    timer:sleep(timer:seconds(10)),
+    %% wait for all the worker's mailboxes to settle and
+    %% wait for the chains to converge
+    ok = hbbft_ct_utils:wait_until(fun() ->
+                                           Chains = sets:from_list(lists:map(fun(W) ->
+                                                                                     {ok, Blocks} = hbbft_worker:get_blocks(W),
+                                                                                     Blocks
+                                                                             end, Workers)),
 
-    %% %% wait for all the worker's mailboxes to settle and
-    %% %% wait for the chains to converge
-    %% ok = hbbft_ct_utils:wait_until(fun() ->
-    %%                                        Chains = sets:from_list(lists:map(fun(W) ->
-    %%                                                                                  {ok, Blocks} = hbbft_worker:get_blocks(W),
-    %%                                                                                  Blocks
-    %%                                                                          end, Workers)),
+                                           0 == lists:sum([element(2, erlang:process_info(W, message_queue_len)) || W <- Workers ]) andalso
+                                           1 == sets:size(Chains) andalso
+                                           0 /= length(hd(sets:to_list(Chains)))
+                                   end, 60*2, 500),
 
-    %%                                        0 == lists:sum([element(2, erlang:process_info(W, message_queue_len)) || W <- Workers ]) andalso
-    %%                                        1 == sets:size(Chains) andalso
-    %%                                        0 /= length(hd(sets:to_list(Chains)))
-    %%                                end, 60*2, 500),
-
-
-    %% Chains = sets:from_list(lists:map(fun(W) ->
-    %%                                           {ok, Blocks} = hbbft_worker:get_blocks(W),
-    %%                                           Blocks
-    %%                                   end, Workers)),
-    %% 1 = sets:size(Chains),
-    %% [Chain] = sets:to_list(Chains),
-    %% io:format("chain is of height ~p~n", [length(Chain)]),
-    %% %% verify they are cryptographically linked
-    %% true = hbbft_worker:verify_chain(Chain, PubKey),
-    %% %% check all the transactions are unique
-    %% BlockTxns = lists:flatten([ hbbft_worker:block_transactions(B) || B <- Chain ]),
-    %% true = length(BlockTxns) == sets:size(sets:from_list(BlockTxns)),
-    %% %% check they're all members of the original message list
-    %% true = sets:is_subset(sets:from_list(BlockTxns), sets:from_list(Msgs)),
-    %% io:format("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
+    Chains = sets:from_list(lists:map(fun(W) ->
+                                              {ok, Blocks} = hbbft_worker:get_blocks(W),
+                                              Blocks
+                                      end, Workers)),
+    1 = sets:size(Chains),
+    [Chain] = sets:to_list(Chains),
+    ct:pal("chain is of height ~p~n", [length(Chain)]),
+    %% verify they are cryptographically linked
+    true = hbbft_worker:verify_chain(Chain, PubKey),
+    %% check all the transactions are unique
+    BlockTxns = lists:flatten([ hbbft_worker:block_transactions(B) || B <- Chain ]),
+    true = length(BlockTxns) == sets:size(sets:from_list(BlockTxns)),
+    %% check they're all members of the original message list
+    true = sets:is_subset(sets:from_list(BlockTxns), sets:from_list(Msgs)),
+    ct:pal("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
     ok.
 
 %% one_actor_no_txns_test(Config) ->

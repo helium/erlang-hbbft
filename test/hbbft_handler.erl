@@ -13,17 +13,18 @@
 
 -record(state, {
           hbbft :: hbbft:hbbft(),
+          sk :: tpke_privkey:privkey(),
           ssk :: tpke_privkey:privkey_serialized()
          }).
 
 init(HBBFTArgs) ->
-    DSK = tpke_privkey:deserialize(proplists:get_value(sk, HBBFTArgs)),
+    SK = tpke_privkey:deserialize(proplists:get_value(sk, HBBFTArgs)),
     N = proplists:get_value(n, HBBFTArgs),
     F = proplists:get_value(f, HBBFTArgs),
     ID = proplists:get_value(id, HBBFTArgs),
     BatchSize = proplists:get_value(batchsize, HBBFTArgs),
-    HBBFT = hbbft:init(DSK, N, F, ID - 1, BatchSize, infinity),
-    {ok, #state{hbbft=HBBFT}}.
+    HBBFT = hbbft:init(SK, N, F, ID - 1, BatchSize, infinity),
+    {ok, #state{hbbft=HBBFT, sk=SK}}.
 
 handle_command({txn, Txn}, State) ->
     case hbbft:input(State#state.hbbft, Txn) of
@@ -37,6 +38,9 @@ handle_command({txn, Txn}, State) ->
 handle_command({finalize_round, Txns, TempBlock}, State) ->
     {HBBFT, {send, ToSend}} = hbbft:finalize_round(State#state.hbbft, Txns, TempBlock),
     {reply, ok, fixup_msgs(ToSend), State#state{hbbft=HBBFT}};
+handle_command(next_round, State) ->
+    {HBBFT, _} = hbbft:next_round(State#state.hbbft),
+    {reply, ok, [new_epoch], State#state{hbbft=HBBFT}};
 handle_command(Msg, State) ->
     ct:pal("unhandled handle_command, Msg: ~p", [Msg]),
     {reply, ok, [], State}.
@@ -53,7 +57,7 @@ handle_message(Msg, Actor, State) ->
             self() ! {transactions, Txns},
             {State#state{hbbft=HBBFT}, []};
         {HBBFT, {result, {signature, Sig}}} ->
-            self() ! {signature, Sig},
+            self() ! {signature, Sig, tpke_privkey:public_key(State#state.sk)},
             {State#state{hbbft=HBBFT}, []}
     end.
 
