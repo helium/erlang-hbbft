@@ -10,6 +10,8 @@ do_send_outer(Mod, [H|T], States, Acc) ->
     {R, NewStates} = do_send(Mod, H, [], States),
     do_send_outer(Mod, T++R, NewStates, Acc).
 
+do_send(Mod, {Id, {result_and_send, Result, ToSend}}, Acc, States) ->
+    do_send(Mod, {Id, ToSend}, [{result, {Id, Result}} | Acc], States);
 do_send(_Mod, {Id, {result, Result}}, Acc, States) ->
     {[{result, {Id, Result}} | Acc], States};
 do_send(_Mod, {_, ok}, Acc, States) ->
