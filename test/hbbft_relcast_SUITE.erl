@@ -1,4 +1,4 @@
--module(hbbft_SUITE).
+-module(hbbft_relcast_SUITE).
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -25,38 +25,60 @@ all() ->
      start_on_demand_test
     ].
 
-init_per_testcase(_, Config) ->
+init_per_testcase(TestCase, Config) ->
     N = 5,
     F = N div 4,
     Module = hbbft,
     BatchSize = 20,
     {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
     {ok, {PubKey, PrivateKeys}} = dealer:deal(Dealer),
-    [{n, N}, {f, F}, {batchsize, BatchSize}, {module, Module}, {pubkey, PubKey}, {privatekeys, PrivateKeys} | Config].
+
+    [{n, N},
+     {f, F},
+     {batchsize, BatchSize},
+     {module, Module},
+     {pubkey, PubKey},
+     {privatekeys, PrivateKeys},
+     {data_dir, atom_to_list(TestCase)++"data"} | Config].
 
 end_per_testcase(_, _Config) ->
     ok.
 
 init_test(Config) ->
+    PubKey = proplists:get_value(pubkey, Config),
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
+    DataDir = proplists:get_value(data_dir, Config),
     BatchSize = proplists:get_value(batchsize, Config),
-    PubKey = proplists:get_value(pubkey, Config),
+
     PrivateKeys = proplists:get_value(privatekeys, Config),
-    Workers = [ element(2, hbbft_worker:start_link(N, F, I, tpke_privkey:serialize(SK), BatchSize, false)) || {I, SK} <- enumerate(PrivateKeys) ],
+
+    Workers = lists:foldl(fun({I, SK}, Acc) ->
+                                  {ok, W} = hbbft_relcast_worker:start_link([
+                                                                     {id, I},
+                                                                     {sk, tpke_privkey:serialize(SK)},
+                                                                     {n, N},
+                                                                     {f, F},
+                                                                     {data_dir, DataDir},
+                                                                     {batchsize, BatchSize}
+                                                                    ]),
+                                  [W | Acc]
+                          end, [], hbbft_test_utils:enumerate(PrivateKeys)),
+
+    ct:pal("Workers: ~p", [Workers]),
+
     Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*20)],
     %% feed the badgers some msgs
     lists:foreach(fun(Msg) ->
-                          Destinations = random_n(rand:uniform(N), Workers),
-                          io:format("destinations ~p~n", [Destinations]),
-                          [ok = hbbft_worker:submit_transaction(Msg, D) || D <- Destinations]
+                          Destinations = hbbft_test_utils:random_n(rand:uniform(N), Workers),
+                          [ok = hbbft_relcast_worker:submit_transaction(Msg, D) || D <- Destinations]
                   end, Msgs),
 
     %% wait for all the worker's mailboxes to settle and
     %% wait for the chains to converge
     ok = hbbft_ct_utils:wait_until(fun() ->
                                            Chains = sets:from_list(lists:map(fun(W) ->
-                                                                                     {ok, Blocks} = hbbft_worker:get_blocks(W),
+                                                                                     {ok, Blocks} = hbbft_relcast_worker:get_blocks(W),
                                                                                      Blocks
                                                                              end, Workers)),
 
@@ -65,22 +87,22 @@ init_test(Config) ->
                                            0 /= length(hd(sets:to_list(Chains)))
                                    end, 60*2, 500),
 
-
     Chains = sets:from_list(lists:map(fun(W) ->
-                                              {ok, Blocks} = hbbft_worker:get_blocks(W),
+                                              {ok, Blocks} = hbbft_relcast_worker:get_blocks(W),
                                               Blocks
                                       end, Workers)),
     1 = sets:size(Chains),
     [Chain] = sets:to_list(Chains),
-    io:format("chain is of height ~p~n", [length(Chain)]),
+    ct:pal("chain is of height ~p~n", [length(Chain)]),
     %% verify they are cryptographically linked
-    true = hbbft_worker:verify_chain(Chain, PubKey),
+    true = hbbft_relcast_worker:verify_chain(Chain, PubKey),
     %% check all the transactions are unique
-    BlockTxns = lists:flatten([ hbbft_worker:block_transactions(B) || B <- Chain ]),
+    BlockTxns = lists:flatten([ hbbft_relcast_worker:block_transactions(B) || B <- Chain ]),
     true = length(BlockTxns) == sets:size(sets:from_list(BlockTxns)),
     %% check they're all members of the original message list
     true = sets:is_subset(sets:from_list(BlockTxns), sets:from_list(Msgs)),
-    io:format("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
+    ct:pal("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
+    [gen_server:stop(W) || W <- Workers],
     ok.
 
 one_actor_no_txns_test(Config) ->
@@ -99,7 +121,7 @@ one_actor_no_txns_test(Config) ->
                                                                                                        {NewData, Reply} = hbbft:input(Data, Msg),
                                                                                                        {{J, NewData}, {J, Reply}}
                                                                                                end, lists:keysort(1, Destinations))),
-                                               {lists:ukeymerge(1, NewStates, States), merge_replies(N, NewReplies, Replies)}
+                                               {lists:ukeymerge(1, NewStates, States), hbbft_test_utils:merge_replies(N, NewReplies, Replies)}
                                        end, {StatesWithIndex, []}, Msgs),
     %% check that at least N-F actors have started ACS:
     ?assert(length(Replies) >= N - F),
@@ -133,7 +155,7 @@ two_actors_no_txns_test(Config) ->
                                                                                                        {NewData, Reply} = hbbft:input(Data, Msg),
                                                                                                        {{J, NewData}, {J, Reply}}
                                                                                                end, lists:keysort(1, Destinations))),
-                                               {lists:ukeymerge(1, NewStates, States), merge_replies(N, NewReplies, Replies)}
+                                               {lists:ukeymerge(1, NewStates, States), hbbft_test_utils:merge_replies(N, NewReplies, Replies)}
                                        end, {StatesWithIndex, []}, Msgs),
     %% check that at least N-F actors have started ACS:
     ?assert(length(Replies) =< N - F),
@@ -161,7 +183,7 @@ one_actor_missing_test(Config) ->
                                                                                                        {NewData, Reply} = hbbft:input(Data, Msg),
                                                                                                        {{J, NewData}, {J, Reply}}
                                                                                                end, lists:keysort(1, Destinations))),
-                                               {lists:ukeymerge(1, NewStates, States), merge_replies(N, NewReplies, Replies)}
+                                               {lists:ukeymerge(1, NewStates, States), hbbft_test_utils:merge_replies(N, NewReplies, Replies)}
                                        end, {StatesWithIndex, []}, Msgs),
     %% check that at least N-F actors have started ACS:
     ?assert(length(Replies) >= N - F),
@@ -195,7 +217,7 @@ two_actors_missing_test(Config) ->
                                                                                                        {NewData, Reply} = hbbft:input(Data, Msg),
                                                                                                        {{J, NewData}, {J, Reply}}
                                                                                                end, lists:keysort(1, Destinations))),
-                                               {lists:ukeymerge(1, NewStates, States), merge_replies(N, NewReplies, Replies)}
+                                               {lists:ukeymerge(1, NewStates, States), hbbft_test_utils:merge_replies(N, NewReplies, Replies)}
                                        end, {StatesWithIndex, []}, Msgs),
     %% check that at least N-F actors have started ACS:
     ?assert(length(Replies) =< N - F),
@@ -219,34 +241,49 @@ encrypt_decrypt_test(Config) ->
     ok.
 
 start_on_demand_test(Config) ->
+    PubKey = proplists:get_value(pubkey, Config),
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
+    DataDir = proplists:get_value(data_dir, Config),
     BatchSize = proplists:get_value(batchsize, Config),
-    PubKey = proplists:get_value(pubkey, Config),
+
     PrivateKeys = proplists:get_value(privatekeys, Config),
-    Workers = [ element(2, hbbft_worker:start_link(N, F, I, tpke_privkey:serialize(SK), BatchSize, false)) || {I, SK} <- enumerate(PrivateKeys) ],
+
+    Workers = lists:foldl(fun({I, SK}, Acc) ->
+                                  {ok, W} = hbbft_relcast_worker:start_link([
+                                                                     {id, I},
+                                                                     {sk, tpke_privkey:serialize(SK)},
+                                                                     {n, N},
+                                                                     {f, F},
+                                                                     {data_dir, DataDir},
+                                                                     {batchsize, BatchSize}
+                                                                    ]),
+                                  [W | Acc]
+                          end, [], hbbft_test_utils:enumerate(PrivateKeys)),
+
 
     [W1, _W2 | RemainingWorkers] = Workers,
 
     Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*20)],
 
     KnownMsg = crypto:strong_rand_bytes(128),
+
     %% feed the badgers some msgs
     lists:foreach(fun(Msg) ->
-                          Destinations = random_n(rand:uniform(length(RemainingWorkers)), RemainingWorkers),
+                          Destinations = hbbft_test_utils:random_n(rand:uniform(length(RemainingWorkers)), RemainingWorkers),
                           io:format("destinations ~p~n", [Destinations]),
-                          [ok = hbbft_worker:submit_transaction(Msg, D) || D <- Destinations]
+                          [ok = hbbft_relcast_worker:submit_transaction(Msg, D) || D <- Destinations]
                   end, Msgs),
 
-    ok = hbbft_worker:submit_transaction(KnownMsg, W1),
+    ok = hbbft_relcast_worker:submit_transaction(KnownMsg, W1),
 
-    _ = hbbft_worker:start_on_demand(W1),
+    _ = hbbft_relcast_worker:start_on_demand(W1),
 
     %% wait for all the worker's mailboxes to settle and
     %% wait for the chains to converge
-    ok = hbbft_ct_utils:wait_until(fun() ->
+    WaitRes = hbbft_ct_utils:wait_until(fun() ->
                                            Chains = sets:from_list(lists:map(fun(W) ->
-                                                                                     {ok, Blocks} = hbbft_worker:get_blocks(W),
+                                                                                     {ok, Blocks} = hbbft_relcast_worker:get_blocks(W),
                                                                                      Blocks
                                                                              end, Workers)),
 
@@ -254,52 +291,35 @@ start_on_demand_test(Config) ->
                                            1 == sets:size(Chains) andalso
                                            0 /= length(hd(sets:to_list(Chains)))
                                    end, 60*2, 500),
+    case WaitRes of
+        ok ->
+            ok;
+        _ ->
+            [begin
+                 {_State, Inbound, Outbound} = hbbft_relcast_worker:relcast_status(W),
+                 ct:pal("~p Inbound : ~p", [W, [{K, binary_to_term(V)} || {K, V} <- Inbound]]),
+                 ct:pal("~p Outbound : ~p", [W, maps:map(fun(_K, V) -> [binary_to_term(X) || X <- V] end, Outbound)])
+             end || W <- Workers ],
+             ok = WaitRes
+    end,
 
 
     Chains = sets:from_list(lists:map(fun(W) ->
-                                              {ok, Blocks} = hbbft_worker:get_blocks(W),
+                                              {ok, Blocks} = hbbft_relcast_worker:get_blocks(W),
                                               Blocks
                                       end, Workers)),
     1 = sets:size(Chains),
     [Chain] = sets:to_list(Chains),
     io:format("chain is of height ~p~n", [length(Chain)]),
     %% verify they are cryptographically linked
-    true = hbbft_worker:verify_chain(Chain, PubKey),
+    true = hbbft_relcast_worker:verify_chain(Chain, PubKey),
     %% check all the transactions are unique
-    BlockTxns = lists:flatten([ hbbft_worker:block_transactions(B) || B <- Chain ]),
+    BlockTxns = lists:flatten([ hbbft_relcast_worker:block_transactions(B) || B <- Chain ]),
     true = lists:member(KnownMsg, BlockTxns),
     true = length(BlockTxns) == sets:size(sets:from_list(BlockTxns)),
     %% check they're all members of the original message list
     true = sets:is_subset(sets:from_list(BlockTxns), sets:from_list([KnownMsg | Msgs])),
     io:format("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
+    [gen_server:stop(W) || W <- Workers],
     ok.
-
-%% helper functions
-
-enumerate(List) ->
-    lists:zip(lists:seq(0, length(List) - 1), List).
-
-random_n(N, List) ->
-    lists:sublist(shuffle(List), N).
-
-shuffle(List) ->
-    [X || {_,X} <- lists:sort([{rand:uniform(), N} || N <- List])].
-
-merge_replies(N, NewReplies, Replies) when N < 0 orelse length(NewReplies) == 0 ->
-    Replies;
-merge_replies(N, NewReplies, Replies) ->
-    case lists:keyfind(N, 1, NewReplies) of
-        false ->
-            merge_replies(N-1, lists:keydelete(N, 1, NewReplies), Replies);
-        {N, ok} ->
-            merge_replies(N-1, lists:keydelete(N, 1, NewReplies), Replies);
-        {N, {send, ToSend}} ->
-            NewSend = case lists:keyfind(N, 1, Replies) of
-                          false ->
-                              {N, {send, ToSend}};
-                          {N, OldSend} ->
-                              {N, {send, OldSend ++ ToSend}}
-                      end,
-            merge_replies(N-1, lists:keydelete(N, 1, NewReplies), lists:keystore(N, 1, Replies, NewSend))
-    end.
 
