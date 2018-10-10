@@ -92,6 +92,7 @@ input(Data = #bba_data{state=done}, _BInput) ->
                                 {bba_data(), defer} |
                                 ignore |
                                 {bba_data(), {send, [hbbft_utils:multicast(bval_msg() | aux_msg() | conf_msg() | coin_msg())]}} |
+                                {bba_data(), {result_and_send, 0 | 1, {send, [hbbft_utils:multicast(term_msg())]}}} |
                                 {bba_data(), {result, 0 | 1}}.
 handle_msg(#bba_data{state=done}, _J, _BInput) ->
     ignore;
@@ -406,11 +407,6 @@ remove_witness(ID, Witness) ->
             OldCount = maps:get({val, val(Val)}, Witness, 1),
             maps:merge(maps:remove(ID, Witness), #{{val, val(Val)} => OldCount - 1})
     end.
-
-%count_witness(Value, Witness, Terminate) ->
-    %% add_terminate deletes other witness values, so we don't have to
-    %% worry about double counting here
-    %maps:get({val, Value}, Witness) + maps:get({val, Value}, Terminate).
 
 add_terminate(Id, Value, Data) ->
     TerminateWitness = add_witness(Id, Value, Data#bba_data.terminate_witness, false),
