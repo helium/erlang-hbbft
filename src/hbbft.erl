@@ -185,6 +185,7 @@ handle_msg(Data = #hbbft_data{round=R}, _J, {{acs, R2}, _ACSMsg}) when R2 > R ->
 handle_msg(Data = #hbbft_data{round=R}, J, {{acs, R}, ACSMsg}) ->
     %% ACS message for this round
     case hbbft_acs:handle_msg(Data#hbbft_data.acs, J, ACSMsg) of
+        ignore -> ignore;
         {NewACS, ok} ->
             {Data#hbbft_data{acs=NewACS}, ok};
         {NewACS, {send, ACSResponse}} ->
@@ -272,10 +273,10 @@ handle_msg(Data = #hbbft_data{round=R, thingtosign=ThingToSign}, J, {sign, R, Bi
                     {Data#hbbft_data{sig_shares=NewSigShares}, ok}
             end;
         false ->
-            {Data, ok}
+            ignore
     end;
-handle_msg(Data, _J, _Msg) ->
-    {Data, ok}.
+handle_msg(_Data, _J, _Msg) ->
+    ignore.
 
 -spec maybe_start_acs(hbbft_data()) -> {hbbft_data(), ok | {send, [rbc_wrapped_output()]}}.
 maybe_start_acs(Data = #hbbft_data{n=N, secret_key=SK, batch_size=BatchSize}) ->

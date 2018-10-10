@@ -87,6 +87,7 @@ input(Data, Input) ->
 handle_msg(Data, J, {{rbc, I}, RBCMsg}) ->
     RBC = get_rbc(Data, I),
     case hbbft_rbc:handle_msg(RBC#rbc_state.rbc_data, J, RBCMsg) of
+        ignore -> ignore;
         {NewRBC, {send, ToSend}} ->
             {store_rbc_state(Data, I, NewRBC), {send, hbbft_utils:wrap({rbc, I}, ToSend)}};
         {NewRBC, {result, Result}} ->
@@ -113,6 +114,7 @@ handle_msg(Data, J, {{rbc, I}, RBCMsg}) ->
 handle_msg(Data = #acs_data{n=N, f=F}, J, {{bba, I}, BBAMsg}) ->
     BBA = get_bba(Data, I),
     case hbbft_bba:handle_msg(BBA#bba_state.bba_data, J, BBAMsg) of
+        ignore -> ignore;
         {NewBBA, {send, ToSend}} ->
             {store_bba_state(Data, I, NewBBA), {send, hbbft_utils:wrap({bba, I}, ToSend)}};
         {NewBBA, {result_and_send, B, {send, ToSend0}}} ->

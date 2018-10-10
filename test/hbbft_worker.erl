@@ -140,8 +140,8 @@ do_send([], State) ->
     State;
 do_send([{I, undefined} | Tail], State) ->
     case relcast:take(I, State#state.relcast) of
-        not_found ->
-            do_send(Tail, State);
+        {not_found, NewRelcast} ->
+            do_send(Tail, State#state{relcast=NewRelcast});
         {ok, Ref, Msg, NewRelcast} ->
             gen_server:cast({global, name(I)}, {hbbft, State#state.id, Msg}),
             do_send(Tail, State#state{relcast=NewRelcast, peers=maps:put(I, Ref, State#state.peers)})

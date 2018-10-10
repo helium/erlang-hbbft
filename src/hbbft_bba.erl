@@ -91,9 +91,9 @@ input(Data = #bba_data{state=done}, _BInput) ->
                  conf_msg()) -> {bba_data(), ok} |
                                 {bba_data(), defer} |
                                 {bba_data(), {send, [hbbft_utils:multicast(bval_msg() | aux_msg() | conf_msg() | coin_msg())]}} |
-                                {bba_data(), {result_and_send, 0 | 1, {send, [hbbft_utils:multicast(term_msg())]}}}.
-handle_msg(Data = #bba_data{state=done}, _J, _BInput) ->
-    {Data, ok};
+                                {bba_data(), {result, 0 | 1}}.
+handle_msg(#bba_data{state=done}, _J, _BInput) ->
+    ignore;
 handle_msg(Data = #bba_data{round=R}, J, {bval, R, V}) ->
     bval(Data, J, V);
 handle_msg(Data = #bba_data{round=R}, J, {aux, R, V}) ->
@@ -137,8 +137,8 @@ handle_msg(Data, J, {term, B}) when B == 0; B == 1 ->
             %% we need to check bval/aux/conf message thresholds in light of the new TERM message
             decide(NewData, [])
     end;
-handle_msg(Data, _J, _Msg) ->
-    {Data, ok}.
+handle_msg(_Data, _J, _Msg) ->
+    ignore.
 
 %% – upon receiving BVALr (b) messages from f + 1 nodes, if
 %% BVALr (b) has not been sent, multicast BVALr (b)

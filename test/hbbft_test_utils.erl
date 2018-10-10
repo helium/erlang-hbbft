@@ -23,13 +23,21 @@ do_send(Mod, {Id, {send, [{unicast, J, Msg}|T]}}, Acc, States) ->
         false ->
             do_send(Mod, {Id, {send, T}}, Acc, States);
     {J, State} ->
-            {NewState, Result} = Mod:handle_msg(State, Id, Msg),
-            do_send(Mod, {Id, {send, T}}, [{J, Result}|Acc], lists:keyreplace(J, 1, States, {J, NewState}))
+            case Mod:handle_msg(State, Id, Msg) of
+                {NewState, Result} ->
+                    do_send(Mod, {Id, {send, T}}, [{J, Result}|Acc], lists:keyreplace(J, 1, States, {J, NewState}));
+                ignore ->
+                    do_send(Mod, {Id, {send, T}}, Acc, States)
+            end
     end;
 do_send(Mod, {Id, {send, [{multicast, Msg}|T]}}, Acc, States) ->
     Res = lists:map(fun({J, State}) ->
-                            {NewState, Result} = Mod:handle_msg(State, Id, Msg),
-                            {{J, NewState}, {J, Result}}
+                            case Mod:handle_msg(State, Id, Msg) of
+                                {NewState, Result} ->
+                                    {{J, NewState}, {J, Result}};
+                                ignore ->
+                                    {{J, State}, {J, ok}}
+                            end
                     end, States),
     {NewStates, Results} = lists:unzip(Res),
     do_send(Mod, {Id, {send, T}}, Results ++ Acc, lists:ukeymerge(1, NewStates, States)).

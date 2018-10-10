@@ -6,6 +6,7 @@
          init/1,
          handle_command/2,
          handle_message/3,
+         callback_message/3,
          serialize/1,
          deserialize/1,
          restore/2
@@ -30,8 +31,8 @@ handle_command({txn, Txn}, State) ->
     case hbbft:input(State#state.hbbft, Txn) of
         {HBBFT, ok} ->
             {reply, ok, [], State#state{hbbft=HBBFT}};
-        {HBBFT, full} ->
-            {reply, {error, full}, [], State#state{hbbft=HBBFT}};
+        {_HBBFT, full} ->
+            {reply, {error, full}, ignore};
         {HBBFT, {send, ToSend}} ->
             {reply, ok, fixup_msgs(ToSend), State#state{hbbft=HBBFT}}
     end;
@@ -49,9 +50,9 @@ handle_command(start_on_demand, State) ->
             %ct:pal("started hbbft on demand", []),
             {reply, ok, fixup_msgs(ToSend), State#state{hbbft=HBBFT}}
     end;
-handle_command(_Msg, State) ->
+handle_command(_Msg, _State) ->
     %ct:pal("unhandled handle_command, Msg: ~p", [_Msg]),
-    {reply, ok, [], State}.
+    {reply, ok, ignore}.
 
 handle_message(Msg, Actor, State) ->
     %ct:pal("Msg ~p", [binary_to_term(Msg)]),
@@ -60,6 +61,8 @@ handle_message(Msg, Actor, State) ->
             {State#state{hbbft=HBBFT}, []};
         {_HBBFT, defer} ->
             defer;
+        ignore ->
+            ignore;
         {HBBFT, {send, ToSend}} ->
             {State#state{hbbft=HBBFT}, fixup_msgs(ToSend)};
         {HBBFT, {result, {transactions, _, Txns}}} ->
@@ -69,6 +72,9 @@ handle_message(Msg, Actor, State) ->
             self() ! {signature, Sig, tpke_privkey:public_key(State#state.sk)},
             {State#state{hbbft=HBBFT}, []}
     end.
+
+callback_message(_, _, _) ->
+    none.
 
 serialize(State) ->
     {SerializedHBBFT, SerializedSK} = hbbft:serialize(State#state.hbbft, true),
