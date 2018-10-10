@@ -65,7 +65,7 @@ get_coin(Data) ->
 %% sig ← ThresholdCombinepk ({ j, s j })
 %% if ThresholdVerifypk(sid) then deliver sig
 %% TODO: more specific return type than an integer?
--spec handle_msg(cc_data(), non_neg_integer(), share_msg()) -> {cc_data(), ok | {result, integer()}}.
+-spec handle_msg(cc_data(), non_neg_integer(), share_msg()) -> {cc_data(), ok | {result, integer()}} | ignore.
 handle_msg(Data, J, {share, Share}) ->
     share(Data, J, Share).
 

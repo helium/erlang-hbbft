@@ -90,6 +90,7 @@ input(Data = #bba_data{state=done}, _BInput) ->
                  aux_msg() |
                  conf_msg()) -> {bba_data(), ok} |
                                 {bba_data(), defer} |
+                                ignore |
                                 {bba_data(), {send, [hbbft_utils:multicast(bval_msg() | aux_msg() | conf_msg() | coin_msg())]}} |
                                 {bba_data(), {result, 0 | 1}}.
 handle_msg(#bba_data{state=done}, _J, _BInput) ->

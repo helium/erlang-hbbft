@@ -176,6 +176,7 @@ round(_Data=#hbbft_data{round=Round}) ->
 
 -spec handle_msg(hbbft_data(), non_neg_integer(), acs_msg() | dec_msg() | sign_msg()) -> {hbbft_data(), ok |
                                                                                           defer |
+                                                                                          ignore |
                                                                                           {send, [hbbft_utils:multicast(dec_msg() | sign_msg()) | rbc_wrapped_output() | bba_wrapped_output()]} |
                                                                                           {result, {transactions, list(), [binary()]}} |
                                                                                           {result, {signature, binary()}}}.

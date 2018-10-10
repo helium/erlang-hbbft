@@ -78,7 +78,7 @@ input(_Data, _Msg) ->
 
 
 %% message handlers
--spec handle_msg(rbc_data(), non_neg_integer(), val_msg() | echo_msg() | ready_msg()) -> {rbc_data(), ok | {send, send_commands()}} |
+-spec handle_msg(rbc_data(), non_neg_integer(), val_msg() | echo_msg() | ready_msg()) -> {rbc_data(), ok | {send, send_commands()}} | ignore |
                                                                                          {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()} | abort} |
                                                                                          {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()}}.
 
@@ -94,7 +94,7 @@ handle_msg(Data, J, {ready, H}) ->
 %% upon receiving VAL(h, bi , si) from PSender,
 %% multicast ECHO(h, bi , si )
 %% only multicast ECHO when VAL msssage is from the known leader
--spec val(rbc_data(), non_neg_integer(), merkerl:hash(), merkerl:proof(), binary()) -> {rbc_data(), ok | {send, send_commands()}}.
+-spec val(rbc_data(), non_neg_integer(), merkerl:hash(), merkerl:proof(), binary()) -> {rbc_data(), ok | {send, send_commands()}} | ignore.
 val(Data = #rbc_data{seen_val=false, leader=Leader}, J, H, Bj, Sj) when J == Leader ->
     case merkerl:verify_proof(merkerl:hash_value(Sj), H, Bj) of
         ok ->
@@ -113,7 +113,7 @@ val(#rbc_data{leader=_Leader}, _J, _H, _Bi, _Si) ->
 %% upon receiving ECHO(h, bj, sj ) from party Pj ,
 %% check that bj is a valid Merkle branch for root h and leaf sj ,
 %% and otherwise discard
--spec echo(rbc_data(), non_neg_integer(), merkerl:hash(), merkerl:proof(), binary()) -> {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()} | abort}.
+-spec echo(rbc_data(), non_neg_integer(), merkerl:hash(), merkerl:proof(), binary()) -> {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()} | abort} | ignore.
 echo(#rbc_data{state=done}, _J, _H, _Bj, _Sj) ->
     ignore;
 echo(Data = #rbc_data{n=N, f=F}, J, H, Bj, Sj) ->
@@ -149,7 +149,7 @@ echo(Data = #rbc_data{n=N, f=F}, J, H, Bj, Sj) ->
 %% Figure2. Bullet5
 %% upon receiving f + 1 matching READY(h) messages, if READY
 %% has not yet been sent, multicast READY(h)
--spec ready(rbc_data(), non_neg_integer(), merkerl:hash()) -> {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()}}.
+-spec ready(rbc_data(), non_neg_integer(), merkerl:hash()) -> {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()}} | ignore.
 ready(Data = #rbc_data{state=waiting, n=N, f=F}, J, H) ->
     %% increment num_readies
 

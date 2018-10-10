@@ -83,7 +83,7 @@ input(Data, Input) ->
 -spec handle_msg(acs_data(), non_neg_integer(), rbc_msg() | bba_msg()) -> {acs_data(), ok |
                                                                            defer |
                                                                            {send, [rbc_wrapped_output() | hbbft_utils:multicast(bba_msg())]} |
-                                                                           {result, [{non_neg_integer(), binary()}]}}.
+                                                                           {result, [{non_neg_integer(), binary()}]}} | ignore.
 handle_msg(Data, J, {{rbc, I}, RBCMsg}) ->
     RBC = get_rbc(Data, I),
     case hbbft_rbc:handle_msg(RBC#rbc_state.rbc_data, J, RBCMsg) of
