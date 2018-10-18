@@ -204,6 +204,8 @@ handle_msg(Data = #hbbft_data{round=R}, J, {{acs, R}, ACSMsg}) ->
         {NewACS, defer} ->
             {Data#hbbft_data{acs=NewACS}, defer}
     end;
+handle_msg(Data = #hbbft_data{round=R}, _J, {dec, R2, _I, _Share}) when R2 > R ->
+    {Data, defer};
 handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
     %% the Share now is a binary, deserialize it and then store in the dec_shares map
     DeserializedShare = hbbft_utils:binary_to_share(Share, Data#hbbft_data.secret_key),
@@ -248,6 +250,8 @@ handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
             %% not enough shares yet
             {Data#hbbft_data{dec_shares=NewShares}, ok}
     end;
+handle_msg(Data = #hbbft_data{round=R, thingtosign=ThingToSign}, _J, {sign, R2, _BinShare}) when ThingToSign == undefined  orelse R2 > R ->
+    {Data, defer};
 handle_msg(Data = #hbbft_data{round=R, thingtosign=ThingToSign}, J, {sign, R, BinShare}) when ThingToSign /= undefined ->
     %% messages related to signing the final block for this round, see finalize_round for more information
     %% Note: this is an extension to the HoneyBadger BFT specification
