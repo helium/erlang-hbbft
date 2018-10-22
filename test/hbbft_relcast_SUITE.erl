@@ -26,7 +26,7 @@ all() ->
     ].
 
 init_per_testcase(TestCase, Config) ->
-    N = 5,
+    N = 7,
     F = N div 4,
     Module = hbbft,
     BatchSize = 20,

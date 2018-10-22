@@ -5,7 +5,7 @@
 -export([start_link/1, submit_transaction/2, get_blocks/1, start_on_demand/1, relcast_status/1]).
 -export([verify_chain/2, block_transactions/1]).
 
--export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
 -record(block, {
           prev_hash :: binary(),
@@ -44,7 +44,7 @@ init(Args) ->
     ID = proplists:get_value(id, Args),
     DataDir = proplists:get_value(data_dir, Args),
     Members = lists:seq(1, N),
-    {ok, Relcast} = relcast:start(ID, Members, hbbft_handler, [Args], [{data_dir, DataDir ++ integer_to_list(ID)}]),
+    {ok, Relcast} = relcast:start(ID, Members, hbbft_handler, Args, [{data_dir, DataDir ++ integer_to_list(ID)}]),
     Peers = maps:from_list([{I, undefined} || I <- Members, I /= ID ]),
     {ok, do_send(#state{relcast=Relcast, id=ID, peers=Peers})}.
 
@@ -128,6 +128,10 @@ handle_info({signature, Sig, Pubkey}, State=#state{tempblock=TempBlock, peers=Pe
 handle_info(Msg, State) ->
     io:format("unhandled msg ~p~n", [Msg]),
     {noreply, State}.
+
+terminate(Reason, State) ->
+    relcast:stop(Reason, State#state.relcast),
+    ok.
 
 %% helper functions
 name(N) ->
