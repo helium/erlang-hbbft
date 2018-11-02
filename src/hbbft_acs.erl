@@ -59,6 +59,9 @@
 -spec status(acs_data()) -> map().
 status(ACSData) ->
     #{acs_done => ACSData#acs_data.done,
+      completed_bba_count => completed_bba_count(ACSData),
+      successful_bba_count => successful_bba_count(ACSData),
+      completed_rbc_count => completed_rbc_count(ACSData),
       rbc => maps:map(fun(_K, #rbc_state{rbc_data=RBCData, result=R}) -> #{rbc => hbbft_rbc:status(RBCData), result => is_binary(R)} end, ACSData#acs_data.rbc),
       bba => maps:map(fun(_K, #bba_state{bba_data=BBAData, result=R, input=I}) -> #{bba => hbbft_bba:status(BBAData), result => R, input => I} end, ACSData#acs_data.bba)}.
 
@@ -173,9 +176,17 @@ rbc_completed(#rbc_state{result=Result}) ->
 bba_completed(#bba_state{input=Input, result=Result}) ->
     Input /= undefined andalso Result /= undefined.
 
--spec successful_bba_count(acs_data()) -> non_neg_integer(). %% successful_bba_count can be 0?
+-spec successful_bba_count(acs_data()) -> non_neg_integer(). %% successful_bba_count can be 0
 successful_bba_count(Data) ->
     lists:sum([ 1 || BBA <- maps:values(Data#acs_data.bba), BBA#bba_state.result]).
+
+-spec completed_bba_count(acs_data()) -> non_neg_integer().
+completed_bba_count(Data) ->
+    lists:sum([ 1 || BBA <- maps:values(Data#acs_data.bba), BBA#bba_state.result /= undefined]).
+
+-spec completed_rbc_count(acs_data()) -> non_neg_integer().
+completed_rbc_count(Data) ->
+    lists:sum([ 1 || RBC <- maps:values(Data#acs_data.rbc), RBC#rbc_state.result /= undefined]).
 
 -spec get_bba(acs_data(), non_neg_integer()) -> bba_state().
 get_bba(Data, I) ->

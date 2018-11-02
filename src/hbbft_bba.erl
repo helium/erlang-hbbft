@@ -117,6 +117,8 @@ handle_msg(Data = #bba_data{round=R}, _J, {{coin, R2}, _CMsg}) when R2 > R ->
 handle_msg(Data = #bba_data{round=R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin /= undefined ->
     %% dispatch the message to the nested coin protocol
     case hbbft_cc:handle_msg(Data#bba_data.coin, J, CMsg) of
+        ignore ->
+            ignore;
         {_NewCoin, {result, Result}} ->
             %% ok, we've obtained the common coin
             Flip = Result rem 2,
