@@ -1,6 +1,6 @@
 -module(hbbft_bba).
 
--export([init/3, input/2, handle_msg/3, serialize/1, deserialize/2, status/1]).
+-export([init/3, input/2, handle_msg/3, sort_msgs/2, serialize/1, deserialize/2, status/1]).
 
 -record(bba_data, {
           state = init :: init | waiting | done,
@@ -193,6 +193,15 @@ conf(Data, Id, V) ->
     Witness = maps:put(Id, V, Data#bba_data.conf_witness),
     NewData = Data#bba_data{conf_witness = Witness},
     decide(NewData, []).
+
+sort_msgs(A, B) ->
+    msg_order(A) =< msg_order(B).
+
+msg_order({bval, R, _}) -> {R, 0};
+msg_order({aux, R, _}) -> {R, 1};
+msg_order({conf, R, _}) -> {R, 2};
+msg_order({{coin, R}, _}) -> {R, 3};
+msg_order(_) -> {infinity, 4}.
 
 -spec serialize(bba_data()) -> bba_serialized_data().
 serialize(#bba_data{state=State,

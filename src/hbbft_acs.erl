@@ -2,6 +2,10 @@
 
 -export([init/4, input/2, handle_msg/3, serialize/1, deserialize/2, status/1]).
 
+-ifdef(TEST).
+-export([sort_bba_msgs/1]).
+-endif.
+
 -record(rbc_state, {
           rbc_data :: hbbft_rbc:rbc_data(),
           result :: undefined | binary()
@@ -143,7 +147,7 @@ handle_msg(Data = #acs_data{n=N, f=F}, J, {{bba, I}, BBAMsg}) ->
                                                               end
                                                       end, {NewData, hbbft_utils:wrap({bba, I}, ToSend0)}, lists:seq(0, N - 1)),
                     %% each BBA is independant, so the total ordering here is unimportant
-                    {NextData#acs_data{done=true}, {send, lists:flatten(Replies)}};
+                    {NextData#acs_data{done=true}, {send, sort_bba_msgs(lists:flatten(Replies))}};
                 false ->
                     check_completion(NewData)
             end;
@@ -234,6 +238,18 @@ store_rbc_state(Data, I, State) ->
 store_rbc_result(Data, I, Result) ->
     RBC = get_rbc(Data, I),
     Data#acs_data{rbc = maps:put(I, RBC#rbc_state{result=Result}, Data#acs_data.rbc)}.
+
+%% sort messages so RBC comes before BBA, BBA messages sorted by round
+sort_bba_msgs(Msgs) ->
+    lists:sort(fun({{bba, _}, BBA1}, {{bba, _}, BBA2}) ->
+                       hbbft_bba:sort_msgs(BBA1, BBA2);
+                  ({{bba, _}, _}, _) ->
+                       false;
+                  (_, {{bba, _}, _}) ->
+                       true;
+                  (_, _) ->
+                       false
+               end, Msgs).
 
 -spec serialize(acs_data()) -> acs_serialized_data().
 serialize(#acs_data{done=Done, n=N, f=F, j=J, rbc=RBCMap, bba=BBAMap}) ->
