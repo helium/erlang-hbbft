@@ -1,6 +1,6 @@
 -module(hbbft_bba).
 
--export([init/3, input/2, handle_msg/3, serialize/1, deserialize/2, status/1]).
+-export([init/3, input/2, handle_msg/3, sort_msgs/2, serialize/1, deserialize/2, status/1]).
 
 -record(bba_data, {
           state = init :: init | waiting | done,
@@ -90,10 +90,12 @@ input(Data = #bba_data{state=done}, _BInput) ->
                  aux_msg() |
                  conf_msg()) -> {bba_data(), ok} |
                                 {bba_data(), defer} |
+                                ignore |
                                 {bba_data(), {send, [hbbft_utils:multicast(bval_msg() | aux_msg() | conf_msg() | coin_msg())]}} |
-                                {bba_data(), {result_and_send, 0 | 1, {send, [hbbft_utils:multicast(term_msg())]}}}.
-handle_msg(Data = #bba_data{state=done}, _J, _BInput) ->
-    {Data, ok};
+                                {bba_data(), {result_and_send, 0 | 1, {send, [hbbft_utils:multicast(term_msg())]}}} |
+                                {bba_data(), {result, 0 | 1}}.
+handle_msg(#bba_data{state=done}, _J, _BInput) ->
+    ignore;
 handle_msg(Data = #bba_data{round=R}, J, {bval, R, V}) ->
     bval(Data, J, V);
 handle_msg(Data = #bba_data{round=R}, J, {aux, R, V}) ->
@@ -115,6 +117,8 @@ handle_msg(Data = #bba_data{round=R}, _J, {{coin, R2}, _CMsg}) when R2 > R ->
 handle_msg(Data = #bba_data{round=R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin /= undefined ->
     %% dispatch the message to the nested coin protocol
     case hbbft_cc:handle_msg(Data#bba_data.coin, J, CMsg) of
+        ignore ->
+            ignore;
         {_NewCoin, {result, Result}} ->
             %% ok, we've obtained the common coin
             Flip = Result rem 2,
@@ -137,8 +141,8 @@ handle_msg(Data, J, {term, B}) when B == 0; B == 1 ->
             %% we need to check bval/aux/conf message thresholds in light of the new TERM message
             decide(NewData, [])
     end;
-handle_msg(Data, _J, _Msg) ->
-    {Data, ok}.
+handle_msg(_Data, _J, _Msg) ->
+    ignore.
 
 %% – upon receiving BVALr (b) messages from f + 1 nodes, if
 %% BVALr (b) has not been sent, multicast BVALr (b)
@@ -189,6 +193,15 @@ conf(Data, Id, V) ->
     Witness = maps:put(Id, V, Data#bba_data.conf_witness),
     NewData = Data#bba_data{conf_witness = Witness},
     decide(NewData, []).
+
+sort_msgs(A, B) ->
+    msg_order(A) =< msg_order(B).
+
+msg_order({bval, R, _}) -> {R, 0};
+msg_order({aux, R, _}) -> {R, 1};
+msg_order({conf, R, _}) -> {R, 2};
+msg_order({{coin, R}, _}) -> {R, 3};
+msg_order(_) -> {infinity, 4}.
 
 -spec serialize(bba_data()) -> bba_serialized_data().
 serialize(#bba_data{state=State,
@@ -405,11 +418,6 @@ remove_witness(ID, Witness) ->
             OldCount = maps:get({val, val(Val)}, Witness, 1),
             maps:merge(maps:remove(ID, Witness), #{{val, val(Val)} => OldCount - 1})
     end.
-
-%count_witness(Value, Witness, Terminate) ->
-    %% add_terminate deletes other witness values, so we don't have to
-    %% worry about double counting here
-    %maps:get({val, Value}, Witness) + maps:get({val, Value}, Terminate).
 
 add_terminate(Id, Value, Data) ->
     TerminateWitness = add_witness(Id, Value, Data#bba_data.terminate_witness, false),

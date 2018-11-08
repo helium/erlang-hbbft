@@ -72,13 +72,13 @@ input(Data = #rbc_data{state=init, n=N, f=F, pid=Pid, leader=Leader}, Msg) when 
     Result = [ {unicast, J, {val, MerkleRootHash, lists:nth(J+1, BranchesForShards), lists:nth(J+1, Shards)}} || J <- lists:seq(0, N-1)],
     %% unicast all the VAL packets and multicast the ECHO for our own share
     {NewData#rbc_data{state=waiting}, {send, Result}}; % ++ [{multicast, {echo, MerkleRootHash, hd(BranchesForShards), hd(ShardsWithSize)}}]}}.
-input(Data, _Msg) ->
+input(_Data, _Msg) ->
     %% ignore anyone else other than leader who tries to start RBC
-    {Data, ok}.
+    ignore.
 
 
 %% message handlers
--spec handle_msg(rbc_data(), non_neg_integer(), val_msg() | echo_msg() | ready_msg()) -> {rbc_data(), ok | {send, send_commands()}} |
+-spec handle_msg(rbc_data(), non_neg_integer(), val_msg() | echo_msg() | ready_msg()) -> {rbc_data(), ok | {send, send_commands()}} | ignore |
                                                                                          {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()} | abort} |
                                                                                          {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()}}.
 
@@ -94,7 +94,7 @@ handle_msg(Data, J, {ready, H}) ->
 %% upon receiving VAL(h, bi , si) from PSender,
 %% multicast ECHO(h, bi , si )
 %% only multicast ECHO when VAL msssage is from the known leader
--spec val(rbc_data(), non_neg_integer(), merkerl:hash(), merkerl:proof(), binary()) -> {rbc_data(), ok | {send, send_commands()}}.
+-spec val(rbc_data(), non_neg_integer(), merkerl:hash(), merkerl:proof(), binary()) -> {rbc_data(), ok | {send, send_commands()}} | ignore.
 val(Data = #rbc_data{seen_val=false, leader=Leader}, J, H, Bj, Sj) when J == Leader ->
     case merkerl:verify_proof(merkerl:hash_value(Sj), H, Bj) of
         ok ->
@@ -102,27 +102,27 @@ val(Data = #rbc_data{seen_val=false, leader=Leader}, J, H, Bj, Sj) when J == Lea
             {Data#rbc_data{seen_val=true}, {send, [{multicast, {echo, H, Bj, Sj}}]}};
         {error, _} ->
             %% otherwise discard
-            {Data, ok}
+            ignore
     end;
-val(Data=#rbc_data{leader=_Leader}, _J, _H, _Bi, _Si) ->
+val(#rbc_data{leader=_Leader}, _J, _H, _Bi, _Si) ->
     %% we already had a val, just ignore this
     %% also, we probably don't care about this leader's VAL message either
-    {Data, ok}.
+    ignore.
 
 %% Figure2. Bullet3
 %% upon receiving ECHO(h, bj, sj ) from party Pj ,
 %% check that bj is a valid Merkle branch for root h and leaf sj ,
 %% and otherwise discard
--spec echo(rbc_data(), non_neg_integer(), merkerl:hash(), merkerl:proof(), binary()) -> {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()} | abort}.
-echo(Data = #rbc_data{state=done}, _J, _H, _Bj, _Sj) ->
-    {Data, ok};
+-spec echo(rbc_data(), non_neg_integer(), merkerl:hash(), merkerl:proof(), binary()) -> {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()} | abort} | ignore.
+echo(#rbc_data{state=done}, _J, _H, _Bj, _Sj) ->
+    ignore;
 echo(Data = #rbc_data{n=N, f=F}, J, H, Bj, Sj) ->
 
     %% check if you've already seen an ECHO from the sender
     case has_echo(Data, J) of
         true ->
             %% already got an ECHO From J, discard
-            {Data, ok};
+            ignore;
         false ->
             case merkerl:verify_proof(merkerl:hash_value(Sj), H, Bj) of
                 ok ->
@@ -142,21 +142,21 @@ echo(Data = #rbc_data{n=N, f=F}, J, H, Bj, Sj) ->
                     end;
                 {error, _} ->
                     %% otherwise discard
-                    {Data, ok}
+                    ignore
             end
     end.
 
 %% Figure2. Bullet5
 %% upon receiving f + 1 matching READY(h) messages, if READY
 %% has not yet been sent, multicast READY(h)
--spec ready(rbc_data(), non_neg_integer(), merkerl:hash()) -> {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()}}.
+-spec ready(rbc_data(), non_neg_integer(), merkerl:hash()) -> {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()}} | ignore.
 ready(Data = #rbc_data{state=waiting, n=N, f=F}, J, H) ->
     %% increment num_readies
 
     %% check if you've already seen this ready
     case has_ready(Data, J) of
         true ->
-            {Data, ok};
+            ignore;
         false ->
             NewData = add_ready(Data, H, J),
             case length(maps:get(H, NewData#rbc_data.num_readies, [])) >= F + 1 andalso maps:size(maps:get(H, NewData#rbc_data.stripes, [])) >= (N - 2*F) of
@@ -167,9 +167,8 @@ ready(Data = #rbc_data{state=waiting, n=N, f=F}, J, H) ->
                     {NewData, ok}
             end
     end;
-
-ready(Data, _J, _H) ->
-    {Data, ok}.
+ready(_Data, _J, _H) ->
+    ignore.
 
 
 %% helper functions
