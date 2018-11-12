@@ -52,8 +52,8 @@ init(SecretKeyShard, Sid, N, F) ->
 %% Figure12. Bullet2
 %% on input GetCoin, multicast ThresholdSignpk (ski, sid)
 -spec get_coin(cc_data()) -> {cc_data(), ok | {send, [hbbft_utils:multicast(share_msg())]}}.
-get_coin(#cc_data{state=done}) ->
-    ignore;
+get_coin(Data = #cc_data{state=done}) ->
+    {Data, ok};
 get_coin(Data) ->
     Share = tpke_privkey:sign(Data#cc_data.sk, Data#cc_data.sid),
     SerializedShare = hbbft_utils:share_to_binary(Share),
@@ -70,7 +70,7 @@ handle_msg(Data, J, {share, Share}) ->
     share(Data, J, Share).
 
 %% TODO: more specific return type than an integer?
--spec share(cc_data(), non_neg_integer(), binary()) -> {cc_data(), ok | {result, integer()}}.
+-spec share(cc_data(), non_neg_integer(), binary()) -> {cc_data(), ok | {result, integer()}} | ignore.
 share(#cc_data{state=done}, _J, _Share) ->
     ignore;
 share(Data, J, Share) ->
