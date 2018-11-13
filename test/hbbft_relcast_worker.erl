@@ -101,8 +101,10 @@ handle_cast(Msg, State) ->
     {noreply, State}.
 
 handle_info({transactions, Txns}, State) ->
-    %% ct:pal("Got transactions for creating a new block: ~p", [Txns]),
-    NewBlock = new_block(Txns, State),
+    %% make sure all the transactions are unique
+    ExistingTxns = lists:flatten([ block_transactions(B) || B <- State#state.blocks ]),
+    UniqueTxns = Txns -- ExistingTxns,
+    NewBlock = new_block(UniqueTxns, State),
     {ok, Relcast} = relcast:command({finalize_round, Txns, term_to_binary(NewBlock)}, State#state.relcast),
     {noreply, do_send(State#state{relcast=Relcast, tempblock=NewBlock})};
 handle_info({signature, Sig, Pubkey}, State=#state{tempblock=TempBlock, peers=Peers}) when TempBlock /= undefined ->
