@@ -192,7 +192,7 @@ one_actor_missing_test(Config) ->
     %% start it on runnin'
     {_, ConvergedResults} = hbbft_test_utils:do_send_outer(Module, Replies, NewStates, sets:new()),
     %% check no actors returned a result
-    ?assertEqual(4, sets:size(ConvergedResults)),
+    ?assertEqual(N - 1, sets:size(ConvergedResults)),
     DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
     %% check all N actors returned the same result
     ?assertEqual(1, sets:size(DistinctResults)),
