@@ -109,7 +109,8 @@ handle_msg(Data, J, {{rbc, I}, RBCMsg}) ->
                     BBA = get_bba(NewData, I),
                     case hbbft_bba:input(BBA#bba_state.bba_data, 1) of
                         {DoneBBA, ok} ->
-                            {store_bba_state(NewData, I, DoneBBA), ok};
+                            %% this BBA probably already completed, check if ACS has completed
+                            check_completion(store_bba_state(NewData, I, DoneBBA));
                         {NewBBA, {send, ToSend}} ->
                             {store_bba_input(store_bba_state(NewData, I, NewBBA), I, 1),
                             {send, hbbft_utils:wrap({bba, I}, ToSend)}}
@@ -147,6 +148,7 @@ handle_msg(Data = #acs_data{n=N, f=F}, J, {{bba, I}, BBAMsg}) ->
                                                               end
                                                       end, {NewData, hbbft_utils:wrap({bba, I}, ToSend0)}, lists:seq(0, N - 1)),
                     %% each BBA is independant, so the total ordering here is unimportant
+                    %% but we sort to try to get the messages from the earlier rounds delivered first
                     {NextData#acs_data{done=true}, {send, sort_bba_msgs(lists:flatten(Replies))}};
                 false ->
                     check_completion(NewData)
