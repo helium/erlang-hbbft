@@ -77,9 +77,10 @@ handle_cast({ack, Sender}, State) ->
     %% ct:pal("ack, Sender: ~p", [Sender]),
     {ok, NewRelcast} = relcast:ack(Sender, maps:get(Sender, State#state.peers, undefined), State#state.relcast),
     {noreply, do_send(State#state{relcast=NewRelcast, peers=maps:put(Sender, undefined, State#state.peers)})};
-handle_cast({block, Block, PubKey}, State) ->
+handle_cast({block, Block, SerializedPubKey}, State) ->
     case lists:member(Block, State#state.blocks) of
         false ->
+            PubKey = tpke_pubkey:deserialize(SerializedPubKey),
             case verify_block_fit([Block | State#state.blocks], PubKey) of
                 true ->
                     {ok, Relcast} = relcast:command(next_round, State#state.relcast),
@@ -112,7 +113,7 @@ handle_info({signature, Sig, Pubkey}, State=#state{tempblock=TempBlock, peers=Pe
         false ->
             case verify_block_fit([NewBlock | State#state.blocks], Pubkey) of
                 true ->
-                    _ = [gen_server:cast({global, name(I)}, {block, NewBlock, Pubkey}) || {I, _} <- maps:to_list(Peers)],
+                    _ = [gen_server:cast({global, name(I)}, {block, NewBlock, tpke_pubkey:serialize(Pubkey)}) || {I, _} <- maps:to_list(Peers)],
                     {ok, Relcast} = relcast:command(next_round, State#state.relcast),
                     {noreply, do_send(State#state{relcast=Relcast,
                                                   tempblock=undefined,
