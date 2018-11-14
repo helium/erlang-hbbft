@@ -90,7 +90,7 @@ input(Data, Input) ->
 -spec handle_msg(acs_data(), non_neg_integer(), rbc_msg() | bba_msg()) -> {acs_data(), ok |
                                                                            defer |
                                                                            {send, [rbc_wrapped_output() | hbbft_utils:multicast(bba_msg())]} |
-                                                                           {result, [{non_neg_integer(), binary()}]}} | ignore.
+                                                                           {result_and_send, [{non_neg_integer(), binary()}], {send, [rbc_wrapped_output() | hbbft_utils:multicast(bba_msg())]}}} | ignore.
 handle_msg(Data, J, {{rbc, I}, RBCMsg}) ->
     RBC = get_rbc(Data, I),
     case hbbft_rbc:handle_msg(RBC#rbc_state.rbc_data, J, RBCMsg) of
@@ -103,14 +103,14 @@ handle_msg(Data, J, {{rbc, I}, RBCMsg}) ->
             NewData = store_rbc_result(store_rbc_state(Data, I, NewRBC), I, Result),
             case bba_has_had_input(maps:get(I, NewData#acs_data.bba)) of
                 true ->
-                    check_completion(NewData);
+                    check_completion(NewData, []);
                 false ->
                     %% ok, start the BBA for this RBC
                     BBA = get_bba(NewData, I),
                     case hbbft_bba:input(BBA#bba_state.bba_data, 1) of
                         {DoneBBA, ok} ->
                             %% this BBA probably already completed, check if ACS has completed
-                            check_completion(store_bba_state(NewData, I, DoneBBA));
+                            check_completion(store_bba_state(NewData, I, DoneBBA), []);
                         {NewBBA, {send, ToSend}} ->
                             {store_bba_input(store_bba_state(NewData, I, NewBBA), I, 1),
                             {send, hbbft_utils:wrap({bba, I}, ToSend)}}
@@ -149,9 +149,11 @@ handle_msg(Data = #acs_data{n=N, f=F}, J, {{bba, I}, BBAMsg}) ->
                                                       end, {NewData, hbbft_utils:wrap({bba, I}, ToSend0)}, lists:seq(0, N - 1)),
                     %% each BBA is independant, so the total ordering here is unimportant
                     %% but we sort to try to get the messages from the earlier rounds delivered first
-                    {NextData#acs_data{done=true}, {send, sort_bba_msgs(lists:flatten(Replies))}};
+                    %%
+                    %% It's possible that this is the final BBA/RBC message we will see and that we've completed the round so check for that here
+                    check_completion(NextData#acs_data{done=true}, sort_bba_msgs(lists:flatten(Replies)));
                 false ->
-                    check_completion(NewData)
+                    check_completion(NewData, [])
             end;
         {NewBBA, ok} ->
             {store_bba_state(Data, I, NewBBA), ok};
@@ -160,7 +162,7 @@ handle_msg(Data = #acs_data{n=N, f=F}, J, {{bba, I}, BBAMsg}) ->
             {store_bba_state(Data, I, NewBBA), defer}
     end.
 
-check_completion(Data = #acs_data{n=N}) ->
+check_completion(Data = #acs_data{n=N}, ToSend) ->
     %% Figure4, Bullet4
     %% once all instances of BA have completed, let C⊂[1..N] be the indexes of each BA that delivered 1.
     %% Wait for the output vj for each RBCj such that j∈C. Finally output ∪j∈Cvj.
@@ -169,9 +171,9 @@ check_completion(Data = #acs_data{n=N}) ->
          lists:all(fun(BBA) -> bba_completed(BBA) end, maps:values(Data#acs_data.bba)) of
         true ->
             ResultVector = [ {E, get_rbc_result(Data, E)} || E <- lists:seq(0, N-1), get_bba_result(Data, E) ],
-            {Data, {result, ResultVector}};
+            {Data, {result_and_send, ResultVector, {send, ToSend}}};
         false ->
-            {Data, ok}
+            {Data, {send, ToSend}}
     end.
 
 -spec rbc_completed(rbc_state()) -> boolean().
