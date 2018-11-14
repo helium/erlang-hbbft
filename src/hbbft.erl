@@ -191,7 +191,7 @@ handle_msg(Data = #hbbft_data{round=R}, J, {{acs, R}, ACSMsg}) ->
             {Data#hbbft_data{acs=NewACS}, ok};
         {NewACS, {send, ACSResponse}} ->
             {Data#hbbft_data{acs=NewACS}, {send, hbbft_utils:wrap({acs, Data#hbbft_data.round}, ACSResponse)}};
-        {NewACS, {result, Results}} ->
+        {NewACS, {result_and_send, Results, {send, ACSResponse}}} ->
             %% ACS[r] has returned, time to move on to the decrypt phase
             %% start decrypt phase
             Replies = lists:map(fun({I, Result}) ->
@@ -200,7 +200,7 @@ handle_msg(Data = #hbbft_data{round=R}, J, {{acs, R}, ACSMsg}) ->
                                         SerializedShare = hbbft_utils:share_to_binary(Share),
                                         {multicast, {dec, Data#hbbft_data.round, I, SerializedShare}}
                                 end, Results),
-            {Data#hbbft_data{acs=NewACS, acs_results=Results}, {send, Replies}};
+            {Data#hbbft_data{acs=NewACS, acs_results=Results}, {send,  hbbft_utils:wrap({acs, Data#hbbft_data.round}, ACSResponse) ++ Replies}};
         {NewACS, defer} ->
             {Data#hbbft_data{acs=NewACS}, defer}
     end;
