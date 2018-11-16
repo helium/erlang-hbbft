@@ -112,8 +112,7 @@ handle_msg(Data, J, {{rbc, I}, RBCMsg}) ->
                             %% this BBA probably already completed, check if ACS has completed
                             check_completion(store_bba_state(NewData, I, DoneBBA), []);
                         {NewBBA, {send, ToSend}} ->
-                            {store_bba_input(store_bba_state(NewData, I, NewBBA), I, 1),
-                            {send, hbbft_utils:wrap({bba, I}, ToSend)}}
+                            check_completion(store_bba_input(store_bba_state(NewData, I, NewBBA), I, 1), hbbft_utils:wrap({bba, I}, ToSend))
                     end
             end;
         {NewRBC, ok} ->
