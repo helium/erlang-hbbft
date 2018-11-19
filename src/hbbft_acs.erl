@@ -110,10 +110,9 @@ handle_msg(Data, J, {{rbc, I}, RBCMsg}) ->
                     case hbbft_bba:input(BBA#bba_state.bba_data, 1) of
                         {DoneBBA, ok} ->
                             %% this BBA probably already completed, check if ACS has completed
-                            check_completion(store_bba_state(NewData, I, DoneBBA), []);
+                            check_completion(store_bba_input(store_bba_state(NewData, I, DoneBBA), I, 1), []);
                         {NewBBA, {send, ToSend}} ->
-                            {store_bba_input(store_bba_state(NewData, I, NewBBA), I, 1),
-                            {send, hbbft_utils:wrap({bba, I}, ToSend)}}
+                            check_completion(store_bba_input(store_bba_state(NewData, I, NewBBA), I, 1), hbbft_utils:wrap({bba, I}, ToSend))
                     end
             end;
         {NewRBC, ok} ->
@@ -141,7 +140,7 @@ handle_msg(Data = #acs_data{n=N, f=F}, J, {{bba, I}, BBAMsg}) ->
                                                                           {FailedBBA, {send, ToSend}} ->
                                                                               {store_bba_input(store_bba_state(DataAcc, E, FailedBBA), E, 0), [hbbft_utils:wrap({bba, E}, ToSend)|MsgAcc]};
                                                                           {DoneBBA, ok} ->
-                                                                              {store_bba_state(DataAcc, E, DoneBBA), MsgAcc}
+                                                                              {store_bba_input(store_bba_state(DataAcc, E, DoneBBA), E, 0), MsgAcc}
                                                                       end;
                                                                   true ->
                                                                       Acc
