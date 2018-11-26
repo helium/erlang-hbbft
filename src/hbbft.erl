@@ -176,10 +176,12 @@ round(_Data=#hbbft_data{round=Round}) ->
 
 -spec handle_msg(hbbft_data(), non_neg_integer(), acs_msg() | dec_msg() | sign_msg()) -> {hbbft_data(), ok |
                                                                                           defer |
-                                                                                          ignore |
-                                                                                          {send, [hbbft_utils:multicast(dec_msg() | sign_msg()) | rbc_wrapped_output() | bba_wrapped_output()]} |
+                                                                                          {send, [hbbft_utils:multicast(dec_msg() |
+                                                                                                                        sign_msg()) |
+                                                                                                  rbc_wrapped_output() |
+                                                                                                  bba_wrapped_output()]} |
                                                                                           {result, {transactions, list(), [binary()]}} |
-                                                                                          {result, {signature, binary()}}}.
+                                                                                          {result, {signature, binary()}}} | ignore.
 handle_msg(Data = #hbbft_data{round=R}, _J, {{acs, R2}, _ACSMsg}) when R2 > R ->
     %% ACS requested we defer this message for now
     {Data, defer};
