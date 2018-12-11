@@ -1,6 +1,6 @@
 -module(hbbft_test_utils).
 
--export([do_send_outer/4, random_n/2, enumerate/1, merge_replies/3]).
+-export([do_send_outer/4, shuffle/1, random_n/2, enumerate/1, merge_replies/3]).
 
 do_send_outer(_Mod, [], States, Acc) ->
     {States, Acc};
