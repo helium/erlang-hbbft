@@ -2,6 +2,7 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("relcast/include/fakecast.hrl").
 
 -export([all/0, init_per_testcase/2, end_per_testcase/2]).
 -export([
@@ -10,7 +11,8 @@
          incorrect_leader_test/1,
          f_dying_test/1,
          simple_test/1,
-         twof_dying_test/1
+         twof_dying_test/1,
+         fakecast_test/1
         ]).
 
 all() ->
@@ -20,7 +22,8 @@ all() ->
      incorrect_leader_test,
      f_dying_test,
      simple_test,
-     twof_dying_test
+     twof_dying_test,
+     fakecast_test
     ].
 
 init_per_testcase(_, Config) ->
@@ -164,4 +167,65 @@ simple_test(Config) ->
     ct:pal("ConvergedResults: ~p~n", [ConvergedResults]),
     1 = sets:size(sets:from_list(ConvergedResults)),
     Msg = hd(ConvergedResults),
+    ok.
+
+-record(state,
+        {
+         node_count :: integer(),
+         stopped = false :: boolean(),
+         results = sets:new() :: sets:set()
+        }).
+
+trivial(_Message, _From, To, _NodeState, _NewState, {result, Result},
+        #state{results = Results0} = State) ->
+    Results = sets:add_element({result, {To, Result}}, Results0),
+    %% ct:pal("results len ~p ~p", [sets:size(Results), sets:to_list(Results)]),
+    case sets:size(Results) == State#state.node_count of
+        true ->
+            {result, Results};
+        false ->
+            {actions, [], State#state{results = Results}}
+    end;
+trivial(_Message, _From, To, _NodeState, _NewState, {result_and_send, Result, _Msgs},
+        #state{results = Results0} = State) ->
+    Results = sets:add_element({result, {To, Result}}, Results0),
+    %% ct:pal("results len ~p ~p", [sets:size(Results), sets:to_list(Results)]),
+    case sets:size(Results) == State#state.node_count of
+        true ->
+            {result, Results};
+        false ->
+            {actions, [], State#state{results = Results}}
+    end;
+trivial(_Message, _From, _To, _NodeState, _NewState, _Actions, ModelState) ->
+    {actions, [], ModelState}.
+
+fakecast_test(Config) ->
+    N = 4, %proplists:get_value(n, Config),
+    F = 1, %proplists:get_value(f, Config),
+    Module = proplists:get_value(module, Config),
+    Msg = proplists:get_value(msg, Config),
+
+    Init = fun() ->
+                   {ok,
+                    #fc_conf{
+                       test_mod = Module,
+                       nodes = lists:seq(1, N),  %% are names useful?
+                       configs = [[N, F, ID, 0] || ID <- lists:seq(0, N - 1)]
+                      },
+                    #state{node_count = N}
+                   }
+           end,
+
+    Input = [{0, Msg}],
+    Seed = os:timestamp(),
+    %% try
+    {ok, ConvergedResults} = fakecast:start_test(Init, fun trivial/7,
+                                                 Seed,
+                                                 Input),
+    %% everyone should converge
+    ?assertEqual(N, sets:size(ConvergedResults)),
+    %% the decoded result should be the original message
+    ConvergedResultsList = sets:to_list(ConvergedResults),
+    ct:pal("ConvergedResultsList: ~p~n", [ConvergedResultsList]),
+    ?assert(lists:all(fun({result, {_, Res}}) -> Res == Msg end, ConvergedResultsList)),
     ok.
