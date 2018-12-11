@@ -13,7 +13,8 @@
          encrypt_decrypt_test/1,
          start_on_demand_test/1,
          one_actor_wrong_key_test/1,
-         one_actor_corrupted_key_test/1
+         one_actor_corrupted_key_test/1,
+         initial_fakecast_test/1
         ]).
 
 all() ->
@@ -26,12 +27,13 @@ all() ->
      encrypt_decrypt_test,
      start_on_demand_test,
      one_actor_wrong_key_test,
-     one_actor_corrupted_key_test
+     one_actor_corrupted_key_test,
+     initial_fakecast_test
     ].
 
 init_per_testcase(_, Config) ->
-    N = 5,
-    F = N div 4,
+    N = 7,
+    F = N div 3,
     Module = hbbft,
     BatchSize = 20,
     {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
@@ -383,6 +385,83 @@ one_actor_corrupted_key_test(Config) ->
     %% check they're all members of the original message list
     true = sets:is_subset(sets:from_list(BlockTxns), sets:from_list(Msgs)),
     io:format("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
+    ok.
+
+
+-record(state,
+        {
+         node_count :: integer(),
+         stopped = false :: boolean(),
+         results = sets:new() :: sets:set()
+        }).
+
+trivial(_Message, _From, _To, _NodeState, _NewState, _Actions,
+        #state{stopped = false} = State) ->
+    case rand:uniform(100) of
+        100 ->
+            {actions, [{stop_node, 4}, {stop_node, 2}
+                      ], State#state{stopped = true}};
+        _ ->
+            {continue, State}
+    end;
+trivial(_Message, _From, To, _NodeState, _NewState, {result, Result},
+        #state{results = Results0} = State) ->
+    Results = sets:add_element({result, {To, Result}}, Results0),
+    %% ct:pal("results len ~p ~p", [sets:size(Results), sets:to_list(Results)]),
+    case sets:size(Results) == State#state.node_count of
+        true ->
+            {result, Results};
+        false ->
+            {continue, State#state{results = Results}}
+    end;
+trivial(_Message, _From, _To, _NodeState, _NewState, _Actions, ModelState) ->
+    {continue, ModelState}.
+
+initial_fakecast_test(Config) ->
+    N = proplists:get_value(n, Config),
+    F = proplists:get_value(f, Config),
+    BatchSize = proplists:get_value(batchsize, Config),
+    Module = proplists:get_value(module, Config),
+    PrivateKeys = proplists:get_value(privatekeys, Config),
+
+    Init = fun() ->
+                   {ok,
+                    {
+                     Module,
+                     random,
+                     favor_concurrent,
+                     [aaa, bbb, ccc, ddd, eee, fff, ggg],  %% are names useful?
+                     0,
+                     [[Sk, N, F, ID, BatchSize, infinity]
+                      || {ID, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
+                     5000
+                    },
+                    #state{node_count = N - 2}
+                   }
+           end,
+    Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*10)],
+    %% send each message to a random subset of the HBBFT actors
+    Input =
+        fun() ->
+                lists:foldl(fun(ID, Acc) ->
+                                    Size = max(length(Msgs), BatchSize + (rand:uniform(length(Msgs)))),
+                                    Subset = hbbft_test_utils:random_n(Size, Msgs),
+                                    lists:append([{ID, Msg} || Msg <- Subset], Acc)
+                            end, [], lists:seq(0, N - 1))
+        end,
+    %% start it on runnin'
+    {ok, ConvergedResults} = fakecast:start_test(Init, fun trivial/7, %%{1543,962578,549287},
+                                                 os:timestamp(),
+                                                 Input),
+
+    %% check all N actors returned a result
+    ?assertEqual(N - 2, sets:size(ConvergedResults)),
+    DistinctResults = sets:from_list([BVal || {result, {_, BVal}} <- sets:to_list(ConvergedResults)]),
+    %% check all N actors returned the same result
+    ?assertEqual(1, sets:size(DistinctResults)),
+    {_, _, AcceptedMsgs} = lists:unzip3(lists:flatten(sets:to_list(DistinctResults))),
+    %% check all the Msgs are actually from the original set
+    ?assert(sets:is_subset(sets:from_list(lists:flatten(AcceptedMsgs)), sets:from_list(Msgs))),
     ok.
 
 %% helper functions
