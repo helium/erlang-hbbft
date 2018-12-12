@@ -2,6 +2,7 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("relcast/include/fakecast.hrl").
 
 -export([all/0, init_per_testcase/2, end_per_testcase/2]).
 -export([termination_test/1,
@@ -235,7 +236,7 @@ trivial(_Message, _From, To, _NodeState, _NewState, {result, Result},
         true ->
             {result, Results};
         false ->
-            {continue, State#state{results = Results}}
+            {actions, [], State#state{results = Results}}
     end;
 trivial(_Message, _From, To, _NodeState, _NewState, {result_and_send, Result, _},
         #state{results = Results0} = State) ->
@@ -245,11 +246,11 @@ trivial(_Message, _From, To, _NodeState, _NewState, {result_and_send, Result, _}
         true ->
             {result, Results};
         false ->
-            {continue, State#state{results = Results}}
+            {actions, [], State#state{results = Results}}
     end;
 trivial(_Message, _From, _To, _NodeState, _NewState, _Actions, ModelState) ->
     %%fakecast:trace("act ~p", [_Actions]),
-    {continue, ModelState}.
+    {actions, [], ModelState}.
 
 fakecast_test(Config) ->
     Module = proplists:get_value(module, Config),
@@ -259,16 +260,11 @@ fakecast_test(Config) ->
     {ok, {_PubKey, PrivateKeys}} = dealer:deal(Dealer),
     Init = fun() ->
                    {ok,
-                    {
-                     Module,
-                     random,
-                     favor_concurrent,
-                     [aaa, bbb, ccc, ddd],
-                     0,
-                     [[Sk, N, F]
-                      || Sk <- PrivateKeys],
-                     1000
-                    },
+                    #fc_conf{
+                       test_mod = Module,
+                       nodes = [aaa, bbb, ccc, ddd],
+                       configs = [[Sk, N, F] || Sk <- PrivateKeys]
+                      },
                     #state{node_count = N}
                    }
            end,

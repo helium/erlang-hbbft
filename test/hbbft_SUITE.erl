@@ -2,6 +2,7 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("relcast/include/fakecast.hrl").
 
 -export([all/0, init_per_testcase/2, end_per_testcase/2]).
 -export([
@@ -28,8 +29,8 @@ all() ->
     ].
 
 init_per_testcase(_, Config) ->
-    N = 7,
-    F = N div 3,
+    N = 5,
+    F = N div 4,
     Module = hbbft,
     BatchSize = 20,
     {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
@@ -287,10 +288,9 @@ trivial(_Message, _From, _To, _NodeState, _NewState, _Actions,
         #state{stopped = false} = State) ->
     case rand:uniform(100) of
         100 ->
-            {actions, [{stop_node, 4}, {stop_node, 2}
-                      ], State#state{stopped = true}};
+            {actions, [{stop_node, 2}], State#state{stopped = true}};
         _ ->
-            {continue, State}
+            {actions, [], State}
     end;
 trivial(_Message, _From, To, _NodeState, _NewState, {result, Result},
         #state{results = Results0} = State) ->
@@ -300,30 +300,27 @@ trivial(_Message, _From, To, _NodeState, _NewState, {result, Result},
         true ->
             {result, Results};
         false ->
-            {continue, State#state{results = Results}}
+            {actions, [], State#state{results = Results}}
     end;
 trivial(_Message, _From, _To, _NodeState, _NewState, _Actions, ModelState) ->
-    {continue, ModelState}.
+    {actions, [], ModelState}.
 
 initial_fakecast_test(Config) ->
-    N = proplists:get_value(n, Config),
-    F = proplists:get_value(f, Config),
+    N = 4, % proplists:get_value(n, Config),
+    F = 1, % proplists:get_value(f, Config),
     BatchSize = proplists:get_value(batchsize, Config),
     Module = proplists:get_value(module, Config),
-    PrivateKeys = proplists:get_value(privatekeys, Config),
+    PrivateKeys0 = proplists:get_value(privatekeys, Config),
+    {PrivateKeys, _} = lists:split(N, PrivateKeys0),
 
     Init = fun() ->
                    {ok,
-                    {
-                     Module,
-                     random,
-                     favor_concurrent,
-                     [aaa, bbb, ccc, ddd, eee, fff, ggg],  %% are names useful?
-                     0,
-                     [[Sk, N, F, ID, BatchSize, infinity]
-                      || {ID, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
-                     5000
-                    },
+                    #fc_conf{
+                       test_mod = Module,
+                       nodes = lists:seq(1, N),
+                       configs = [[Sk, N, F, ID, BatchSize, infinity]
+                                  || {ID, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)]
+                      },
                     #state{node_count = N - 2}
                    }
            end,
@@ -338,7 +335,7 @@ initial_fakecast_test(Config) ->
                             end, [], lists:seq(0, N - 1))
         end,
     %% start it on runnin'
-    {ok, ConvergedResults} = fakecast:start_test(Init, fun trivial/7, %%{1543,962578,549287},
+    {ok, ConvergedResults} = fakecast:start_test(Init, fun trivial/7,
                                                  os:timestamp(),
                                                  Input),
 

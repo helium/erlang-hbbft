@@ -2,6 +2,7 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("relcast/include/fakecast.hrl").
 
 -export([all/0, init_per_testcase/2, end_per_testcase/2]).
 -export([
@@ -183,7 +184,7 @@ trivial(_Message, _From, To, _NodeState, _NewState, {result, Result},
         true ->
             {result, Results};
         false ->
-            {continue, State#state{results = Results}}
+            {actions, [], State#state{results = Results}}
     end;
 trivial(_Message, _From, To, _NodeState, _NewState, {result_and_send, Result, _Msgs},
         #state{results = Results0} = State) ->
@@ -193,10 +194,10 @@ trivial(_Message, _From, To, _NodeState, _NewState, {result_and_send, Result, _M
         true ->
             {result, Results};
         false ->
-            {continue, State#state{results = Results}}
+            {actions, [], State#state{results = Results}}
     end;
 trivial(_Message, _From, _To, _NodeState, _NewState, _Actions, ModelState) ->
-    {continue, ModelState}.
+    {actions, [], ModelState}.
 
 fakecast_test(Config) ->
     N = 4, %proplists:get_value(n, Config),
@@ -206,16 +207,11 @@ fakecast_test(Config) ->
 
     Init = fun() ->
                    {ok,
-                    {
-                     Module,
-                     random,
-                     favor_concurrent,
-                     lists:seq(1, N),  %% are names useful?
-                     0,
-                     [[N, F, ID, 0]
-                      || ID <- lists:seq(0, N - 1)],
-                     2000
-                    },
+                    #fc_conf{
+                       test_mod = Module,
+                       nodes = lists:seq(1, N),  %% are names useful?
+                       configs = [[N, F, ID, 0] || ID <- lists:seq(0, N - 1)]
+                      },
                     #state{node_count = N}
                    }
            end,

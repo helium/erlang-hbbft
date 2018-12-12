@@ -72,7 +72,6 @@ status(BBAData) ->
 
 -spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer()) -> bba_data().
 init(SK, N, F) ->
-    %% fakecast:trace("init n ~p f ~p", [N, F]),
     #bba_data{secret_key=SK, n=N, f=F}.
 
 %% upon receiving input binput , set est0 := binput and proceed as
@@ -120,7 +119,6 @@ handle_msg(Data = #bba_data{round=R, coin=Coin}, J, {{coin, R}, CMsg}) when Coin
     %% dispatch the message to the nested coin protocol
     case hbbft_cc:handle_msg(Data#bba_data.coin, J, CMsg) of
         ignore ->
-            %% fakecast:trace("coin ignore"),
             ignore;
         {_NewCoin, {result, Result}} ->
             %% ok, we've obtained the common coin
@@ -145,7 +143,6 @@ handle_msg(Data, J, {term, B}) when B == 0; B == 1 ->
             decide(NewData, [])
     end;
 handle_msg(_Data, _J, _Msg) ->
-    %% fakecast:trace("end ignore: d ~p j ~p m ~p", [_Data, _J, _Msg]),
     ignore.
 
 %% – upon receiving BVALr (b) messages from f + 1 nodes, if
@@ -155,16 +152,14 @@ bval(Data=#bba_data{f=F}, Id, V) ->
     %% add to witnesses
     Witness = add_witness(Id, V, Data#bba_data.bval_witness, true),
     WitnessCount = maps:get({val, V}, Witness, 0),
-    %% fakecast:trace("wc (f+1 is ~p): ~p bcast ~p", [F+1, WitnessCount, not has(V, Data#bba_data.broadcasted)]),
+
     {NewData, ToSend} = case WitnessCount >= F+1 andalso not has(V, Data#bba_data.broadcasted) of
                             true ->
                                 %% add to broadcasted
-                                %% fakecast:trace("got enough"),
                                 NewData0 = Data#bba_data{bval_witness=Witness,
                                                          broadcasted=add(V, Data#bba_data.broadcasted)},
                                 {NewData0, [{multicast, {bval, Data#bba_data.round, V}}]};
                             false ->
-                                %% fakecast:trace("updating witness"),
                                 {Data#bba_data{bval_witness=Witness}, []}
                         end,
 
@@ -288,7 +283,6 @@ deserialize(#bba_serialized_data{state=State,
 
 decide(Data=#bba_data{n=N, f=F}, ToSend0) ->
     %% check if we have n-f aux messages
-    %% fakecast:trace("decide ~p ~p ~p", [N, F, Data]),
     case threshold(N, F, Data, aux) of
         true ->
             case schedule(Data#bba_data.round) of
@@ -459,8 +453,6 @@ check_coin_flip({Data, ToSend}, Flip) ->
                          false ->
                              undefined
                      end,
-            %% fakecast:trace("count is right: round ~p b ~p flip ~p output ~p",
-            %%                [Data#bba_data.round, B, Flip, Data#bba_data.output]),
             case B == Flip andalso Data#bba_data.output == B of
                 true ->
                     %% we are done
@@ -470,13 +462,10 @@ check_coin_flip({Data, ToSend}, Flip) ->
                     %% increment round and continue
                     NewData = init(Data#bba_data.secret_key, Data#bba_data.n, Data#bba_data.f),
                     {NewData2, {send, NewToSend}} = input(NewData#bba_data{round=Data#bba_data.round + 1, output=Output, terminate_witness=Data#bba_data.terminate_witness}, B),
-                    %% fakecast:trace("new round mesages: ~p ++ ~p",
-                    %%               [ToSend, NewToSend]),
                     {NewData2, {send, ToSend ++ NewToSend}}
             end;
         false ->
             %% else estr+1 := s%2
-            %% fakecast:trace("count is wrong"),
             B = Flip,
             NewData = init(Data#bba_data.secret_key, Data#bba_data.n, Data#bba_data.f),
             {NewData2, {send, NewToSend}} = input(NewData#bba_data{round=Data#bba_data.round + 1, terminate_witness=Data#bba_data.terminate_witness}, B),
