@@ -1,0 +1,22 @@
+version: 2.1
+
+orbs:
+    rebar3: tsloughter/rebar3@0.5.1
+
+steps:
+    - run:
+        command: <<parameters.pkg_install_cmd>> yasm
+
+workflows:
+  build-test:
+    jobs:
+      - rebar3/compile
+      - rebar3/xref:
+          requires:
+            - rebar3/compile
+      - rebar3/dialyzer:
+          requires:
+            - rebar3/compile
+      - rebar3/ct:
+          requires:
+            - rebar3/compile
