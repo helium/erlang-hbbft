@@ -67,7 +67,7 @@ send_incorrect_msg_test(Config) ->
     BadMsg = crypto:strong_rand_bytes(512),
     M = N - 2*F,
     K = 2*F,
-    {ok, Shards} = erasure:encode(K, M, BadMsg),
+    {ok, Shards} = erasure:encode_gc(K, M, BadMsg),
     MsgSize = byte_size(BadMsg),
     ShardsWithSize = [{MsgSize, Shard} || Shard <- Shards],
     Merkle = merkerl:new(ShardsWithSize, fun merkerl:hash_value/1),
