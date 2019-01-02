@@ -61,7 +61,7 @@ input(Data = #rbc_data{state=init, n=N, f=F, pid=Pid, leader=Leader}, Msg) when 
     M = N - 2*F,
     K = 2*F,
     %% Shards represent sj from the whitepaper
-    {ok, Shards} = erasure:encode(K, M, Msg),
+    {ok, Shards} = erasure:encode_gc(K, M, Msg),
     %% Need to know the size of the msg for decoding
     Merkle = merkerl:new(Shards, fun merkerl:hash_value/1),
     MerkleRootHash = merkerl:root_hash(Merkle),
@@ -209,10 +209,10 @@ check_completion(Data = #rbc_data{n=N, f=F}, H) ->
     K = 2*F,
 
     Shards = maps:values(maps:get(H, Data#rbc_data.stripes, #{})),
-    case erasure:decode(K, M, Shards) of
+    case erasure:decode_gc(K, M, Shards) of
         {ok, Msg} ->
             %% recompute merkle root H
-            {ok, AllShards} = erasure:encode(K, M, Msg),
+            {ok, AllShards} = erasure:encode_gc(K, M, Msg),
             Merkle = merkerl:new(AllShards, fun merkerl:hash_value/1),
             MerkleRootHash = merkerl:root_hash(Merkle),
             case H == MerkleRootHash of
