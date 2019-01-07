@@ -153,7 +153,7 @@ handle_msg(Data = #acs_data{n=N, f=F}, J, {{bba, I}, BBAMsg}) ->
                     %% It's possible that this is the final BBA/RBC message we will see and that we've completed the round so check for that here
                     check_completion(NextData#acs_data{done=true}, sort_bba_msgs(lists:flatten(Replies)));
                 false ->
-                    check_completion(NewData, [])
+                    check_completion(NewData, hbbft_utils:wrap({bba, I}, ToSend0))
             end;
         {NewBBA, ok} ->
             {store_bba_state(Data, I, NewBBA), ok};
