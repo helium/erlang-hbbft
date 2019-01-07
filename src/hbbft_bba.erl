@@ -92,8 +92,7 @@ input(Data = #bba_data{state=done}, _BInput) ->
                                 {bba_data(), defer} |
                                 ignore |
                                 {bba_data(), {send, [hbbft_utils:multicast(bval_msg() | aux_msg() | conf_msg() | coin_msg())]}} |
-                                {bba_data(), {result_and_send, 0 | 1, {send, [hbbft_utils:multicast(term_msg())]}}} |
-                                {bba_data(), {result, 0 | 1}}.
+                                {bba_data(), {result_and_send, 0 | 1, {send, [hbbft_utils:multicast(term_msg())]}}}.
 handle_msg(#bba_data{state=done}, _J, _BInput) ->
     ignore;
 handle_msg(Data = #bba_data{round=R}, J, {bval, R, V}) ->
