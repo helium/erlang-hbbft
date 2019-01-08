@@ -1,7 +1,7 @@
 {"1.1.0",
 [{<<"erasure">>,
   {git,"https://github.com/helium/erlang-erasure.git",
-       {ref,"d6d7083f81f110fe624d45b8c98ee98028631da6"}},
+       {ref,"1697137c56eccf2f681fc9f42de6d299be77e857"}},
   0},
  {<<"erlang_pbc">>,
   {git,"https://github.com/helium/erlang_pbc.git",
