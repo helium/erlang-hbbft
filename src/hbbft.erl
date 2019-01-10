@@ -378,7 +378,7 @@ serialize(#hbbft_data{secret_key=SK}=Data, true) ->
 -spec deserialize(hbbft_serialized_data(), tpke_privkey:privkey()) -> hbbft_data().
 deserialize(R, SK) when is_record(R, hbbft_serialized_data, 19) ->
     %% old record without filterfun field
-    deserialize(tuple_to_list(list_to_tuple(R) ++ [undefined]), SK);
+    deserialize(list_to_tuple(tuple_to_list(R) ++ [undefined]), SK);
 deserialize(#hbbft_serialized_data{batch_size=BatchSize,
                                    n=N,
                                    f=F,
