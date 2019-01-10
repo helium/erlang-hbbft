@@ -6,12 +6,14 @@
 -export([all/0, init_per_testcase/2, end_per_testcase/2]).
 -export([
          init_test/1,
+         filter_fun_test/1,
          one_actor_no_txns_test/1,
          two_actors_no_txns_test/1,
          one_actor_missing_test/1,
          two_actors_missing_test/1,
          encrypt_decrypt_test/1,
-         start_on_demand_test/1
+         start_on_demand_test/1,
+         filter_fun/1
         ]).
 
 all() ->
@@ -82,6 +84,56 @@ init_test(Config) ->
     true = sets:is_subset(sets:from_list(BlockTxns), sets:from_list(Msgs)),
     io:format("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
     ok.
+
+filter_fun_test(Config) ->
+    N = proplists:get_value(n, Config),
+    F = proplists:get_value(f, Config),
+    BatchSize = proplists:get_value(batchsize, Config),
+    PubKey = proplists:get_value(pubkey, Config),
+    PrivateKeys = proplists:get_value(privatekeys, Config),
+    Workers = [ element(2, hbbft_worker:start_link(N, F, I, tpke_privkey:serialize(SK), BatchSize, false)) || {I, SK} <- enumerate(PrivateKeys) ],
+    [ hbbft_worker:set_filter_fun(?MODULE, filter_fun, [], W) || W<- Workers ],
+    Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*20)],
+    %% feed the badgers some msgs
+    lists:foreach(fun(Msg) ->
+                          Destinations = random_n(rand:uniform(N), Workers),
+                          io:format("destinations ~p~n", [Destinations]),
+                          [ok = hbbft_worker:submit_transaction(Msg, D) || D <- Destinations]
+                  end, Msgs),
+
+    %% wait for all the worker's mailboxes to settle and
+    %% wait for the chains to converge
+    ok = hbbft_ct_utils:wait_until(fun() ->
+                                           Chains = sets:from_list(lists:map(fun(W) ->
+                                                                                     {ok, Blocks} = hbbft_worker:get_blocks(W),
+                                                                                     Blocks
+                                                                             end, Workers)),
+
+                                           0 == lists:sum([element(2, erlang:process_info(W, message_queue_len)) || W <- Workers ]) andalso
+                                           1 == sets:size(Chains) andalso
+                                           0 /= length(hd(sets:to_list(Chains)))
+                                   end, 60*2, 500),
+
+
+    Chains = sets:from_list(lists:map(fun(W) ->
+                                              {ok, Blocks} = hbbft_worker:get_blocks(W),
+                                              Blocks
+                                      end, Workers)),
+    1 = sets:size(Chains),
+    [Chain] = sets:to_list(Chains),
+    io:format("chain is of height ~p~n", [length(Chain)]),
+    %% verify they are cryptographically linked
+    true = hbbft_worker:verify_chain(Chain, PubKey),
+    %% check all the transactions are unique
+    BlockTxns = lists:flatten([ hbbft_worker:block_transactions(B) || B <- Chain ]),
+    true = length(BlockTxns) == sets:size(sets:from_list(BlockTxns)),
+    %% check they're all members of the original message list
+    true = sets:is_subset(sets:from_list(BlockTxns), sets:from_list(Msgs)),
+    %% check they all passed the filter fun
+    true = sets:is_subset(sets:from_list(BlockTxns), sets:from_list(lists:filter(fun filter_fun/1, Msgs))),
+    io:format("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
+    ok.
+
 
 one_actor_no_txns_test(Config) ->
     N = proplists:get_value(n, Config),
@@ -303,3 +355,5 @@ merge_replies(N, NewReplies, Replies) ->
             merge_replies(N-1, lists:keydelete(N, 1, NewReplies), lists:keystore(N, 1, Replies, NewSend))
     end.
 
+filter_fun(<<X:8/integer, _/binary>>) when X rem 2 == 1 -> false;
+filter_fun(_) -> true.

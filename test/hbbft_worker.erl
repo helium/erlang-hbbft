@@ -4,6 +4,7 @@
 
 -export([start_link/6, submit_transaction/2, start_on_demand/1, get_blocks/1]).
 -export([verify_chain/2, block_transactions/1]).
+-export([set_filter_fun/4]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
@@ -83,6 +84,9 @@ verify_block_fit([A, B | _], PubKey) ->
 block_transactions(Block) ->
     Block#block.transactions.
 
+set_filter_fun(M, F, A, Pid) ->
+    gen_server:call(Pid, {set_filter_fun, M, F, A}).
+
 init([N, F, ID, SK, BatchSize, ToSerialize]) ->
     %% deserialize the secret key once
     DSK = tpke_privkey:deserialize(SK),
@@ -99,6 +103,9 @@ handle_call({submit_txn, Txn}, _From, State = #state{hbbft=HBBFT, sk=SK}) ->
     {reply, ok, NewState};
 handle_call(get_blocks, _From, State) ->
     {reply, {ok, State#state.blocks}, State};
+handle_call({set_filter_fun, M, F, A}, _From, State = #state{hbbft=HBBFT}) ->
+    NewHBBFT = hbbft:set_filter_fun(M, F, A, HBBFT),
+    {reply, ok, State#state{hbbft=NewHBBFT}};
 handle_call(Msg, _From, State) ->
     io:format("unhandled msg ~p~n", [Msg]),
     {reply, ok, State}.

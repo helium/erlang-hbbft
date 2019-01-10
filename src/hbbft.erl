@@ -2,6 +2,8 @@
 
 -export([init/6,
          init/7,
+         set_stamp_fun/4,
+         set_filter_fun/4,
          start_on_demand/1,
          input/2,
          finalize_round/3,
@@ -38,7 +40,8 @@
           sig_shares = #{} :: #{non_neg_integer() => {non_neg_integer(), erlang_pbc:element()}},
           thingtosign :: undefined | erlang_pbc:element(),
           stampfun :: undefined | {atom(), atom(), list()},
-          stamps = [] :: [{non_neg_integer(), any()}]
+          stamps = [] :: [{non_neg_integer(), any()}],
+          filterfun :: undefined | {atom(), atom(), list()}
          }).
 
 -record(hbbft_serialized_data, {
@@ -59,7 +62,8 @@
           dec_shares = #{} :: #{non_neg_integer() => {non_neg_integer(), binary()}},
           thingtosign :: undefined | binary(),
           stampfun :: undefined | {atom(), atom(), list()},
-          stamps = [] :: [{non_neg_integer(), any()}]
+          stamps = [] :: [{non_neg_integer(), any()}],
+          filterfun :: undefined | {atom(), atom(), list()}
          }).
 
 -type hbbft_data() :: #hbbft_data{}.
@@ -94,11 +98,19 @@ init(SK, N, F, J, BatchSize, MaxBuf) ->
 init(SK, N, F, J, BatchSize, MaxBuf, {M, Fn, A}) ->
     #hbbft_data{secret_key=SK, n=N, f=F, j=J, batch_size=BatchSize, acs=hbbft_acs:init(SK, N, F, J), max_buf=MaxBuf, stampfun={M, Fn, A}}.
 
+-spec set_stamp_fun(atom(), atom(), list(), hbbft_data()) -> hbbft_data().
+set_stamp_fun(M, F, A, Data) when is_atom(M), is_atom(F) ->
+    Data#hbbft_data{stampfun={M, F, A}}.
+
+-spec set_filter_fun(atom(), atom(), list(), hbbft_data()) -> hbbft_data().
+set_filter_fun(M, F, A, Data) when is_atom(M), is_atom(F) ->
+    Data#hbbft_data{filterfun={M, F, A}}.
+
 %% start acs on demand
 -spec start_on_demand(hbbft_data()) -> {hbbft_data(), already_started | {send, [rbc_wrapped_output()]}}.
-start_on_demand(Data = #hbbft_data{buf=Buf, n=N, secret_key=SK, batch_size=BatchSize, acs_init=false}) ->
+start_on_demand(Data0 = #hbbft_data{secret_key=SK, acs_init=false}) ->
     %% pick proposed whichever is lesser from batchsize/n or buffer
-    Proposed = hbbft_utils:random_n(min((BatchSize div N), length(Buf)), lists:sublist(Buf, BatchSize)),
+    {Proposed, Data} = proposed(Data0),
     %% encrypt x -> tpke.enc(pk, proposed)
     Stamp = case Data#hbbft_data.stampfun of
                 undefined -> undefined;
@@ -286,13 +298,13 @@ handle_msg(_Data, _J, _Msg) ->
     ignore.
 
 -spec maybe_start_acs(hbbft_data()) -> {hbbft_data(), ok | {send, [rbc_wrapped_output()]}}.
-maybe_start_acs(Data = #hbbft_data{n=N, secret_key=SK, batch_size=BatchSize}) ->
-    case length(Data#hbbft_data.buf) > BatchSize andalso Data#hbbft_data.acs_init == false of
+maybe_start_acs(Data0 = #hbbft_data{secret_key=SK, batch_size=BatchSize}) ->
+    case length(Data0#hbbft_data.buf) > BatchSize andalso Data0#hbbft_data.acs_init == false of
         true ->
             %% compose a transaction bundle
             %% get the top b elements from buf
             %% pick a random B/N selection of them
-            Proposed = hbbft_utils:random_n(BatchSize div N, lists:sublist(Data#hbbft_data.buf, length(Data#hbbft_data.buf) - BatchSize + 1, BatchSize)),
+            {Proposed, Data} = proposed(Data0),
             %% encrypt x -> tpke.enc(pk, proposed)
             Stamp = case Data#hbbft_data.stampfun of
                 undefined -> undefined;
@@ -306,7 +318,7 @@ maybe_start_acs(Data = #hbbft_data{n=N, secret_key=SK, batch_size=BatchSize}) ->
              {send, hbbft_utils:wrap({acs, Data#hbbft_data.round}, ACSResponse)}};
         false ->
             %% not enough transactions for this round yet
-            {Data, ok}
+            {Data0, ok}
     end.
 
 -spec encrypt(tpke_pubkey:pubkey(), binary()) -> binary().
@@ -461,3 +473,22 @@ group_by([], D) ->
     lists:keysort(1, [{K, lists:sort(V)} || {K, V} <- dict:to_list(D)]);
 group_by([{K, V}|T], D) ->
     group_by(T, dict:append(K, V, D)).
+
+
+proposed(Data = #hbbft_data{n=N, batch_size=BatchSize, buf=Buf}) ->
+    Proposed = hbbft_utils:random_n(min((BatchSize div N), length(Buf)), lists:sublist(Buf, BatchSize)),
+    case Data#hbbft_data.filterfun of
+        undefined ->
+            %% everything is valid
+            {Proposed, Data};
+        {M, F, A} ->
+            case lists:partition(fun(E) -> erlang:apply(M, F, [E|A]) end, Proposed) of
+                {Res, []} ->
+                    %% no invalid transactions detected
+                    {Res, Data};
+                {_, Invalid} ->
+                    %% remove the invalid transactions from the buffer and retry
+                    NewBuf = Data#hbbft_data.buf -- Invalid,
+                    proposed(Data#hbbft_data{buf= NewBuf})
+            end
+    end.
