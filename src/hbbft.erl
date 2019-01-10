@@ -376,6 +376,9 @@ serialize(#hbbft_data{secret_key=SK}=Data, true) ->
     {serialize_hbbft_data(Data), tpke_privkey:serialize(SK)}.
 
 -spec deserialize(hbbft_serialized_data(), tpke_privkey:privkey()) -> hbbft_data().
+deserialize(R, SK) when is_record(R, hbbft_serialized_data, 19) ->
+    %% old record without filterfun field
+    deserialize(tuple_to_list(list_to_tuple(R) ++ [undefined]), SK);
 deserialize(#hbbft_serialized_data{batch_size=BatchSize,
                                    n=N,
                                    f=F,
@@ -393,6 +396,7 @@ deserialize(#hbbft_serialized_data{batch_size=BatchSize,
                                    dec_shares=DecShares,
                                    thingtosign=ThingToSign,
                                    stampfun=Stampfun,
+                                   filterfun=Filterfun,
                                    stamps=Stamps}, SK) ->
 
     NewThingToSign = case ThingToSign of
@@ -417,6 +421,7 @@ deserialize(#hbbft_serialized_data{batch_size=BatchSize,
                 sig_shares=deserialize_shares(SigShares, SK),
                 thingtosign=NewThingToSign,
                 stampfun=Stampfun,
+                filterfun=Filterfun,
                 stamps=Stamps}.
 
 %% TODO: better spec for this
@@ -446,6 +451,7 @@ serialize_hbbft_data(#hbbft_data{batch_size=BatchSize,
                                  decrypted=Decrypted,
                                  thingtosign=ThingToSign,
                                  stampfun=Stampfun,
+                                 filterfun=Filterfun,
                                  stamps=Stamps}) ->
 
     NewThingToSign = case ThingToSign of
@@ -470,6 +476,7 @@ serialize_hbbft_data(#hbbft_data{batch_size=BatchSize,
                            sig_shares=serialize_shares(SigShares),
                            thingtosign=NewThingToSign,
                            stampfun=Stampfun,
+                           filterfun=Filterfun,
                            stamps=Stamps}.
 
 -spec is_serialized(hbbft_data() | hbbft_serialized_data()) -> boolean().
