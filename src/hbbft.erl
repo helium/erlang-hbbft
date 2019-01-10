@@ -2,6 +2,8 @@
 
 -export([init/6,
          init/7,
+         get_stamp_fun/1,
+         get_filter_fun/1,
          set_stamp_fun/4,
          set_filter_fun/4,
          start_on_demand/1,
@@ -97,6 +99,14 @@ init(SK, N, F, J, BatchSize, MaxBuf) ->
 -spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer(), non_neg_integer(), pos_integer(), infinity | pos_integer(), {atom(), atom(), list()}) -> hbbft_data().
 init(SK, N, F, J, BatchSize, MaxBuf, {M, Fn, A}) ->
     #hbbft_data{secret_key=SK, n=N, f=F, j=J, batch_size=BatchSize, acs=hbbft_acs:init(SK, N, F, J), max_buf=MaxBuf, stampfun={M, Fn, A}}.
+
+-spec get_stamp_fun(hbbft_data()) -> {atom(), atom(), list()} | undefined.
+get_stamp_fun(#hbbft_data{stampfun=S}) ->
+    S.
+
+-spec get_filter_fun(hbbft_data()) -> {atom(), atom(), list()} | undefined.
+get_filter_fun(#hbbft_data{filterfun=S}) ->
+    S.
 
 -spec set_stamp_fun(atom(), atom(), list(), hbbft_data()) -> hbbft_data().
 set_stamp_fun(M, F, A, Data) when is_atom(M), is_atom(F) ->
