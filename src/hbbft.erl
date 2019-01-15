@@ -223,24 +223,26 @@ handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
             ValidSharesForThisBundle = [ S || S <- SharesForThisBundle, tpke_pubkey:verify_share(tpke_privkey:public_key(Data#hbbft_data.secret_key), S, EncKey) ],
             case tpke_pubkey:combine_shares(tpke_privkey:public_key(Data#hbbft_data.secret_key), EncKey, ValidSharesForThisBundle) of
                 undefined ->
-                    %% can't recover the key, consider this ACS failed if we have 2f+1 shared and still can't decrypt
-                    NewDecrypted = maps:put(I, [], Data#hbbft_data.decrypted),
+                    %% can't recover the key, consider this ACS failed if we have 2f+1 shares and still can't decrypt
                     case length(SharesForThisBundle) > 2 * Data#hbbft_data.f of
                         true ->
+                            %% ok, just declare this ACS returned an empty list
+                            NewDecrypted = maps:put(I, [], Data#hbbft_data.decrypted),
                             check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted});
                         false ->
-                            {Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted}, ok}
+                            {Data#hbbft_data{dec_shares=NewShares}, ok}
                     end;
                 DecKey ->
                     case decrypt(DecKey, Enc) of
                         error ->
                             %% can't decrypt, also consider this ACS a failure if we have 2f+1 shares but still can't decrypt
-                            NewDecrypted = maps:put(I, [], Data#hbbft_data.decrypted),
                             case length(SharesForThisBundle) > 2 * Data#hbbft_data.f of
                                 true ->
+                                    %% ok, just declare this ACS returned an empty list
+                                    NewDecrypted = maps:put(I, [], Data#hbbft_data.decrypted),
                                     check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted});
                                 false ->
-                                    {Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted}, ok}
+                                    {Data#hbbft_data{dec_shares=NewShares}, ok}
                             end;
                         Decrypted ->
                             {Stamp, Transactions} = binary_to_term(Decrypted),
