@@ -218,18 +218,30 @@ handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
         true ->
             {I, Enc} = lists:keyfind(I, 1, Data#hbbft_data.acs_results),
             EncKey = get_encrypted_key(Data#hbbft_data.secret_key, Enc),
-            %% TODO verify the shares with verify_share/3
-            case tpke_pubkey:combine_shares(tpke_privkey:public_key(Data#hbbft_data.secret_key), EncKey, SharesForThisBundle) of
+            %% filter the shares with verify_share/3
+            %% only use valid shares so a invalid share doesn't corrupt our result
+            ValidSharesForThisBundle = [ S || S <- SharesForThisBundle, tpke_pubkey:verify_share(tpke_privkey:public_key(Data#hbbft_data.secret_key), S, EncKey) ],
+            case tpke_pubkey:combine_shares(tpke_privkey:public_key(Data#hbbft_data.secret_key), EncKey, ValidSharesForThisBundle) of
                 undefined ->
-                    %% can't recover the key, consider this ACS failed
+                    %% can't recover the key, consider this ACS failed if we have 2f+1 shared and still can't decrypt
                     NewDecrypted = maps:put(I, [], Data#hbbft_data.decrypted),
-                    check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted});
+                    case length(SharesForThisBundle) > 2 * Data#hbbft_data.f of
+                        true ->
+                            check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted});
+                        false ->
+                            {Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted}, ok}
+                    end;
                 DecKey ->
                     case decrypt(DecKey, Enc) of
                         error ->
-                            %% can't decrypt, also consider this ACS a failure
+                            %% can't decrypt, also consider this ACS a failure if we have 2f+1 shares but still can't decrypt
                             NewDecrypted = maps:put(I, [], Data#hbbft_data.decrypted),
-                            check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted});
+                            case length(SharesForThisBundle) > 2 * Data#hbbft_data.f of
+                                true ->
+                                    check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted});
+                                false ->
+                                    {Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted}, ok}
+                            end;
                         Decrypted ->
                             {Stamp, Transactions} = binary_to_term(Decrypted),
                             NewDecrypted = maps:put(I, Transactions, Data#hbbft_data.decrypted),
