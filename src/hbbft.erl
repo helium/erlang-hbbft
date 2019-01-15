@@ -232,15 +232,12 @@ handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
                 DecKey ->
                     case decrypt(DecKey, Enc) of
                         error ->
-                            %% can't decrypt, also consider this ACS a failure if we have 2f+1 shares but still can't decrypt
-                            case length(SharesForThisBundle) > 2 * Data#hbbft_data.f of
-                                true ->
-                                    %% ok, just declare this ACS returned an empty list
-                                    NewDecrypted = maps:put(I, [], Data#hbbft_data.decrypted),
-                                    check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted});
-                                false ->
-                                    {Data#hbbft_data{dec_shares=NewShares}, ok}
-                            end;
+                            %% can't decrypt, consider this ACS a failure
+                            %% just declare this ACS returned an empty list because we had
+                            %% f+1 valid shares but the resulting decryption key was unusuable to decrypt
+                            %% the transaction bundle
+                            NewDecrypted = maps:put(I, [], Data#hbbft_data.decrypted),
+                            check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted});
                         Decrypted ->
                             {Stamp, Transactions} = binary_to_term(Decrypted),
                             NewDecrypted = maps:put(I, Transactions, Data#hbbft_data.decrypted),
