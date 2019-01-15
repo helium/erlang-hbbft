@@ -218,10 +218,7 @@ handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
         true ->
             {I, Enc} = lists:keyfind(I, 1, Data#hbbft_data.acs_results),
             EncKey = get_encrypted_key(Data#hbbft_data.secret_key, Enc),
-            %% filter the shares with verify_share/3
-            %% only use valid shares so a invalid share doesn't corrupt our result
-            ValidSharesForThisBundle = [ S || S <- SharesForThisBundle, tpke_pubkey:verify_share(tpke_privkey:public_key(Data#hbbft_data.secret_key), S, EncKey) ],
-            case tpke_pubkey:combine_shares(tpke_privkey:public_key(Data#hbbft_data.secret_key), EncKey, ValidSharesForThisBundle) of
+            case combine_shares(Data#hbbft_data.f, Data#hbbft_data.secret_key, SharesForThisBundle, EncKey) of
                 undefined ->
                     %% can't recover the key, consider this ACS failed if we have 2f+1 shares and still can't decrypt
                     case length(SharesForThisBundle) > 2 * Data#hbbft_data.f of
@@ -482,3 +479,15 @@ check_completion(Data) ->
             {Data, ok}
     end.
 
+-spec combine_shares(pos_integer(), tpke_privkey:privkey(), [tpke_privkey:share()], tpke_pubkey:ciphertext()) -> undefined | binary().
+combine_shares(F, SK, SharesForThisBundle, EncKey) ->
+    %% filter the shares with verify_share/3
+    %% only use valid shares so a invalid share doesn't corrupt our result
+    ValidSharesForThisBundle = [ S || S <- SharesForThisBundle, tpke_pubkey:verify_share(tpke_privkey:public_key(SK), S, EncKey) ],
+    case length(ValidSharesForThisBundle) > F of
+        true ->
+            tpke_pubkey:combine_shares(tpke_privkey:public_key(SK), EncKey, ValidSharesForThisBundle);
+        false ->
+            %% not enough valid shares to bother trying to combine them
+            undefined
+    end.
