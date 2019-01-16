@@ -11,7 +11,9 @@
          one_actor_missing_test/1,
          two_actors_missing_test/1,
          encrypt_decrypt_test/1,
-         start_on_demand_test/1
+         start_on_demand_test/1,
+         one_actor_wrong_key_test/1,
+         one_actor_corrupted_key_test/1
         ]).
 
 all() ->
@@ -22,7 +24,9 @@ all() ->
      one_actor_missing_test,
      two_actors_missing_test,
      encrypt_decrypt_test,
-     start_on_demand_test
+     start_on_demand_test,
+     one_actor_wrong_key_test,
+     one_actor_corrupted_key_test
     ].
 
 init_per_testcase(_, Config) ->
@@ -271,6 +275,113 @@ start_on_demand_test(Config) ->
     true = length(BlockTxns) == sets:size(sets:from_list(BlockTxns)),
     %% check they're all members of the original message list
     true = sets:is_subset(sets:from_list(BlockTxns), sets:from_list([KnownMsg | Msgs])),
+    io:format("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
+    ok.
+
+one_actor_wrong_key_test(Config) ->
+    N = proplists:get_value(n, Config),
+    F = proplists:get_value(f, Config),
+    BatchSize = proplists:get_value(batchsize, Config),
+    PubKey = proplists:get_value(pubkey, Config),
+    PrivateKeys0 = proplists:get_value(privatekeys, Config),
+    {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
+    {ok, {_PubKey, PrivateKeys1}} = dealer:deal(Dealer),
+    %% give actor 1 a completely unrelated key
+    %% this will prevent it from doing any valid threshold cryptography
+    %% and thus it will not be able to reach consensus
+    PrivateKeys = [hd(PrivateKeys1)|tl(PrivateKeys0)],
+
+    Workers = [ element(2, hbbft_worker:start_link(N, F, I, tpke_privkey:serialize(SK), BatchSize, false)) || {I, SK} <- enumerate(PrivateKeys) ],
+    Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*20)],
+    %% feed the badgers some msgs
+    lists:foreach(fun(Msg) ->
+                          Destinations = random_n(rand:uniform(N), Workers),
+                          io:format("destinations ~p~n", [Destinations]),
+                          [ok = hbbft_worker:submit_transaction(Msg, D) || D <- Destinations]
+                  end, Msgs),
+
+    %% wait for all the worker's mailboxes to settle and
+    %% wait for the chains to converge
+    ok = hbbft_ct_utils:wait_until(fun() ->
+                                           Chains = sets:from_list(lists:map(fun(W) ->
+                                                                                     {ok, Blocks} = hbbft_worker:get_blocks(W),
+                                                                                     Blocks
+                                                                             end, tl(Workers))),
+
+                                           0 == lists:sum([element(2, erlang:process_info(W, message_queue_len)) || W <- Workers ]) andalso
+                                           1 == sets:size(Chains) andalso
+                                           0 /= length(hd(sets:to_list(Chains)))
+                                   end, 60*2, 500),
+
+
+    Chains = sets:from_list(lists:map(fun(W) ->
+                                              {ok, Blocks} = hbbft_worker:get_blocks(W),
+                                              Blocks
+                                      end, tl(Workers))),
+    1 = sets:size(Chains),
+    [Chain] = sets:to_list(Chains),
+    io:format("chain is of height ~p~n", [length(Chain)]),
+    %% verify they are cryptographically linked
+    true = hbbft_worker:verify_chain(Chain, PubKey),
+    %% check all the transactions are unique
+    BlockTxns = lists:flatten([ hbbft_worker:block_transactions(B) || B <- Chain ]),
+    true = length(BlockTxns) == sets:size(sets:from_list(BlockTxns)),
+    %% check they're all members of the original message list
+    true = sets:is_subset(sets:from_list(BlockTxns), sets:from_list(Msgs)),
+    io:format("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
+    ok.
+
+one_actor_corrupted_key_test(Config) ->
+    N = proplists:get_value(n, Config),
+    F = proplists:get_value(f, Config),
+    BatchSize = proplists:get_value(batchsize, Config),
+    PubKey = proplists:get_value(pubkey, Config),
+    [PK1|PrivateKeys0] = proplists:get_value(privatekeys, Config),
+    PKE = element(3, PK1),
+    %% scramble the private element of the key
+    %% this will not prevent the actor for encrypting their bundle
+    %% merely prevent it producing valid decryption shares
+    %% thus all the actors will be able to converge
+    PK2 = setelement(3, PK1, erlang_pbc:element_random(PKE)),
+    PrivateKeys = [PK2|PrivateKeys0],
+
+    Workers = [ element(2, hbbft_worker:start_link(N, F, I, tpke_privkey:serialize(SK), BatchSize, false)) || {I, SK} <- enumerate(PrivateKeys) ],
+    Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*20)],
+    %% feed the badgers some msgs
+    lists:foreach(fun(Msg) ->
+                          Destinations = random_n(rand:uniform(N), Workers),
+                          io:format("destinations ~p~n", [Destinations]),
+                          [ok = hbbft_worker:submit_transaction(Msg, D) || D <- Destinations]
+                  end, Msgs),
+
+    %% wait for all the worker's mailboxes to settle and
+    %% wait for the chains to converge
+    ok = hbbft_ct_utils:wait_until(fun() ->
+                                           Chains = sets:from_list(lists:map(fun(W) ->
+                                                                                     {ok, Blocks} = hbbft_worker:get_blocks(W),
+                                                                                     Blocks
+                                                                             end, (Workers))),
+
+                                           0 == lists:sum([element(2, erlang:process_info(W, message_queue_len)) || W <- Workers ]) andalso
+                                           1 == sets:size(Chains) andalso
+                                           0 /= length(hd(sets:to_list(Chains)))
+                                   end, 60*2, 500),
+
+
+    Chains = sets:from_list(lists:map(fun(W) ->
+                                              {ok, Blocks} = hbbft_worker:get_blocks(W),
+                                              Blocks
+                                      end, (Workers))),
+    1 = sets:size(Chains),
+    [Chain] = sets:to_list(Chains),
+    io:format("chain is of height ~p~n", [length(Chain)]),
+    %% verify they are cryptographically linked
+    true = hbbft_worker:verify_chain(Chain, PubKey),
+    %% check all the transactions are unique
+    BlockTxns = lists:flatten([ hbbft_worker:block_transactions(B) || B <- Chain ]),
+    true = length(BlockTxns) == sets:size(sets:from_list(BlockTxns)),
+    %% check they're all members of the original message list
+    true = sets:is_subset(sets:from_list(BlockTxns), sets:from_list(Msgs)),
     io:format("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
     ok.
 

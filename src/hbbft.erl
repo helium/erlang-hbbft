@@ -218,34 +218,31 @@ handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
         true ->
             {I, Enc} = lists:keyfind(I, 1, Data#hbbft_data.acs_results),
             EncKey = get_encrypted_key(Data#hbbft_data.secret_key, Enc),
-            %% TODO verify the shares with verify_share/3
-            case tpke_pubkey:combine_shares(tpke_privkey:public_key(Data#hbbft_data.secret_key), EncKey, SharesForThisBundle) of
+            case combine_shares(Data#hbbft_data.f, Data#hbbft_data.secret_key, SharesForThisBundle, EncKey) of
                 undefined ->
-                    %% can't recover the key
-                    {Data#hbbft_data{dec_shares=NewShares}, ok};
+                    %% can't recover the key, consider this ACS failed if we have 2f+1 shares and still can't recover the key
+                    case length(SharesForThisBundle) > 2 * Data#hbbft_data.f of
+                        true ->
+                            %% ok, just declare this ACS returned an empty list
+                            NewDecrypted = maps:put(I, [], Data#hbbft_data.decrypted),
+                            check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted});
+                        false ->
+                            {Data#hbbft_data{dec_shares=NewShares}, ok}
+                    end;
                 DecKey ->
                     case decrypt(DecKey, Enc) of
                         error ->
-                            {Data#hbbft_data{dec_shares=NewShares}, ok};
+                            %% can't decrypt, consider this ACS a failure
+                            %% just declare this ACS returned an empty list because we had
+                            %% f+1 valid shares but the resulting decryption key was unusuable to decrypt
+                            %% the transaction bundle
+                            NewDecrypted = maps:put(I, [], Data#hbbft_data.decrypted),
+                            check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted});
                         Decrypted ->
                             {Stamp, Transactions} = binary_to_term(Decrypted),
                             NewDecrypted = maps:put(I, Transactions, Data#hbbft_data.decrypted),
                             Stamps = [{I, Stamp} | Data#hbbft_data.stamps],
-                            case maps:size(NewDecrypted) == length(Data#hbbft_data.acs_results) andalso not Data#hbbft_data.sent_txns of
-                                true ->
-                                    %% we did it!
-                                    %% Combine all unique messages into a single list
-                                    TransactionsThisRound = lists:usort(lists:flatten(maps:values(NewDecrypted))),
-                                    StampsThisRound = lists:usort(Stamps),
-                                    %% return the transactions we agreed on to the user
-                                    %% we have no idea which transactions are valid, invalid, out of order or missing
-                                    %% causal context (eg. a nonce is not monotonic) so we return them to the user to let them
-                                    %% figure it out. We expect the user to call finalize_round/3 once they've decided what they want to accept
-                                    %% from this set of transactions.
-                                    {Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted, stamps=Stamps, sent_txns=true}, {result, {transactions, StampsThisRound, TransactionsThisRound}}};
-                                false ->
-                                    {Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted, stamps=Stamps}, ok}
-                            end
+                            check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted, stamps=Stamps})
                     end
             end;
         false ->
@@ -461,3 +458,33 @@ group_by([], D) ->
     lists:keysort(1, [{K, lists:sort(V)} || {K, V} <- dict:to_list(D)]);
 group_by([{K, V}|T], D) ->
     group_by(T, dict:append(K, V, D)).
+
+check_completion(Data) ->
+    case maps:size(Data#hbbft_data.decrypted) == length(Data#hbbft_data.acs_results) andalso not Data#hbbft_data.sent_txns of
+        true ->
+            %% we did it!
+            %% Combine all unique messages into a single list
+            TransactionsThisRound = lists:usort(lists:flatten(maps:values(Data#hbbft_data.decrypted))),
+            StampsThisRound = lists:usort(Data#hbbft_data.stamps),
+            %% return the transactions we agreed on to the user
+            %% we have no idea which transactions are valid, invalid, out of order or missing
+            %% causal context (eg. a nonce is not monotonic) so we return them to the user to let them
+            %% figure it out. We expect the user to call finalize_round/3 once they've decided what they want to accept
+            %% from this set of transactions.
+            {Data#hbbft_data{sent_txns=true}, {result, {transactions, StampsThisRound, TransactionsThisRound}}};
+        false ->
+            {Data, ok}
+    end.
+
+-spec combine_shares(pos_integer(), tpke_privkey:privkey(), [tpke_privkey:share()], tpke_pubkey:ciphertext()) -> undefined | binary().
+combine_shares(F, SK, SharesForThisBundle, EncKey) ->
+    %% filter the shares with verify_share/3
+    %% only use valid shares so an invalid share doesn't corrupt our result
+    ValidSharesForThisBundle = [ S || S <- SharesForThisBundle, tpke_pubkey:verify_share(tpke_privkey:public_key(SK), S, EncKey) ],
+    case length(ValidSharesForThisBundle) > F of
+        true ->
+            tpke_pubkey:combine_shares(tpke_privkey:public_key(SK), EncKey, ValidSharesForThisBundle);
+        false ->
+            %% not enough valid shares to bother trying to combine them
+            undefined
+    end.
