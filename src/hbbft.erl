@@ -224,9 +224,11 @@ handle_msg(Data = #hbbft_data{round=R}, _J, {dec, R2, _I, _Share}) when R2 > R -
     {Data, defer};
 handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
     %% check if we have enough to decode the bundle
-    case maps:is_key({I, J}, Data#hbbft_data.dec_shares) orelse maps:is_key(I, Data#hbbft_data.decrypted) of
+    case maps:is_key(I, Data#hbbft_data.decrypted) %% have we already decrypted for this instance?
+        orelse maps:is_key({I, J}, Data#hbbft_data.dec_shares) of %% do we already have this share?
         true ->
             %% we already have this share, or we've already decrypted this ACS result
+            %% we don't need this
             ignore;
         false ->
             %% the Share now is a binary, deserialize it and then store in the dec_shares map
@@ -241,8 +243,8 @@ handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
                     end,
             NewShares = maps:put({I, J}, {Valid, DeserializedShare}, Data#hbbft_data.dec_shares),
             SharesForThisBundle = [ S || {{Idx, _}, S} <- maps:to_list(NewShares), I == Idx],
-            case length(SharesForThisBundle) > Data#hbbft_data.f andalso not maps:is_key({I, J}, Data#hbbft_data.dec_shares)
-                 andalso lists:keymember(I, 1, Data#hbbft_data.acs_results) andalso not maps:is_key(I, Data#hbbft_data.decrypted) of
+            case lists:keymember(I, 1, Data#hbbft_data.acs_results)         %% was this instance included in the ACS result set?
+                 andalso length(SharesForThisBundle) > Data#hbbft_data.f of %% do we have f+1 decryption shares?
                 true ->
                   {I, Enc} = lists:keyfind(I, 1, Data#hbbft_data.acs_results),
                   EncKey = get_encrypted_key(Data#hbbft_data.secret_key, Enc),
@@ -507,7 +509,6 @@ check_completion(Data) ->
 
 -spec combine_shares(pos_integer(), tpke_privkey:privkey(), [tpke_privkey:share()], tpke_pubkey:ciphertext()) -> undefined | binary().
 combine_shares(F, SK, SharesForThisBundle, EncKey) ->
-    %% filter the shares with verify_share/3
     %% only use valid shares so an invalid share doesn't corrupt our result
     ValidSharesForThisBundle = [ S || {true, S} <- SharesForThisBundle ],
     case length(ValidSharesForThisBundle) > F of
