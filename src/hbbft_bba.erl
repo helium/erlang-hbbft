@@ -149,7 +149,7 @@ handle_msg(_Data, _J, _Msg) ->
 bval(Data=#bba_data{f=F}, Id, V) ->
     %% add to witnesses
     Witness = add_witness(Id, V, Data#bba_data.bval_witness, true),
-    WitnessCount = maps:get({val, V}, Witness, 0),
+    WitnessCount = maps:get({val, V}, Witness, 0) + maps:get({val, V}, Data#bba_data.terminate_witness, 0),
 
     {NewData, ToSend} = case WitnessCount >= F+1 andalso not has(V, Data#bba_data.broadcasted) of
                             true ->
@@ -166,8 +166,7 @@ bval(Data=#bba_data{f=F}, Id, V) ->
     case WitnessCount >= 2*F+1 of
         true ->
             %% add to binvalues
-            NewData2 = Data#bba_data{bval_witness=Witness,
-                                     bin_values=add(V, NewData#bba_data.bin_values)},
+            NewData2 = NewData#bba_data{bin_values=add(V, NewData#bba_data.bin_values)},
             {NewData3, ToSend2} = case NewData2#bba_data.aux_sent == false of
                                       true ->
                                           %% XXX How many times do we send AUX per round? I think just once
