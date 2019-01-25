@@ -149,7 +149,7 @@ handle_msg(_Data, _J, _Msg) ->
 bval(Data=#bba_data{f=F}, Id, V) ->
     %% add to witnesses
     Witness = add_witness(Id, V, Data#bba_data.bval_witness, true),
-    WitnessCount = maps:get({val, V}, Witness, 0),
+    WitnessCount = maps:get({val, V}, Witness, 0) + maps:get({val, V}, Data#bba_data.terminate_witness, 0),
 
     {NewData, ToSend} = case WitnessCount >= F+1 andalso not has(V, Data#bba_data.broadcasted) of
                             true ->
@@ -166,8 +166,7 @@ bval(Data=#bba_data{f=F}, Id, V) ->
     case WitnessCount >= 2*F+1 of
         true ->
             %% add to binvalues
-            NewData2 = Data#bba_data{bval_witness=Witness,
-                                     bin_values=add(V, NewData#bba_data.bin_values)},
+            NewData2 = NewData#bba_data{bin_values=add(V, NewData#bba_data.bin_values)},
             {NewData3, ToSend2} = case NewData2#bba_data.aux_sent == false of
                                       true ->
                                           %% XXX How many times do we send AUX per round? I think just once
@@ -183,15 +182,20 @@ bval(Data=#bba_data{f=F}, Id, V) ->
 
 -spec aux(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), ok | {send, [hbbft_utils:multicast(conf_msg())]}}.
 aux(Data, Id, V) ->
-    Witness = add_witness(Id, V, Data#bba_data.aux_witness, true),
+    Witness = add_witness(Id, V, Data#bba_data.aux_witness, false),
     NewData = Data#bba_data{aux_witness = Witness},
     decide(NewData, []).
 
 -spec conf(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), ok | {send, [hbbft_utils:multicast(coin_msg())]}}.
 conf(Data, Id, V) ->
-    Witness = maps:put(Id, V, Data#bba_data.conf_witness),
-    NewData = Data#bba_data{conf_witness = Witness},
-    decide(NewData, []).
+    case maps:is_key(Id, Data#bba_data.conf_witness) of
+        false ->
+            Witness = maps:put(Id, V, Data#bba_data.conf_witness),
+            NewData = Data#bba_data{conf_witness = Witness},
+            decide(NewData, []);
+        true ->
+            {Data, ok}
+    end.
 
 sort_msgs(A, B) ->
     msg_order(A) =< msg_order(B).
