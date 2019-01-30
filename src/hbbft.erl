@@ -1,7 +1,6 @@
 -module(hbbft).
 
--export([init/6,
-         init/7,
+-export([init/6, init/7, init/9,
          get_stamp_fun/1,
          set_stamp_fun/4,
          start_on_demand/1,
@@ -11,6 +10,7 @@
          next_round/1,
          next_round/3,
          round/1,
+         buf/1,
          get_encrypted_key/2,
          encrypt/2,
          decrypt/2,
@@ -90,11 +90,23 @@ status(HBBFTData) ->
 
 -spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer(), non_neg_integer(), pos_integer(), infinity | pos_integer()) -> hbbft_data().
 init(SK, N, F, J, BatchSize, MaxBuf) ->
+    init(SK, N, F, J, BatchSize, MaxBuf, undefined, 0, []).
     #hbbft_data{secret_key=SK, n=N, f=F, j=J, batch_size=BatchSize, acs=hbbft_acs:init(SK, N, F, J), max_buf=MaxBuf}.
 
 -spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer(), non_neg_integer(), pos_integer(), infinity | pos_integer(), {atom(), atom(), list()}) -> hbbft_data().
 init(SK, N, F, J, BatchSize, MaxBuf, {M, Fn, A}) ->
-    #hbbft_data{secret_key=SK, n=N, f=F, j=J, batch_size=BatchSize, acs=hbbft_acs:init(SK, N, F, J), max_buf=MaxBuf, stampfun={M, Fn, A}}.
+    init(SK, N, F, J, BatchSize, MaxBuf, {M, Fn, A}, 0, []).
+
+init(SK, N, F, J, BatchSize, MaxBuf, StampFun, Round, Buf) ->
+    #hbbft_data{secret_key=SK,
+                n=N, f=F, j=J,
+                batch_size=BatchSize,
+                acs=hbbft_acs:init(SK, N, F, J),
+                round = Round,
+                buf = Buf,
+                max_buf=MaxBuf,
+                stampfun=StampFun}.
+
 
 -spec get_stamp_fun(hbbft_data()) -> {atom(), atom(), list()} | undefined.
 get_stamp_fun(#hbbft_data{stampfun=S}) ->
@@ -183,6 +195,10 @@ next_round(Data = #hbbft_data{secret_key=SK, n=N, f=F, j=J, buf=Buf}, NextRound,
 -spec round(hbbft_data()) -> non_neg_integer().
 round(_Data=#hbbft_data{round=Round}) ->
     Round.
+
+-spec buf(hbbft_data()) -> [any()].
+round(_Data=#hbbft_data{buf = Buf}) ->
+    Buf.
 
 -spec handle_msg(hbbft_data(), non_neg_integer(), acs_msg() | dec_msg() | sign_msg()) -> {hbbft_data(), ok |
                                                                                           defer |
