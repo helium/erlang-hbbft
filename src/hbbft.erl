@@ -10,7 +10,7 @@
          next_round/1,
          next_round/3,
          round/1,
-         buf/1,
+         buf/1, buf/2,
          get_encrypted_key/2,
          encrypt/2,
          decrypt/2,
@@ -196,9 +196,13 @@ next_round(Data = #hbbft_data{secret_key=SK, n=N, f=F, j=J, buf=Buf}, NextRound,
 round(_Data=#hbbft_data{round=Round}) ->
     Round.
 
--spec buf(hbbft_data()) -> [any()].
-round(_Data=#hbbft_data{buf = Buf}) ->
+-spec buf(hbbft_data()) -> [binary()].
+buf(_Data=#hbbft_data{buf = Buf}) ->
     Buf.
+
+-spec buf([binary()], hbbft_data()) -> hbbft_data().
+buf(Buf, Data) ->
+    Data#hbbft_data{buf=Buf}.
 
 -spec handle_msg(hbbft_data(), non_neg_integer(), acs_msg() | dec_msg() | sign_msg()) -> {hbbft_data(), ok |
                                                                                           defer |
