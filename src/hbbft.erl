@@ -91,7 +91,6 @@ status(HBBFTData) ->
 -spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer(), non_neg_integer(), pos_integer(), infinity | pos_integer()) -> hbbft_data().
 init(SK, N, F, J, BatchSize, MaxBuf) ->
     init(SK, N, F, J, BatchSize, MaxBuf, undefined, 0, []).
-    #hbbft_data{secret_key=SK, n=N, f=F, j=J, batch_size=BatchSize, acs=hbbft_acs:init(SK, N, F, J), max_buf=MaxBuf}.
 
 -spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer(), non_neg_integer(), pos_integer(), infinity | pos_integer(), {atom(), atom(), list()}) -> hbbft_data().
 init(SK, N, F, J, BatchSize, MaxBuf, {M, Fn, A}) ->
@@ -196,7 +195,7 @@ next_round(Data = #hbbft_data{secret_key=SK, n=N, f=F, j=J, buf=Buf}, NextRound,
 round(_Data=#hbbft_data{round=Round}) ->
     Round.
 
--spec buf(hbbft_data()) -> [binary()].
+-spec buf(hbbft_data()) -> [any()].
 buf(_Data=#hbbft_data{buf = Buf}) ->
     Buf.
 
