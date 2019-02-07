@@ -61,7 +61,7 @@
           dec_shares = #{} :: #{non_neg_integer() => {non_neg_integer(), binary()}},
           thingtosign :: undefined | binary(),
           stampfun :: undefined | {atom(), atom(), list()},
-          stamps = [] :: [{non_neg_integer(), any()}]
+          stamps = [] :: [binary()]
          }).
 
 -type hbbft_data() :: #hbbft_data{}.
@@ -122,10 +122,11 @@ start_on_demand(Data = #hbbft_data{buf=Buf, n=N, secret_key=SK, batch_size=Batch
     Proposed = hbbft_utils:random_n(min((BatchSize div N), length(Buf)), lists:sublist(Buf, BatchSize)),
     %% encrypt x -> tpke.enc(pk, proposed)
     Stamp = case Data#hbbft_data.stampfun of
-                undefined -> undefined;
+                undefined -> <<>>;
                 {M, F, A} -> erlang:apply(M, F, A)
             end,
-    EncX = encrypt(tpke_privkey:public_key(SK), term_to_binary({Stamp, Proposed})),
+    true = is_binary(Stamp),
+    EncX = encrypt(tpke_privkey:public_key(SK), encode_list([Stamp|Proposed], [])),
     %% time to kick off a round
     {NewACSState, {send, ACSResponse}} = hbbft_acs:input(Data#hbbft_data.acs, EncX),
     %% add this to acs set in data and send out the ACS response(s)
@@ -298,7 +299,7 @@ handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
                                     NewDecrypted = maps:put(I, [], Data#hbbft_data.decrypted),
                                     check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted});
                                 Decrypted ->
-                                    {Stamp, Transactions} = binary_to_term(Decrypted),
+                                    [Stamp | Transactions] = decode_list(Decrypted, []),
                                     NewDecrypted = maps:put(I, Transactions, Data#hbbft_data.decrypted),
                                     Stamps = [{I, Stamp} | Data#hbbft_data.stamps],
                                     check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted, stamps=Stamps})
@@ -352,10 +353,11 @@ maybe_start_acs(Data = #hbbft_data{n=N, secret_key=SK, batch_size=BatchSize}) ->
             Proposed = hbbft_utils:random_n(BatchSize div N, lists:sublist(Data#hbbft_data.buf, length(Data#hbbft_data.buf) - BatchSize + 1, BatchSize)),
             %% encrypt x -> tpke.enc(pk, proposed)
             Stamp = case Data#hbbft_data.stampfun of
-                undefined -> undefined;
+                undefined -> <<>>;
                 {M, F, A} -> erlang:apply(M, F, A)
             end,
-            EncX = encrypt(tpke_privkey:public_key(SK), term_to_binary({Stamp, Proposed})),
+            true = is_binary(Stamp),
+            EncX = encrypt(tpke_privkey:public_key(SK), encode_list([Stamp|Proposed], [])),
             %% time to kick off a round
             {NewACSState, {send, ACSResponse}} = hbbft_acs:input(Data#hbbft_data.acs, EncX),
             %% add this to acs set in data and send out the ACS response(s)
@@ -547,3 +549,13 @@ combine_shares(F, SK, SharesForThisBundle, EncKey) ->
             %% not enough valid shares to bother trying to combine them
             undefined
     end.
+
+encode_list([], Acc) ->
+    list_to_binary(lists:reverse(Acc));
+encode_list([H|T], Acc) ->
+    encode_list(T, [<<(byte_size(H)):16/integer-unsigned-little, H/binary>> | Acc]).
+
+decode_list(<<>>, Acc) ->
+    lists:reverse(Acc);
+decode_list(<<Length:16/integer-unsigned-little, Entry:Length/binary, Tail/binary>>, Acc) ->
+    decode_list(Tail, [Entry|Acc]).
