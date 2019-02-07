@@ -137,11 +137,11 @@ start_on_demand(Data) ->
 
 %% someone submitting a transaction to the replica set
 -spec input(hbbft_data(), binary()) -> {hbbft_data(), ok | {send, [rbc_wrapped_output()]} | full}.
-input(Data = #hbbft_data{buf=Buf, max_buf=MaxBuf}, Txn) when length(Buf) < MaxBuf->
+input(Data = #hbbft_data{buf=Buf, max_buf=MaxBuf}, Txn) when is_binary(Txn), length(Buf) < MaxBuf->
     %% add this txn to the the buffer
     NewBuf = [Txn | Buf],
     maybe_start_acs(Data#hbbft_data{buf=NewBuf});
-input(Data = #hbbft_data{buf=_Buf}, _Txn) ->
+input(Data = #hbbft_data{buf=_Buf}, _Txn) when is_binary(_Txn) ->
     %% drop the txn
     {Data, full}.
 
