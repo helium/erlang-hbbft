@@ -399,12 +399,14 @@ decrypt(Key, Bin) ->
     <<IV:16/binary, EncKeySize:16/integer-unsigned, EncKey:EncKeySize/binary, Tag:16/binary, CipherText/binary>> = Bin,
     crypto:block_decrypt(aes_gcm, Key, IV, {<<IV:16/binary, EncKeySize:16/integer-unsigned, EncKey:(EncKeySize)/binary>>, CipherText, Tag}).
 
--spec serialize(hbbft_data()) -> {hbbft_serialized_data(), tpke_privkey:privkey_serialized() | tpke_privkey:privkey()}.
+-spec serialize(hbbft_data()) -> {hbbft_serialized_data() | #{atom() => binary() | map()},
+                                  tpke_privkey:privkey_serialized() | tpke_privkey:privkey()}.
 serialize(Data) ->
     %% serialize the SK unless explicitly told not to
     serialize(Data, true).
 
--spec serialize(hbbft_data(), boolean()) -> {hbbft_serialized_data(), tpke_privkey:privkey_serialized() | tpke_privkey:privkey()}.
+-spec serialize(hbbft_data(), boolean()) -> {hbbft_serialized_data() | #{atom() => binary() | map()},
+                                             tpke_privkey:privkey_serialized() | tpke_privkey:privkey()}.
 serialize(#hbbft_data{secret_key=SK}=Data, false) ->
     %% dont serialize the private key
     {serialize_hbbft_data(Data), SK};
@@ -418,7 +420,6 @@ deserialize(#hbbft_serialized_data{batch_size=BatchSize,
                                    f=F,
                                    j=J,
                                    round=Round,
-                                   buf=Buf,
                                    max_buf=MaxBuf,
                                    acs=ACSData,
                                    acs_init=ACSInit,
@@ -442,7 +443,61 @@ deserialize(#hbbft_serialized_data{batch_size=BatchSize,
                 f=F,
                 j=J,
                 round=Round,
-                buf=Buf,
+                buf=[],
+                max_buf=MaxBuf,
+                acs=hbbft_acs:deserialize(ACSData, SK),
+                acs_init=ACSInit,
+                sent_txns=SentTxns,
+                sent_sig=SentSig,
+                acs_results=ACSResults,
+                decrypted=Decrypted,
+                dec_shares=maps:map(fun(_, {Valid, Share}) ->
+                                            {Valid, hbbft_utils:binary_to_share(Share, SK)};
+                                       ({I, _}, Share) ->
+                                            %% compatability shim for old, untagged shares
+                                            {I, Enc} = lists:keyfind(I, 1, ACSResults),
+                                            EncKey = get_encrypted_key(SK, Enc),
+                                            DeserializedShare = hbbft_utils:binary_to_share(Share, SK),
+                                            Valid = tpke_pubkey:verify_share(tpke_privkey:public_key(SK), DeserializedShare, EncKey),
+                                            {Valid, DeserializedShare}
+                                    end, DecShares),
+                sig_shares=maps:map(fun(_, Share) -> hbbft_utils:binary_to_share(Share, SK) end, SigShares),
+                thingtosign=NewThingToSign,
+                stampfun=Stampfun,
+                stamps=Stamps};
+deserialize(M0, SK) ->
+    M = maps:map(fun(acs, V) -> V;
+                (_K, V) -> binary_to_term(V)
+                 end, M0),
+    #{batch_size := BatchSize,
+      n := N,
+      f := F,
+      j := J,
+      round := Round,
+      max_buf := MaxBuf,
+      acs := ACSData,
+      acs_init := ACSInit,
+      sent_txns := SentTxns,
+      sent_sig := SentSig,
+      acs_results := ACSResults,
+      decrypted := Decrypted,
+      sig_shares := SigShares,
+      dec_shares := DecShares,
+      thingtosign := ThingToSign,
+      stampfun := Stampfun,
+      stamps := Stamps} = M,
+
+    NewThingToSign = case ThingToSign of
+                         undefined -> undefined;
+                         _ -> tpke_pubkey:deserialize_element(tpke_privkey:public_key(SK), ThingToSign)
+                     end,
+    #hbbft_data{secret_key=SK,
+                batch_size=BatchSize,
+                n=N,
+                f=F,
+                j=J,
+                round=Round,
+                buf=[],
                 max_buf=MaxBuf,
                 acs=hbbft_acs:deserialize(ACSData, SK),
                 acs_init=ACSInit,
@@ -465,13 +520,12 @@ deserialize(#hbbft_serialized_data{batch_size=BatchSize,
                 stampfun=Stampfun,
                 stamps=Stamps}.
 
--spec serialize_hbbft_data(hbbft_data()) -> hbbft_serialized_data().
+-spec serialize_hbbft_data(hbbft_data()) -> hbbft_serialized_data() | #{atom() => binary() | map()}.
 serialize_hbbft_data(#hbbft_data{batch_size=BatchSize,
                                  n=N,
                                  f=F,
                                  j=J,
                                  round=Round,
-                                 buf=Buf,
                                  max_buf=MaxBuf,
                                  acs=ACSData,
                                  acs_init=ACSInit,
@@ -490,27 +544,30 @@ serialize_hbbft_data(#hbbft_data{batch_size=BatchSize,
                          _ -> erlang_pbc:element_to_binary(ThingToSign)
                      end,
 
-    #hbbft_serialized_data{batch_size=BatchSize,
-                           n=N,
-                           f=F,
-                           round=Round,
-                           buf=Buf,
-                           max_buf=MaxBuf,
-                           acs=hbbft_acs:serialize(ACSData),
-                           acs_init=ACSInit,
-                           sent_txns=SentTxns,
-                           decrypted=Decrypted,
-                           j=J,
-                           sent_sig=SentSig,
-                           acs_results=ACSResults,
-                           dec_shares=maps:map(fun(_, {Valid, Share}) -> {Valid, hbbft_utils:share_to_binary(Share)} end, DecShares),
-                           sig_shares=maps:map(fun(_, V) -> hbbft_utils:share_to_binary(V) end, SigShares),
-                           thingtosign=NewThingToSign,
-                           stampfun=Stampfun,
-                           stamps=Stamps}.
+    M = #{batch_size => BatchSize,
+          n => N,
+          f => F,
+          round => Round,
+          max_buf => MaxBuf,
+          acs => hbbft_acs:serialize(ACSData),
+          acs_init => ACSInit,
+          sent_txns => SentTxns,
+          decrypted => Decrypted,
+          j => J,
+          sent_sig => SentSig,
+          acs_results => ACSResults,
+          dec_shares => maps:map(fun(_, {Valid, Share}) -> {Valid, hbbft_utils:share_to_binary(Share)} end, DecShares),
+          sig_shares => maps:map(fun(_, V) -> hbbft_utils:share_to_binary(V) end, SigShares),
+          thingtosign => NewThingToSign,
+          stampfun => Stampfun,
+          stamps => Stamps},
+    maps:map(fun(acs, V) -> V;
+                (_K, V) -> term_to_binary(V, [compressed])
+             end, M).
 
 -spec is_serialized(hbbft_data() | hbbft_serialized_data()) -> boolean().
 is_serialized(Data) when is_record(Data, hbbft_serialized_data) -> true;
+is_serialized(Data) when is_map(Data) -> true;
 is_serialized(Data) when is_record(Data, hbbft_data) -> false.
 
 group_by(Tuples) ->

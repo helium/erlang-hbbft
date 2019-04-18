@@ -151,7 +151,7 @@ serialization_test(Config) ->
                             end, Nodes),
 
     %% start a hbbft_worker on each node
-    Workers = [{Node, rpc:call(Node, hbbft_worker, start_link, [N, F, I, tpke_privkey:serialize(SK), BatchSize, true])} || {I, {Node, SK}} <- enumerate(NodesSKs)],
+    Workers = [{Node, rpc:call(Node, hbbft_worker, start_link, [N, F, I, tpke_privkey:serialize(SK), BatchSize, false])} || {I, {Node, SK}} <- enumerate(NodesSKs)],
     ok = global:sync(),
 
     [ link(W) || {_, {ok, W}} <- Workers ],
@@ -168,16 +168,19 @@ serialization_test(Config) ->
 
     %% wait for all the worker's mailboxes to settle and.
     %% wait for the chains to converge
-    ok = hbbft_ct_utils:wait_until(fun() ->
-                                           Chains = sets:from_list(lists:map(fun({_Node, {ok, W}}) ->
-                                                                                     {ok, Blocks} = hbbft_worker:get_blocks(W),
-                                                                                     Blocks
-                                                                             end, Workers)),
-
-                                           0 == lists:sum([element(2, rpc:call(Node, erlang, process_info, [W, message_queue_len])) || {Node, {ok, W}} <- Workers ]) andalso
-                                           1 == sets:size(Chains) andalso
-                                           0 /= length(hd(sets:to_list(Chains)))
-                                   end, 60*2, 500),
+    ok = hbbft_ct_utils:wait_until(
+           fun() ->
+                   Chains = sets:from_list(lists:map(fun({_Node, {ok, W}}) ->
+                                                             {ok, Blocks} = hbbft_worker:get_blocks(W),
+                                                             Blocks
+                                                     end, Workers)),
+                   Lens = lists:sum([element(2, rpc:call(Node, erlang, process_info, [W, message_queue_len]))
+                                     || {Node, {ok, W}} <- Workers ]),
+                   ct:pal("lens ~p chains ~p", [Lens, sets:to_list(Chains)]),
+                   0 == Lens andalso
+                       1 == sets:size(Chains) andalso
+                       0 /= length(hd(sets:to_list(Chains)))
+           end, 60*2, 500),
 
 
     Chains = sets:from_list(lists:map(fun({_Node, {ok, Worker}}) ->
