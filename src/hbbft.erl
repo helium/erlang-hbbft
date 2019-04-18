@@ -399,12 +399,14 @@ decrypt(Key, Bin) ->
     <<IV:16/binary, EncKeySize:16/integer-unsigned, EncKey:EncKeySize/binary, Tag:16/binary, CipherText/binary>> = Bin,
     crypto:block_decrypt(aes_gcm, Key, IV, {<<IV:16/binary, EncKeySize:16/integer-unsigned, EncKey:(EncKeySize)/binary>>, CipherText, Tag}).
 
--spec serialize(hbbft_data()) -> {hbbft_serialized_data(), tpke_privkey:privkey_serialized() | tpke_privkey:privkey()}.
+-spec serialize(hbbft_data()) -> {hbbft_serialized_data() | #{atom() => binary() | map()},
+                                  tpke_privkey:privkey_serialized() | tpke_privkey:privkey()}.
 serialize(Data) ->
     %% serialize the SK unless explicitly told not to
     serialize(Data, true).
 
--spec serialize(hbbft_data(), boolean()) -> {hbbft_serialized_data(), tpke_privkey:privkey_serialized() | tpke_privkey:privkey()}.
+-spec serialize(hbbft_data(), boolean()) -> {hbbft_serialized_data() | #{atom() => binary() | map()},
+                                             tpke_privkey:privkey_serialized() | tpke_privkey:privkey()}.
 serialize(#hbbft_data{secret_key=SK}=Data, false) ->
     %% dont serialize the private key
     {serialize_hbbft_data(Data), SK};
@@ -518,7 +520,7 @@ deserialize(M0, SK) ->
                 stampfun=Stampfun,
                 stamps=Stamps}.
 
--spec serialize_hbbft_data(hbbft_data()) -> hbbft_serialized_data().
+-spec serialize_hbbft_data(hbbft_data()) -> hbbft_serialized_data() | #{atom() => binary() | map()}.
 serialize_hbbft_data(#hbbft_data{batch_size=BatchSize,
                                  n=N,
                                  f=F,

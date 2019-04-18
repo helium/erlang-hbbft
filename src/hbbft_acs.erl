@@ -254,14 +254,14 @@ sort_bba_msgs(Msgs) ->
                        false
                end, Msgs).
 
--spec serialize(acs_data()) -> acs_serialized_data().
+-spec serialize(acs_data()) -> #{atom() => #{} | binary()}.
 serialize(#acs_data{done=Done, n=N, f=F, j=J, rbc=RBCMap, bba=BBAMap}) ->
     M = #{done => Done, n => N, f => F, j => J},
     M1 = maps:map(fun(_K, V) -> term_to_binary(V, [compressed]) end, M),
     M1#{rbc => serialize_state(RBCMap, rbc),
         bba => serialize_state(BBAMap, bba)}.
 
--spec deserialize(acs_serialized_data(), tpke_privkey:privkey()) -> acs_data().
+-spec deserialize(acs_serialized_data() | #{}, tpke_privkey:privkey()) -> acs_data().
 deserialize(#acs_serialized_data{done=Done, n=N, f=F, j=J, rbc=RBCMap, bba=BBAMap}, SK) ->
     #acs_data{done=Done, n=N, f=F, j=J,
               rbc=deserialize_state(RBCMap, rbc),
@@ -308,23 +308,27 @@ deser_bba_key(AK) ->
     "bba_" ++ Int = atom_to_list(AK),
     list_to_integer(Int).
 
--spec serialize_rbc_state(rbc_state()) -> rbc_serialized_state().
+-spec serialize_rbc_state(rbc_state()) -> binary().
 serialize_rbc_state(#rbc_state{rbc_data=RBCData, result=Result}) ->
     term_to_binary(#rbc_serialized_state{rbc_data=RBCData, result=Result},
                    [compressed]).
 
--spec deserialize_rbc_state(rbc_serialized_state()) -> rbc_state().
+-spec deserialize_rbc_state(rbc_serialized_state() | #{}) -> rbc_state().
+deserialize_rbc_state(#rbc_serialized_state{rbc_data=RBCData, result=Result}) ->
+    #rbc_state{rbc_data=RBCData, result=Result};
 deserialize_rbc_state(BinRec) ->
     #rbc_serialized_state{rbc_data=RBCData, result=Result} =
         binary_to_term(BinRec),
     #rbc_state{rbc_data=RBCData, result=Result}.
 
--spec serialize_bba_state(bba_state()) -> bba_serialized_state().
+-spec serialize_bba_state(bba_state()) -> binary().
 serialize_bba_state(#bba_state{bba_data=BBAData, input=Input, result=Result}) ->
     term_to_binary(#bba_serialized_state{bba_data=hbbft_bba:serialize(BBAData), input=Input, result=Result},
                    [compressed]).
 
--spec deserialize_bba_state(bba_serialized_state(), tpke_privkey:privkey()) -> bba_state().
+-spec deserialize_bba_state(bba_serialized_state() | #{}, tpke_privkey:privkey()) -> bba_state().
+deserialize_bba_state(#bba_serialized_state{bba_data=BBAData, input=Input, result=Result}, SK) ->
+    #bba_state{bba_data=hbbft_bba:deserialize(BBAData, SK), input=Input, result=Result};
 deserialize_bba_state(BinRec, SK) ->
     #bba_serialized_state{bba_data=BBAData, input=Input, result=Result} =
         binary_to_term(BinRec),
