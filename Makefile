@@ -17,3 +17,5 @@ test: compile
 typecheck:
 	$(REBAR) dialyzer
 
+ci:
+	$(REBAR) dialyzer && $(REBAR) as test do eunit -c, ct -c, cover -v

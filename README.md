@@ -1,7 +1,7 @@
 erlang_hbbft
 =====
 
-[![Build Status](https://travis-ci.org/helium/erlang-hbbft.svg?branch=master)](https://travis-ci.org/helium/erlang-hbbft)
+[![Build Status](https://badge.buildkite.com/e794bf0f28123f75870633e8f4a9fda955cbe19e981d12a5d3.svg?branch=master)](https://buildkite.com/helium/hbbft)
 
 Erlang implementation of HoneyBadgerBFT's protocols.
 
