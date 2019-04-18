@@ -63,7 +63,7 @@ handle_call(Msg, _From, State) ->
     {reply, ok, State}.
 
 handle_cast({hbbft, FromId, Msg}, State) ->
-    case relcast:deliver(Msg, FromId, State#state.relcast) of
+    case relcast:deliver(1, Msg, FromId, State#state.relcast) of
         {ok, NewRelcast} ->
             gen_server:cast({global, name(FromId)}, {ack, State#state.id}),
             {noreply, do_send(State#state{relcast=NewRelcast})};
@@ -147,9 +147,9 @@ do_send([], State) ->
     State;
 do_send([{I, undefined} | Tail], State) ->
     case relcast:take(I, State#state.relcast) of
-        {not_found, NewRelcast} ->
+        {not_found, _, NewRelcast} ->
             do_send(Tail, State#state{relcast=NewRelcast});
-        {ok, Ref, Msg, NewRelcast} ->
+        {ok, Ref, _, Msg, NewRelcast} ->
             gen_server:cast({global, name(I)}, {hbbft, State#state.id, Msg}),
             do_send(Tail, State#state{relcast=NewRelcast, peers=maps:put(I, Ref, State#state.peers)})
     end;
