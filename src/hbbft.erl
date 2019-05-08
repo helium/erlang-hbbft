@@ -234,20 +234,7 @@ handle_msg(Data = #hbbft_data{round=R}, J, {{acs, R}, ACSMsg}) ->
                                         {Share, Sig} = get_decrypted_keyshare(Data, I, Result),
                                         {multicast, {dec, Data#hbbft_data.round, I, Share, Sig}}
                                 end, Results),
-            %% verify any shares we received before we got the ACS result
-            VerifiedShares = maps:map(fun({I, _}, {undefined, Share}) ->
-                                              case lists:keyfind(I, 1, Results) of
-                                                  {I, {Share, Sig}} ->
-                                                      Valid = verify_keyshare(Data, I, Share, Sig),
-                                                      {Valid, Share};
-                                                  false ->
-                                                      %% this is a share for an RBC we will never decode
-                                                      {undefined, Share}
-                                              end;
-                                         (_, V) ->
-                                              V
-                                      end, Data#hbbft_data.dec_shares),
-            {Data#hbbft_data{acs=NewACS, acs_results=Results, dec_shares=VerifiedShares}, {send,  hbbft_utils:wrap({acs, Data#hbbft_data.round}, ACSResponse) ++ Replies}};
+            {Data#hbbft_data{acs=NewACS, acs_results=Results}, {send,  hbbft_utils:wrap({acs, Data#hbbft_data.round}, ACSResponse) ++ Replies}};
         {NewACS, defer} ->
             {Data#hbbft_data{acs=NewACS}, defer}
     end;
@@ -262,14 +249,7 @@ handle_msg(Data = #hbbft_data{round=R, f=F}, J, {dec, R, I, Share, Sig}) ->
             %% we don't need this
             ignore;
         false ->
-            %% the Share now is a binary, deserialize it and then store in the dec_shares map
-            Valid = case lists:keyfind(I, 1, Data#hbbft_data.acs_results) of
-                        {I, _} ->
-                            verify_keyshare(Data, I, Share, Sig);
-                        false ->
-                            %% the corresponding ACS has not yet returned so we can't verify the share yet
-                            undefined
-                    end,
+            Valid = verify_keyshare(Data, I, Share, Sig),
             NewShares = maps:put({I, J}, {Valid, Share}, Data#hbbft_data.dec_shares),
             SharesForThisBundle = [ S || {{Idx, _}, {true, S}} <- maps:to_list(NewShares), I == Idx],
             case lists:keymember(I, 1, Data#hbbft_data.acs_results)         %% was this instance included in the ACS result set?
@@ -399,7 +379,6 @@ decrypt_from(Data, I, Share) ->
     crypto:block_decrypt(aes_cfb128, ECDHKey, <<Round:128/integer-unsigned-little>>, Share).
 
 get_peer_key(#hbbft_data{peer_keys=PK}, I) ->
-    ct:pal("Peer keys ~p ~p ~p~n", [I, length(PK), PK]),
     lists:nth(I+1, PK).
 
 -spec decrypt(binary(), binary()) -> binary() | error.

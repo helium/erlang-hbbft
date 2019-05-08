@@ -12,7 +12,6 @@
          two_actors_no_txns_test/1,
          one_actor_missing_test/1,
          two_actors_missing_test/1,
-         encrypt_decrypt_test/1,
          start_on_demand_test/1,
          one_actor_wrong_key_test/1,
          one_actor_corrupted_key_test/1,
@@ -26,7 +25,6 @@ all() ->
      two_actors_no_txns_test,
      one_actor_missing_test,
      two_actors_missing_test,
-     encrypt_decrypt_test,
      start_on_demand_test,
      one_actor_wrong_key_test,
      one_actor_corrupted_key_test,
@@ -34,7 +32,7 @@ all() ->
     ].
 
 init_per_testcase(_, Config) ->
-    N = 7,
+    N = 5,
     F = N div 4,
     Module = hbbft,
     BatchSize = 20,
@@ -99,8 +97,9 @@ one_actor_no_txns_test(Config) ->
     BatchSize = proplists:get_value(batchsize, Config),
     Module = proplists:get_value(module, Config),
     PrivateKeys = proplists:get_value(privatekeys, Config),
+    ECCKeys = proplists:get_value(ecckeys, Config),
 
-    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize, infinity)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
+    StatesWithIndex = [{J, hbbft:set_key_params(mk_key_params(J, ECCKeys), hbbft:init(Sk, N, F, J, BatchSize, infinity))} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
     Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*10)],
     %% send each message to a random subset of the HBBFT actors
     {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
@@ -133,8 +132,9 @@ two_actors_no_txns_test(Config) ->
     BatchSize = proplists:get_value(batchsize, Config),
     Module = proplists:get_value(module, Config),
     PrivateKeys = proplists:get_value(privatekeys, Config),
+    ECCKeys = proplists:get_value(ecckeys, Config),
 
-    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize, infinity)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
+    StatesWithIndex = [{J, hbbft:set_key_params(mk_key_params(J, ECCKeys), hbbft:init(Sk, N, F, J, BatchSize, infinity))} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
     Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*10)],
     %% send each message to a random subset of the HBBFT actors
     {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
@@ -161,8 +161,9 @@ one_actor_missing_test(Config) ->
     BatchSize = proplists:get_value(batchsize, Config),
     Module = proplists:get_value(module, Config),
     PrivateKeys = proplists:get_value(privatekeys, Config),
+    ECCKeys = proplists:get_value(ecckeys, Config),
 
-    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize, infinity)} || {J, Sk} <- lists:zip(lists:seq(0, N - 2), lists:sublist(PrivateKeys, N-1))],
+    StatesWithIndex = [{J, hbbft:set_key_params(mk_key_params(J, ECCKeys), hbbft:init(Sk, N, F, J, BatchSize, infinity))} || {J, Sk} <- lists:zip(lists:seq(0, N - 2), lists:sublist(PrivateKeys, N-1))],
     Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*10)],
     %% send each message to a random subset of the HBBFT actors
     {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
@@ -195,8 +196,9 @@ two_actors_missing_test(Config) ->
     BatchSize = proplists:get_value(batchsize, Config),
     Module = proplists:get_value(module, Config),
     PrivateKeys = proplists:get_value(privatekeys, Config),
+    ECCKeys = proplists:get_value(ecckeys, Config),
 
-    StatesWithIndex = [{J, hbbft:init(Sk, N, F, J, BatchSize, infinity)} || {J, Sk} <- lists:zip(lists:seq(0, N - 3), lists:sublist(PrivateKeys, N-2))],
+    StatesWithIndex = [{J, hbbft:set_key_params(mk_key_params(J, ECCKeys), hbbft:init(Sk, N, F, J, BatchSize, infinity))} || {J, Sk} <- lists:zip(lists:seq(0, N - 3), lists:sublist(PrivateKeys, N-2))],
     Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*10)],
     %% send each message to a random subset of the HBBFT actors
     {NewStates, Replies} = lists:foldl(fun(Msg, {States, Replies}) ->
@@ -217,24 +219,14 @@ two_actors_missing_test(Config) ->
     ?assertEqual(0, sets:size(ConvergedResults)),
     ok.
 
-encrypt_decrypt_test(Config) ->
-    PubKey = proplists:get_value(pubkey, Config),
-    PrivateKeys = proplists:get_value(privatekeys, Config),
-
-    PlainText = crypto:strong_rand_bytes(24),
-    Enc = hbbft:encrypt(PubKey, PlainText),
-    EncKey = hbbft:get_encrypted_key(hd(PrivateKeys), Enc),
-    DecKey = tpke_pubkey:combine_shares(PubKey, EncKey, [ tpke_privkey:decrypt_share(SK, EncKey) || SK <- PrivateKeys]),
-    ?assertEqual(PlainText, hbbft:decrypt(DecKey, Enc)),
-    ok.
-
 start_on_demand_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
     BatchSize = proplists:get_value(batchsize, Config),
     PubKey = proplists:get_value(pubkey, Config),
+    ECCKeys = proplists:get_value(ecckeys, Config),
     PrivateKeys = proplists:get_value(privatekeys, Config),
-    Workers = [ element(2, hbbft_worker:start_link(N, F, I, tpke_privkey:serialize(SK), BatchSize, false)) || {I, SK} <- enumerate(PrivateKeys) ],
+    Workers = [ element(2, hbbft_worker:start_link(N, F, I, tpke_privkey:serialize(SK), BatchSize, false, mk_key_params(I, ECCKeys)))|| {I, SK} <- enumerate(PrivateKeys) ],
 
     [W1, _W2 | RemainingWorkers] = Workers,
 
@@ -288,6 +280,7 @@ one_actor_wrong_key_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
     BatchSize = proplists:get_value(batchsize, Config),
+    ECCKeys = proplists:get_value(ecckeys, Config),
     PubKey = proplists:get_value(pubkey, Config),
     PrivateKeys0 = proplists:get_value(privatekeys, Config),
     {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
@@ -297,7 +290,7 @@ one_actor_wrong_key_test(Config) ->
     %% and thus it will not be able to reach consensus
     PrivateKeys = [hd(PrivateKeys1)|tl(PrivateKeys0)],
 
-    Workers = [ element(2, hbbft_worker:start_link(N, F, I, tpke_privkey:serialize(SK), BatchSize, false)) || {I, SK} <- enumerate(PrivateKeys) ],
+    Workers = [ element(2, hbbft_worker:start_link(N, F, I, tpke_privkey:serialize(SK), BatchSize, false, mk_key_params(I, ECCKeys))) || {I, SK} <- enumerate(PrivateKeys) ],
     Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*20)],
     %% feed the badgers some msgs
     lists:foreach(fun(Msg) ->
@@ -342,6 +335,7 @@ one_actor_corrupted_key_test(Config) ->
     F = proplists:get_value(f, Config),
     BatchSize = proplists:get_value(batchsize, Config),
     PubKey = proplists:get_value(pubkey, Config),
+    ECCKeys = proplists:get_value(ecckeys, Config),
     [PK1|PrivateKeys0] = proplists:get_value(privatekeys, Config),
     PKE = element(3, PK1),
     %% scramble the private element of the key
@@ -351,7 +345,7 @@ one_actor_corrupted_key_test(Config) ->
     PK2 = setelement(3, PK1, erlang_pbc:element_random(PKE)),
     PrivateKeys = [PK2|PrivateKeys0],
 
-    Workers = [ element(2, hbbft_worker:start_link(N, F, I, tpke_privkey:serialize(SK), BatchSize, false)) || {I, SK} <- enumerate(PrivateKeys) ],
+    Workers = [ element(2, hbbft_worker:start_link(N, F, I, tpke_privkey:serialize(SK), BatchSize, false, mk_key_params(I, ECCKeys))) || {I, SK} <- enumerate(PrivateKeys) ],
     Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*20)],
     %% feed the badgers some msgs
     lists:foreach(fun(Msg) ->
