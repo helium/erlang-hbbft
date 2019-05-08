@@ -2,7 +2,7 @@
 
 -behaviour(gen_server).
 
--export([start_link/6, submit_transaction/2, start_on_demand/1, get_blocks/1]).
+-export([start_link/7, submit_transaction/2, start_on_demand/1, get_blocks/1]).
 -export([verify_chain/2, block_transactions/1]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
@@ -24,8 +24,8 @@
           to_serialize = false :: boolean()
          }).
 
-start_link(N, F, ID, SK, BatchSize, ToSerialize) ->
-    gen_server:start_link({global, name(ID)}, ?MODULE, [N, F, ID, SK, BatchSize, ToSerialize], []).
+start_link(N, F, ID, SK, BatchSize, ToSerialize, KeyParams) ->
+    gen_server:start_link({global, name(ID)}, ?MODULE, [N, F, ID, SK, BatchSize, ToSerialize, KeyParams], []).
 
 submit_transaction(Msg, Pid) ->
     gen_server:call(Pid, {submit_txn, Msg}, infinity).
@@ -83,11 +83,11 @@ verify_block_fit([A, B | _], PubKey) ->
 block_transactions(Block) ->
     Block#block.transactions.
 
-init([N, F, ID, SK, BatchSize, ToSerialize]) ->
+init([N, F, ID, SK, BatchSize, ToSerialize, KeyParams]) ->
     %% deserialize the secret key once
     DSK = tpke_privkey:deserialize(SK),
     %% init hbbft
-    HBBFT = hbbft:init(DSK, N, F, ID, BatchSize, infinity),
+    HBBFT = hbbft:set_key_params(KeyParams, hbbft:init(DSK, N, F, ID, BatchSize, infinity)),
     %% store the serialized state and serialized SK
     {ok, #state{hbbft=HBBFT, blocks=[], id=ID, n=N, sk=DSK, ssk=SK, to_serialize=ToSerialize}}.
 

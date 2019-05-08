@@ -3,6 +3,7 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("relcast/include/fakecast.hrl").
+-include_lib("public_key/include/public_key.hrl").
 
 -export([all/0, init_per_testcase/2, end_per_testcase/2]).
 -export([
@@ -33,13 +34,14 @@ all() ->
     ].
 
 init_per_testcase(_, Config) ->
-    N = 5,
+    N = 7,
     F = N div 4,
     Module = hbbft,
     BatchSize = 20,
     {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
     {ok, {PubKey, PrivateKeys}} = dealer:deal(Dealer),
-    [{n, N}, {f, F}, {batchsize, BatchSize}, {module, Module}, {pubkey, PubKey}, {privatekeys, PrivateKeys} | Config].
+    ECCKeys = [ public_key:generate_key({namedCurve,?secp256r1}) || _ <- lists:seq(1, N)],
+    [{n, N}, {f, F}, {batchsize, BatchSize}, {module, Module}, {ecckeys, ECCKeys}, {pubkey, PubKey}, {privatekeys, PrivateKeys} | Config].
 
 end_per_testcase(_, _Config) ->
     ok.
@@ -48,9 +50,10 @@ init_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
     BatchSize = proplists:get_value(batchsize, Config),
+    ECCKeys = proplists:get_value(ecckeys, Config),
     PubKey = proplists:get_value(pubkey, Config),
     PrivateKeys = proplists:get_value(privatekeys, Config),
-    Workers = [ element(2, hbbft_worker:start_link(N, F, I, tpke_privkey:serialize(SK), BatchSize, false)) || {I, SK} <- enumerate(PrivateKeys) ],
+    Workers = [ element(2, hbbft_worker:start_link(N, F, I, tpke_privkey:serialize(SK), BatchSize, false, mk_key_params(I, ECCKeys))) || {I, SK} <- enumerate(PrivateKeys) ],
     Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*20)],
     %% feed the badgers some msgs
     lists:foreach(fun(Msg) ->
@@ -490,3 +493,8 @@ merge_replies(N, NewReplies, Replies) ->
             merge_replies(N-1, lists:keydelete(N, 1, NewReplies), lists:keystore(N, 1, Replies, NewSend))
     end.
 
+mk_key_params(I, Keylist) ->
+    ct:pal("I ~p~n", [I]),
+    PrivKey = lists:nth(I+1, Keylist),
+    PubKeys = lists:map(fun(#'ECPrivateKey'{parameters=_Params, publicKey=PubKey}) ->     {#'ECPoint'{point = PubKey}, _Params} end, Keylist),
+    {PubKeys, fun(Bin) -> public_key:sign(Bin, sha256, PrivKey) end, fun({PubKey, {namedCurve, ?secp256r1}}) -> public_key:compute_key(PubKey, PrivKey) end}.

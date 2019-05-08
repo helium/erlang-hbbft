@@ -3,6 +3,7 @@
 -export([init/6, init/7, init/9,
          get_stamp_fun/1,
          set_stamp_fun/4,
+         set_key_params/2,
          start_on_demand/1,
          input/2,
          finalize_round/3,
@@ -11,9 +12,6 @@
          next_round/3,
          round/1,
          buf/1, buf/2,
-         get_encrypted_key/2,
-         encrypt/2,
-         decrypt/2,
          handle_msg/3,
          serialize/1,
          serialize/2,
@@ -40,7 +38,10 @@
           sig_shares = #{} :: #{non_neg_integer() => {non_neg_integer(), erlang_pbc:element()}},
           thingtosign :: undefined | erlang_pbc:element(),
           stampfun :: undefined | {atom(), atom(), list()},
-          stamps = [] :: [{non_neg_integer(), any()}]
+          stamps = [] :: [{non_neg_integer(), any()}],
+          peer_keys = [] :: list(),
+          sigfun :: fun((binary()) -> binary()),
+          ecdhfun :: fun()
          }).
 
 -record(hbbft_serialized_data, {
@@ -115,9 +116,12 @@ get_stamp_fun(#hbbft_data{stampfun=S}) ->
 set_stamp_fun(M, F, A, Data) when is_atom(M), is_atom(F) ->
     Data#hbbft_data{stampfun={M, F, A}}.
 
+set_key_params({PubKeys, SigFun, ECDHFun}, Data) ->
+    Data#hbbft_data{peer_keys=PubKeys, sigfun=SigFun, ecdhfun=ECDHFun}.
+
 %% start acs on demand
 -spec start_on_demand(hbbft_data()) -> {hbbft_data(), already_started | {send, [rbc_wrapped_output()]}}.
-start_on_demand(Data = #hbbft_data{buf=Buf, n=N, secret_key=SK, batch_size=BatchSize, acs_init=false}) ->
+start_on_demand(Data = #hbbft_data{buf=Buf, n=N, batch_size=BatchSize, acs_init=false}) ->
     %% pick proposed whichever is lesser from batchsize/n or buffer
     Proposed = hbbft_utils:random_n(min((BatchSize div N), length(Buf)), lists:sublist(Buf, BatchSize)),
     %% encrypt x -> tpke.enc(pk, proposed)
@@ -126,7 +130,7 @@ start_on_demand(Data = #hbbft_data{buf=Buf, n=N, secret_key=SK, batch_size=Batch
                 {M, F, A} -> erlang:apply(M, F, A)
             end,
     true = is_binary(Stamp),
-    EncX = encrypt(tpke_privkey:public_key(SK), encode_list([Stamp|Proposed], [])),
+    EncX = encrypt(Data, encode_list([Stamp|Proposed], [])),
     %% time to kick off a round
     {NewACSState, {send, ACSResponse}} = hbbft_acs:input(Data#hbbft_data.acs, EncX),
     %% add this to acs set in data and send out the ACS response(s)
@@ -227,17 +231,14 @@ handle_msg(Data = #hbbft_data{round=R}, J, {{acs, R}, ACSMsg}) ->
             %% ACS[r] has returned, time to move on to the decrypt phase
             %% start decrypt phase
             Replies = lists:map(fun({I, Result}) ->
-                                        EncKey = get_encrypted_key(Data#hbbft_data.secret_key, Result),
-                                        Share = tpke_privkey:decrypt_share(Data#hbbft_data.secret_key, EncKey),
-                                        SerializedShare = hbbft_utils:share_to_binary(Share),
-                                        {multicast, {dec, Data#hbbft_data.round, I, SerializedShare}}
+                                        {Share, Sig} = get_decrypted_keyshare(Data, I, Result),
+                                        {multicast, {dec, Data#hbbft_data.round, I, Share, Sig}}
                                 end, Results),
             %% verify any shares we received before we got the ACS result
             VerifiedShares = maps:map(fun({I, _}, {undefined, Share}) ->
                                               case lists:keyfind(I, 1, Results) of
-                                                  {I, Enc} ->
-                                                      EncKey = get_encrypted_key(Data#hbbft_data.secret_key, Enc),
-                                                      Valid = tpke_pubkey:verify_share(tpke_privkey:public_key(Data#hbbft_data.secret_key), Share, EncKey),
+                                                  {I, {Share, Sig}} ->
+                                                      Valid = verify_keyshare(Data, I, Share, Sig),
                                                       {Valid, Share};
                                                   false ->
                                                       %% this is a share for an RBC we will never decode
@@ -250,9 +251,9 @@ handle_msg(Data = #hbbft_data{round=R}, J, {{acs, R}, ACSMsg}) ->
         {NewACS, defer} ->
             {Data#hbbft_data{acs=NewACS}, defer}
     end;
-handle_msg(Data = #hbbft_data{round=R}, _J, {dec, R2, _I, _Share}) when R2 > R ->
+handle_msg(Data = #hbbft_data{round=R}, _J, {dec, R2, _I, _Share, _Sig}) when R2 > R ->
     {Data, defer};
-handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
+handle_msg(Data = #hbbft_data{round=R, f=F}, J, {dec, R, I, Share, Sig}) ->
     %% check if we have enough to decode the bundle
     case maps:is_key(I, Data#hbbft_data.decrypted) %% have we already decrypted for this instance?
         orelse maps:is_key({I, J}, Data#hbbft_data.dec_shares) of %% do we already have this share?
@@ -262,49 +263,34 @@ handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
             ignore;
         false ->
             %% the Share now is a binary, deserialize it and then store in the dec_shares map
-            DeserializedShare = hbbft_utils:binary_to_share(Share, Data#hbbft_data.secret_key),
             Valid = case lists:keyfind(I, 1, Data#hbbft_data.acs_results) of
-                        {I, Enc0} ->
-                            EncKey0 = get_encrypted_key(Data#hbbft_data.secret_key, Enc0),
-                            tpke_pubkey:verify_share(tpke_privkey:public_key(Data#hbbft_data.secret_key), DeserializedShare, EncKey0);
+                        {I, _} ->
+                            verify_keyshare(Data, I, Share, Sig);
                         false ->
                             %% the corresponding ACS has not yet returned so we can't verify the share yet
                             undefined
                     end,
-            NewShares = maps:put({I, J}, {Valid, DeserializedShare}, Data#hbbft_data.dec_shares),
-            SharesForThisBundle = [ S || {{Idx, _}, S} <- maps:to_list(NewShares), I == Idx],
+            NewShares = maps:put({I, J}, {Valid, Share}, Data#hbbft_data.dec_shares),
+            SharesForThisBundle = [ S || {{Idx, _}, {true, S}} <- maps:to_list(NewShares), I == Idx],
             case lists:keymember(I, 1, Data#hbbft_data.acs_results)         %% was this instance included in the ACS result set?
                  andalso length(SharesForThisBundle) > Data#hbbft_data.f of %% do we have f+1 decryption shares?
                 true ->
+                  DecKey = erlang_sss:sss_combine_keyshares(SharesForThisBundle, F+1),
                   {I, Enc} = lists:keyfind(I, 1, Data#hbbft_data.acs_results),
-                  EncKey = get_encrypted_key(Data#hbbft_data.secret_key, Enc),
-                    case combine_shares(Data#hbbft_data.f, Data#hbbft_data.secret_key, SharesForThisBundle, EncKey) of
-                        undefined ->
-                            %% can't recover the key, consider this ACS failed if we have 2f+1 shares and still can't recover the key
-                            case length(SharesForThisBundle) > 2 * Data#hbbft_data.f of
-                                true ->
-                                    %% ok, just declare this ACS returned an empty list
-                                    NewDecrypted = maps:put(I, [], Data#hbbft_data.decrypted),
-                                    check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted});
-                                false ->
-                                    {Data#hbbft_data{dec_shares=NewShares}, ok}
-                            end;
-                        DecKey ->
-                            case decrypt(DecKey, Enc) of
-                                error ->
-                                    %% can't decrypt, consider this ACS a failure
-                                    %% just declare this ACS returned an empty list because we had
-                                    %% f+1 valid shares but the resulting decryption key was unusuable to decrypt
-                                    %% the transaction bundle
-                                    NewDecrypted = maps:put(I, [], Data#hbbft_data.decrypted),
-                                    check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted});
-                                Decrypted ->
-                                    [Stamp | Transactions] = decode_list(Decrypted, []),
-                                    NewDecrypted = maps:put(I, Transactions, Data#hbbft_data.decrypted),
-                                    Stamps = [{I, Stamp} | Data#hbbft_data.stamps],
-                                    check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted, stamps=Stamps})
-                            end
-                    end;
+                  case decrypt(DecKey, Enc) of
+                      error ->
+                          %% can't decrypt, consider this ACS a failure
+                          %% just declare this ACS returned an empty list because we had
+                          %% f+1 valid shares but the resulting decryption key was unusuable to decrypt
+                          %% the transaction bundle
+                          NewDecrypted = maps:put(I, [], Data#hbbft_data.decrypted),
+                          check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted});
+                      Decrypted ->
+                          [Stamp | Transactions] = decode_list(Decrypted, []),
+                          NewDecrypted = maps:put(I, Transactions, Data#hbbft_data.decrypted),
+                          Stamps = [{I, Stamp} | Data#hbbft_data.stamps],
+                          check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted, stamps=Stamps})
+                  end;
                 false ->
                     %% not enough shares yet
                     {Data#hbbft_data{dec_shares=NewShares}, ok}
@@ -344,7 +330,7 @@ handle_msg(_Data, _J, _Msg) ->
     ignore.
 
 -spec maybe_start_acs(hbbft_data()) -> {hbbft_data(), ok | {send, [rbc_wrapped_output()]}}.
-maybe_start_acs(Data = #hbbft_data{n=N, secret_key=SK, batch_size=BatchSize}) ->
+maybe_start_acs(Data = #hbbft_data{n=N, batch_size=BatchSize}) ->
     case length(Data#hbbft_data.buf) > BatchSize andalso Data#hbbft_data.acs_init == false of
         true ->
             %% compose a transaction bundle
@@ -357,7 +343,7 @@ maybe_start_acs(Data = #hbbft_data{n=N, secret_key=SK, batch_size=BatchSize}) ->
                 {M, F, A} -> erlang:apply(M, F, A)
             end,
             true = is_binary(Stamp),
-            EncX = encrypt(tpke_privkey:public_key(SK), encode_list([Stamp|Proposed], [])),
+            EncX = encrypt(Data, encode_list([Stamp|Proposed], [])),
             %% time to kick off a round
             {NewACSState, {send, ACSResponse}} = hbbft_acs:input(Data#hbbft_data.acs, EncX),
             %% add this to acs set in data and send out the ACS response(s)
@@ -369,30 +355,52 @@ maybe_start_acs(Data = #hbbft_data{n=N, secret_key=SK, batch_size=BatchSize}) ->
     end.
 
 -spec encrypt(tpke_pubkey:pubkey(), binary()) -> binary().
-encrypt(PK, Bin) ->
+encrypt(Data = #hbbft_data{n=N, f=F}, Bin) ->
     %% generate a random AES key and IV
     Key = crypto:strong_rand_bytes(32),
     IV = crypto:strong_rand_bytes(16),
-    %% encrypt that random AES key with the HBBFT replica set's public key
-    %% the result of the encryption is a 3-tuple that contains 2 PBC Elements and a 32 byte binary
-    %% we need to encode all this crap into a binary value that we can unpack again sanely
-    {U, V, W} = tpke_pubkey:encrypt(PK, Key),
-    UBin = erlang_pbc:element_to_binary(U),
-    WBin = erlang_pbc:element_to_binary(W),
-    EncKey = <<(byte_size(UBin)):8/integer-unsigned, UBin/binary, V:32/binary, (byte_size(WBin)):8/integer-unsigned, WBin/binary>>,
+    %% split that random AES key into N shares, where any F+1 can recreate the original key
+    KeyShares = erlang_sss:sss_create_keyshares(Key, N, F+1),
+    %% sign each share with our public key, so it can be verified, and then encrypt each share so only its destination can
+    %% decrypt it
+    EncKey = term_to_binary([ encrypt_for(Data, I, sign(Data, Share)) || {Share, I} <- lists:zip(KeyShares, lists:seq(0, N-1))]),
     %% encrypt the bundle with AES-GCM and put the IV and the encrypted key in the Additional Authenticated Data (AAD)
     AAD = <<IV:16/binary, (byte_size(EncKey)):16/integer-unsigned, EncKey/binary>>,
     {CipherText, CipherTag} = crypto:block_encrypt(aes_gcm, Key, IV, {AAD, Bin}),
     %% assemble a final binary packet
     <<AAD/binary, CipherTag:16/binary, CipherText/binary>>.
 
--spec get_encrypted_key(tpke_privkey:privkey(), binary()) -> tpke_pubkey:ciphertext().
-get_encrypted_key(SK, <<_IV:16/binary, EncKeySize:16/integer-unsigned, EncKey:EncKeySize/binary, _/binary>>) ->
-    <<USize:8/integer-unsigned, UBin:USize/binary, V:32/binary, WSize:8/integer-unsigned, WBin:WSize/binary>> = EncKey,
-    PubKey = tpke_privkey:public_key(SK),
-    U = tpke_pubkey:deserialize_element(PubKey, UBin),
-    W = tpke_pubkey:deserialize_element(PubKey, WBin),
-    {U, V, W}.
+get_decrypted_keyshare(Data = #hbbft_data{j=J}, I, <<_IV:16/binary, EncKeySize:16/integer-unsigned, EncKey:EncKeySize/binary, _/binary>>) ->
+    EncKeyShares = binary_to_term(EncKey),
+    MyShare = lists:nth(J+1, EncKeyShares),
+    <<KeyShare:33/binary, Signature/binary>> = decrypt_from(Data, I, MyShare),
+    {KeyShare, Signature}.
+
+verify_keyshare(Data, I, KeyShare, Signature) ->
+    PubKey = get_peer_key(Data, I),
+    public_key:verify(KeyShare, sha256, Signature, PubKey).
+
+sign(Data, Share) ->
+    Signature = (Data#hbbft_data.sigfun)(Share),
+    <<Share:33/binary, Signature/binary>>.
+
+encrypt_for(Data, I, Payload) ->
+    Round = Data#hbbft_data.round,
+    PeerKey = get_peer_key(Data, I),
+    ECDHKey = (Data#hbbft_data.ecdhfun)(PeerKey),
+    %% TODO we should use HKDF or something here to scramble the diffie hellman key
+    %% a bit because we aren't using ephemeral keys here
+    crypto:block_encrypt(aes_cfb128, ECDHKey, <<Round:128/integer-unsigned-little>>, Payload).
+
+decrypt_from(Data, I, Share) ->
+    Round = Data#hbbft_data.round,
+    PeerKey = get_peer_key(Data, I),
+    ECDHKey = (Data#hbbft_data.ecdhfun)(PeerKey),
+    crypto:block_decrypt(aes_cfb128, ECDHKey, <<Round:128/integer-unsigned-little>>, Share).
+
+get_peer_key(#hbbft_data{peer_keys=PK}, I) ->
+    ct:pal("Peer keys ~p ~p ~p~n", [I, length(PK), PK]),
+    lists:nth(I+1, PK).
 
 -spec decrypt(binary(), binary()) -> binary() | error.
 decrypt(Key, Bin) ->
@@ -451,16 +459,7 @@ deserialize(#hbbft_serialized_data{batch_size=BatchSize,
                 sent_sig=SentSig,
                 acs_results=ACSResults,
                 decrypted=Decrypted,
-                dec_shares=maps:map(fun(_, {Valid, Share}) ->
-                                            {Valid, hbbft_utils:binary_to_share(Share, SK)};
-                                       ({I, _}, Share) ->
-                                            %% compatability shim for old, untagged shares
-                                            {I, Enc} = lists:keyfind(I, 1, ACSResults),
-                                            EncKey = get_encrypted_key(SK, Enc),
-                                            DeserializedShare = hbbft_utils:binary_to_share(Share, SK),
-                                            Valid = tpke_pubkey:verify_share(tpke_privkey:public_key(SK), DeserializedShare, EncKey),
-                                            {Valid, DeserializedShare}
-                                    end, DecShares),
+                dec_shares=DecShares,
                 sig_shares=maps:map(fun(_, Share) -> hbbft_utils:binary_to_share(Share, SK) end, SigShares),
                 thingtosign=NewThingToSign,
                 stampfun=Stampfun,
@@ -505,16 +504,7 @@ deserialize(M0, SK) ->
                 sent_sig=SentSig,
                 acs_results=ACSResults,
                 decrypted=Decrypted,
-                dec_shares=maps:map(fun(_, {Valid, Share}) ->
-                                            {Valid, hbbft_utils:binary_to_share(Share, SK)};
-                                       ({I, _}, Share) ->
-                                            %% compatability shim for old, untagged shares
-                                            {I, Enc} = lists:keyfind(I, 1, ACSResults),
-                                            EncKey = get_encrypted_key(SK, Enc),
-                                            DeserializedShare = hbbft_utils:binary_to_share(Share, SK),
-                                            Valid = tpke_pubkey:verify_share(tpke_privkey:public_key(SK), DeserializedShare, EncKey),
-                                            {Valid, DeserializedShare}
-                                    end, DecShares),
+                dec_shares=DecShares,
                 sig_shares=maps:map(fun(_, Share) -> hbbft_utils:binary_to_share(Share, SK) end, SigShares),
                 thingtosign=NewThingToSign,
                 stampfun=Stampfun,
@@ -593,18 +583,6 @@ check_completion(Data) ->
             {Data#hbbft_data{sent_txns=true}, {result, {transactions, StampsThisRound, TransactionsThisRound}}};
         false ->
             {Data, ok}
-    end.
-
--spec combine_shares(pos_integer(), tpke_privkey:privkey(), [tpke_privkey:share()], tpke_pubkey:ciphertext()) -> undefined | binary().
-combine_shares(F, SK, SharesForThisBundle, EncKey) ->
-    %% only use valid shares so an invalid share doesn't corrupt our result
-    ValidSharesForThisBundle = [ S || {true, S} <- SharesForThisBundle ],
-    case length(ValidSharesForThisBundle) > F of
-        true ->
-            tpke_pubkey:combine_shares(tpke_privkey:public_key(SK), EncKey, ValidSharesForThisBundle);
-        false ->
-            %% not enough valid shares to bother trying to combine them
-            undefined
     end.
 
 encode_list([], Acc) ->
