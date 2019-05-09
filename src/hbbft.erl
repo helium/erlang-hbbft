@@ -357,7 +357,7 @@ get_decrypted_keyshare(Data = #hbbft_data{j=J}, I, <<_IV:16/binary, EncKeySize:1
     {KeyShare, Signature}.
 
 verify_keyshare(Data, I, KeyShare, Signature) ->
-    PubKey = get_peer_key(Data, I),
+    {ecc_compact, PubKey} = get_peer_key(Data, I),
     public_key:verify(KeyShare, sha256, Signature, PubKey).
 
 sign(Data, Share) ->
