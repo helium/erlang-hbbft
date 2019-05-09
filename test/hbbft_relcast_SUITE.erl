@@ -2,6 +2,7 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("public_key/include/public_key.hrl").
 
 -export([all/0, init_per_testcase/2, end_per_testcase/2]).
 -export([
@@ -10,7 +11,6 @@
          two_actors_no_txns_test/1,
          one_actor_missing_test/1,
          two_actors_missing_test/1,
-         encrypt_decrypt_test/1,
          start_on_demand_test/1
         ]).
 
@@ -21,7 +21,6 @@ all() ->
      two_actors_no_txns_test,
      one_actor_missing_test,
      two_actors_missing_test,
-     encrypt_decrypt_test,
      start_on_demand_test
     ].
 
@@ -32,6 +31,7 @@ init_per_testcase(TestCase, Config) ->
     BatchSize = 20,
     {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
     {ok, {PubKey, PrivateKeys}} = dealer:deal(Dealer),
+    ECCKeys = [ public_key:generate_key({namedCurve,?secp256r1}) || _ <- lists:seq(1, N)],
 
     [{n, N},
      {f, F},
@@ -39,6 +39,7 @@ init_per_testcase(TestCase, Config) ->
      {module, Module},
      {pubkey, PubKey},
      {privatekeys, PrivateKeys},
+     {ecckeys, ECCKeys},
      {data_dir, atom_to_list(TestCase)++"data"} | Config].
 
 end_per_testcase(_, _Config) ->
@@ -60,6 +61,7 @@ init_test(Config) ->
                                                                      {n, N},
                                                                      {f, F},
                                                                      {data_dir, DataDir},
+                                                                     {key_params, mk_key_params(I-1, proplists:get_value(ecckeys, Config))},
                                                                      {batchsize, BatchSize}
                                                                     ]),
                                   [W | Acc]
@@ -229,17 +231,6 @@ two_actors_missing_test(Config) ->
     ?assertEqual(0, sets:size(ConvergedResults)),
     ok.
 
-encrypt_decrypt_test(Config) ->
-    PubKey = proplists:get_value(pubkey, Config),
-    PrivateKeys = proplists:get_value(privatekeys, Config),
-
-    PlainText = crypto:strong_rand_bytes(24),
-    Enc = hbbft:encrypt(PubKey, PlainText),
-    EncKey = hbbft:get_encrypted_key(hd(PrivateKeys), Enc),
-    DecKey = tpke_pubkey:combine_shares(PubKey, EncKey, [ tpke_privkey:decrypt_share(SK, EncKey) || SK <- PrivateKeys]),
-    ?assertEqual(PlainText, hbbft:decrypt(DecKey, Enc)),
-    ok.
-
 start_on_demand_test(Config) ->
     PubKey = proplists:get_value(pubkey, Config),
     N = proplists:get_value(n, Config),
@@ -256,6 +247,7 @@ start_on_demand_test(Config) ->
                                                                      {n, N},
                                                                      {f, F},
                                                                      {data_dir, DataDir},
+                                                                     {key_params, mk_key_params(I-1, proplists:get_value(ecckeys, Config))},
                                                                      {batchsize, BatchSize}
                                                                     ]),
                                   [W | Acc]
@@ -323,3 +315,9 @@ start_on_demand_test(Config) ->
     [gen_server:stop(W) || W <- Workers],
     ok.
 
+
+mk_key_params(I, Keylist) ->
+    ct:pal("I ~p~n", [I]),
+    PrivKey = lists:nth(I+1, Keylist),
+    PubKeys = lists:map(fun(#'ECPrivateKey'{parameters=_Params, publicKey=PubKey}) ->     {#'ECPoint'{point = PubKey}, _Params} end, Keylist),
+    {PubKeys, fun(Bin) -> public_key:sign(Bin, sha256, PrivKey) end, fun({PubKey, {namedCurve, ?secp256r1}}) -> public_key:compute_key(PubKey, PrivKey) end}.
