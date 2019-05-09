@@ -87,7 +87,7 @@ init([N, F, ID, SK, BatchSize, ToSerialize, KeyParams]) ->
     %% deserialize the secret key once
     DSK = tpke_privkey:deserialize(SK),
     %% init hbbft
-    HBBFT = hbbft:set_key_params(KeyParams, hbbft:init(DSK, N, F, ID, BatchSize, infinity)),
+    HBBFT = hbbft:set_ecc_keys(KeyParams, hbbft:init(DSK, N, F, ID, BatchSize, infinity)),
     %% store the serialized state and serialized SK
     {ok, #state{hbbft=HBBFT, blocks=[], id=ID, n=N, sk=DSK, ssk=SK, to_serialize=ToSerialize}}.
 

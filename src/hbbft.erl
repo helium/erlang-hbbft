@@ -3,7 +3,8 @@
 -export([init/6, init/7, init/9,
          get_stamp_fun/1,
          set_stamp_fun/4,
-         set_key_params/2,
+         set_ecc_keys/2,
+         get_ecc_keys/1,
          start_on_demand/1,
          input/2,
          finalize_round/3,
@@ -116,8 +117,18 @@ get_stamp_fun(#hbbft_data{stampfun=S}) ->
 set_stamp_fun(M, F, A, Data) when is_atom(M), is_atom(F) ->
     Data#hbbft_data{stampfun={M, F, A}}.
 
-set_key_params({PubKeys, SigFun, ECDHFun}, Data) ->
+set_ecc_keys({PubKeys, SigFun, ECDHFun}, Data) ->
     Data#hbbft_data{peer_keys=PubKeys, sigfun=SigFun, ecdhfun=ECDHFun}.
+
+get_ecc_keys(Data) ->
+    #hbbft_data{peer_keys=PubKeys, sigfun=SigFun, ecdhfun=ECDHFun} = Data,
+    Res = {PubKeys, SigFun, ECDHFun},
+    case lists:all(fun(E) -> E == undefined end, tuple_to_list(Res)) of
+        true ->
+            undefined;
+        false ->
+            Res
+    end.
 
 %% start acs on demand
 -spec start_on_demand(hbbft_data()) -> {hbbft_data(), already_started | {send, [rbc_wrapped_output()]}}.
@@ -357,7 +368,7 @@ get_decrypted_keyshare(Data = #hbbft_data{j=J}, I, <<_IV:16/binary, EncKeySize:1
     {KeyShare, Signature}.
 
 verify_keyshare(Data, I, KeyShare, Signature) ->
-    {ecc_compact, PubKey} = get_peer_key(Data, I),
+    PubKey = get_peer_key(Data, I),
     public_key:verify(KeyShare, sha256, Signature, PubKey).
 
 sign(Data, Share) ->

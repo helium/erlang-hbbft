@@ -25,7 +25,7 @@ init(HBBFTArgs) ->
     ID = proplists:get_value(id, HBBFTArgs),
     BatchSize = proplists:get_value(batchsize, HBBFTArgs),
     KeyParams = proplists:get_value(key_params, HBBFTArgs),
-    HBBFT = hbbft:set_key_params(KeyParams, hbbft:init(SK, N, F, ID - 1, BatchSize, infinity)),
+    HBBFT = hbbft:set_ecc_keys(KeyParams, hbbft:init(SK, N, F, ID - 1, BatchSize, infinity)),
     {ok, #state{hbbft=HBBFT, sk=SK}}.
 
 handle_command({txn, Txn}, State) ->
