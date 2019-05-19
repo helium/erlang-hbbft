@@ -69,7 +69,7 @@
 -type hbbft_data() :: #hbbft_data{}.
 -type hbbft_serialized_data() :: #hbbft_serialized_data{}.
 -type acs_msg() :: {{acs, non_neg_integer()}, hbbft_acs:msgs()}.
--type dec_msg() :: {dec, non_neg_integer(), non_neg_integer(), {non_neg_integer(), binary()}}.
+-type dec_msg() :: {dec_share, non_neg_integer(), non_neg_integer(), binary(), binary()}.
 -type sign_msg() :: {sign, non_neg_integer(), binary()}.
 -type rbc_wrapped_output() :: hbbft_utils:unicast({{acs, non_neg_integer()}, {{rbc, non_neg_integer()}, hbbft_rbc:val_msg()}}) | hbbft_utils:multicast({{acs, non_neg_integer()}, {{rbc, non_neg_integer()}, hbbft_rbc:echo_msg() | hbbft_rbc:ready_msg()}}).
 -type bba_wrapped_output() :: hbbft_utils:multicast({{acs, non_neg_integer()}, hbbft_acs:bba_msg()}).
@@ -241,17 +241,23 @@ handle_msg(Data = #hbbft_data{round=R}, J, {{acs, R}, ACSMsg}) ->
         {NewACS, {result_and_send, Results, {send, ACSResponse}}} ->
             %% ACS[r] has returned, time to move on to the decrypt phase
             %% start decrypt phase
-            Replies = lists:map(fun({I, Result}) ->
+            Replies = lists:foldl(fun({I, Result}, Acc) ->
                                         {Share, Sig} = get_decrypted_keyshare(Data, I, Result),
-                                        {multicast, {dec, Data#hbbft_data.round, I, Share, Sig}}
-                                end, Results),
+                                        case verify_keyshare(Data, I, Share, Sig) of
+                                            true ->
+                                                [{multicast, {dec_share, Data#hbbft_data.round, I, Share, Sig}}|Acc];
+                                            false ->
+                                                %% XXX INVALID KEYSHARE, SOMETHING IS PRETTY WRONG AND WE SHOULD FLAG THIS
+                                                Acc
+                                        end
+                                end, [], Results),
             {Data#hbbft_data{acs=NewACS, acs_results=Results}, {send,  hbbft_utils:wrap({acs, Data#hbbft_data.round}, ACSResponse) ++ Replies}};
         {NewACS, defer} ->
             {Data#hbbft_data{acs=NewACS}, defer}
     end;
-handle_msg(Data = #hbbft_data{round=R}, _J, {dec, R2, _I, _Share, _Sig}) when R2 > R ->
+handle_msg(Data = #hbbft_data{round=R}, _J, {dec_share, R2, _I, _Share, _Sig}) when R2 > R ->
     {Data, defer};
-handle_msg(Data = #hbbft_data{round=R, f=F}, J, {dec, R, I, Share, Sig}) ->
+handle_msg(Data = #hbbft_data{round=R, f=F}, J, {dec_share, R, I, Share, Sig}) ->
     %% check if we have enough to decode the bundle
     case maps:is_key(I, Data#hbbft_data.decrypted) %% have we already decrypted for this instance?
         orelse maps:is_key({I, J}, Data#hbbft_data.dec_shares) of %% do we already have this share?
@@ -270,17 +276,16 @@ handle_msg(Data = #hbbft_data{round=R, f=F}, J, {dec, R, I, Share, Sig}) ->
                   {I, Enc} = lists:keyfind(I, 1, Data#hbbft_data.acs_results),
                   case decrypt(DecKey, Enc) of
                       error ->
-                          %% can't decrypt, consider this ACS a failure
-                          %% just declare this ACS returned an empty list because we had
-                          %% f+1 valid shares but the resulting decryption key was unusuable to decrypt
-                          %% the transaction bundle
-                          NewDecrypted = maps:put(I, [], Data#hbbft_data.decrypted),
-                          check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted});
+                          %% We can't decrypt this with f+1 valid shares. Something is likely wrong but, to be sure, we need to
+                          %% broadcast our failure and either wait for 2f+1 other decryption messages for this RBC result, or wait
+                          %% until another node broadcasts valid decryption key.
+                          check_completion(Data#hbbft_data{dec_shares=NewShares}, [{multicast, {dec_failed, R, I}}]);
                       Decrypted ->
                           [Stamp | Transactions] = decode_list(Decrypted, []),
                           NewDecrypted = maps:put(I, Transactions, Data#hbbft_data.decrypted),
                           Stamps = [{I, Stamp} | Data#hbbft_data.stamps],
-                          check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted, stamps=Stamps})
+                          %% broadcast our working key
+                          check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted, stamps=Stamps}, [{multicast, {dec_key, R, I, DecKey}}])
                   end;
                 false ->
                     %% not enough shares yet
@@ -352,8 +357,27 @@ encrypt(Data = #hbbft_data{n=N, f=F}, Bin) ->
     IV = crypto:strong_rand_bytes(16),
     %% split that random AES key into N shares, where any F+1 can recreate the original key
     KeyShares = erlang_sss:sss_create_keyshares(Key, N, F+1),
-    %% sign each share with our public key, so it can be verified, and then encrypt each share so only its destination can
-    %% decrypt it
+    %%
+    %% Threshold ECC decryption scheme
+    %% ===============================
+    %% Each consensus group member is the 'proposer' for an RBC instance to share its encrypted proposal.
+    %% First we use Shamir's Secret Sharing to split a randomly generated 32 byte AES-256 key into N shares, where any F+1
+    %% shares are sufficient to recover the key.
+    %% Then, for each share, we sign it with our key, so it is authenticated.
+    %% Finally, we compute an ECDH key with the key for that actor's share. This means that only they can decrypt it.
+    %% The RBC proposal bundle is then encrypted using AES-GCM with this AES key, and the encrypted keyshares are attached to
+    %% the Authenticated Data.
+    %%
+    %% Once ACS has returned, and we have all the agreed upon proposals, we decrypt all our of key shares and broadcast
+    %% them with the DEC message. Once we get F+1 DEC shares for a particular RBC instance, with valid signatures for the proposer
+    %% of that RBC we can then re-combine those shares to obtain the original AES key, which we can then use to perform the decryption.
+    %% The use of AES-GCM ensures that if the key is re-assembled incorrectly that the decryption will fail rather than return an corrupted
+    %% proposal. If a node successfully decrypts the proposal, it can reveal the key to all parties. This prevents a 'poison' share from
+    %% preventing some, but not all, nodes from decrypting. If any honest node can decrypt the proposal, after the reveal of the key, all
+    %% honest nodes should be able to.decrypt. If a node is unable to decrypt it publishes a decryption failure message. If 2f+1 decryption
+    %% failure messages are observed for a RBC result, that result is discarded.
+    %%
+    %% Instead of signing each share, a commitment vector could be used that each decrypted share can be checked against.
     EncKey = term_to_binary([ encrypt_for(Data, I, sign(Data, Share)) || {Share, I} <- lists:zip(KeyShares, lists:seq(0, N-1))]),
     %% encrypt the bundle with AES-GCM and put the IV and the encrypted key in the Additional Authenticated Data (AAD)
     AAD = <<IV:16/binary, (byte_size(EncKey)):16/integer-unsigned, EncKey/binary>>,
@@ -558,7 +582,7 @@ group_by([], D) ->
 group_by([{K, V}|T], D) ->
     group_by(T, dict:append(K, V, D)).
 
-check_completion(Data) ->
+check_completion(Data, ToSend) ->
     case maps:size(Data#hbbft_data.decrypted) == length(Data#hbbft_data.acs_results) andalso not Data#hbbft_data.sent_txns of
         true ->
             %% we did it!
