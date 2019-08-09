@@ -19,6 +19,7 @@
          serialize/2,
          deserialize/2,
          status/1,
+         have_key/1,
          is_serialized/1]).
 
 -record(hbbft_data, {
@@ -71,6 +72,11 @@
 -type sign_msg() :: {sign, non_neg_integer(), binary()}.
 -type rbc_wrapped_output() :: hbbft_utils:unicast({{acs, non_neg_integer()}, {{rbc, non_neg_integer()}, hbbft_rbc:val_msg()}}) | hbbft_utils:multicast({{acs, non_neg_integer()}, {{rbc, non_neg_integer()}, hbbft_rbc:echo_msg() | hbbft_rbc:ready_msg()}}).
 -type bba_wrapped_output() :: hbbft_utils:multicast({{acs, non_neg_integer()}, hbbft_acs:bba_msg()}).
+
+-spec have_key(hbbft_data()) -> boolean().
+have_key(#hbbft_data{secret_key = Key}) ->
+    %% we don't have a key if it's undefined
+    Key /= undefined.
 
 -spec status(hbbft_data()) -> map().
 status(HBBFTData) ->
