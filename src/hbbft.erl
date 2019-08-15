@@ -24,7 +24,7 @@
 
 -record(hbbft_data, {
           batch_size :: pos_integer(),
-          secret_key :: tpke_privkey:privkey(),
+          secret_key :: undefined | tpke_privkey:privkey(),
           n :: pos_integer(),
           f :: pos_integer(),
           j :: non_neg_integer(),
