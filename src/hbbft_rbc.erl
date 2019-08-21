@@ -150,7 +150,9 @@ echo(Data = #rbc_data{n=N, f=F}, J, H, Bj, Sj) ->
 %% upon receiving f + 1 matching READY(h) messages, if READY
 %% has not yet been sent, multicast READY(h)
 -spec ready(rbc_data(), non_neg_integer(), merkerl:hash()) -> {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()}} | ignore.
-ready(Data = #rbc_data{state=waiting, n=N, f=F}, J, H) ->
+ready(#rbc_data{state=done}, _J, _H) ->
+    ignore;
+ready(Data = #rbc_data{n=N, f=F}, J, H) ->
     %% increment num_readies
 
     %% check if you've already seen this ready
@@ -166,10 +168,7 @@ ready(Data = #rbc_data{state=waiting, n=N, f=F}, J, H) ->
                     %% waiting
                     {NewData, ok}
             end
-    end;
-ready(_Data, _J, _H) ->
-    ignore.
-
+    end.
 
 %% helper functions
 -spec add_stripe(rbc_data(), merkerl:hash(), non_neg_integer(), binary()) -> rbc_data().
