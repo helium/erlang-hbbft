@@ -129,7 +129,7 @@ echo(Data = #rbc_data{n=N, f=F}, J, H, Bj, Sj) ->
                     %% valid branch
                     DataWithEchoes = add_echo(Data, H, J),
                     NewData = add_stripe(DataWithEchoes, H, J, Sj),
-                    case length(maps:get(H, NewData#rbc_data.num_echoes, [])) >= (N - F) andalso maps:size(maps:get(H, NewData#rbc_data.stripes, [])) >= (N - 2*F) of
+                    case length(maps:get(H, NewData#rbc_data.num_echoes, [])) >= (N - F) andalso maps:size(maps:get(H, NewData#rbc_data.stripes, #{})) >= (N - 2*F) of
                         true ->
                             %% Figure2. Bullet4
                             %% upon receiving valid ECHO(h, ·, ·) messages from N − f distinct parties,
@@ -161,7 +161,7 @@ ready(Data = #rbc_data{n=N, f=F}, J, H) ->
             ignore;
         false ->
             NewData = add_ready(Data, H, J),
-            case length(maps:get(H, NewData#rbc_data.num_readies, [])) >= F + 1 andalso maps:size(maps:get(H, NewData#rbc_data.stripes, [])) >= (N - 2*F) of
+            case length(maps:get(H, NewData#rbc_data.num_readies, [])) >= F + 1 andalso maps:size(maps:get(H, NewData#rbc_data.stripes, #{})) >= (N - 2*F) of
                 true ->
                     check_completion(NewData, H);
                 false ->
