@@ -208,7 +208,7 @@ check_completion(Data = #rbc_data{n=N, f=F}, H) ->
     M = N - 2*F, %% Note: M = Threshold (specified in RBC protocol)
     K = 2*F,
 
-    Shards = maps:values(maps:get(H, Data#rbc_data.stripes, [])),
+    Shards = maps:values(maps:get(H, Data#rbc_data.stripes, #{})),
     case erasure:decode(K, M, Shards) of
         {ok, Msg} ->
             %% recompute merkle root H
