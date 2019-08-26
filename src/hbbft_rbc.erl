@@ -224,13 +224,29 @@ check_completion(Data = #rbc_data{n=N, f=F}, H) ->
                             %% Figure2. Bullet6
                             %% check if we have enough readies and enough echoes
                             %% N-2F echoes and 2F + 1 readies
-                            case length(maps:get(H, Data#rbc_data.num_echoes, [])) >= M andalso length(maps:get(H, Data#rbc_data.num_readies, [])) >= (2*F + 1) of
-                                true ->
-                                    %% decode V. Done
-                                    {Data#rbc_data{state=done}, {result, Msg}};
+                            %% case length(maps:get(H, Data#rbc_data.num_echoes, [])) >= M andalso length(maps:get(H, Data#rbc_data.num_readies, [])) >= (2*F + 1) of
+                            %%     true ->
+                            %%         %% decode V. Done
+                            %%         {Data#rbc_data{state=done}, {result, Msg}};
+                            %%     false ->
+                            %%         %% wait for enough echoes and readies?
+                            %%         {Data#rbc_data{state=waiting, msg=Msg}, ok}
+                            %% end;
+
+                            %% check for 2f + 1 READY msgs
+                            case length(maps:get(H, Data#rbc_data.num_readies, [])) >= K + 1 of
                                 false ->
-                                    %% wait for enough echoes and readies?
-                                    {Data#rbc_data{state=waiting, msg=Msg}, ok}
+                                    %% not enough READY msgs
+                                    {Data#rbc_data{state=waiting, msg=Msg}, ok};
+                                true ->
+                                    %% wait for N - 2f ECHO msgs
+                                    case length(maps:get(H, Data#rbc_data.num_echoes, [])) >= M of
+                                        false ->
+                                            {Data#rbc_data{state=waiting, msg=Msg}, ok};
+                                        true ->
+                                            %% decode V. Done
+                                            {Data#rbc_data{state=done}, {result, Msg}}
+                                    end
                             end;
                         false ->
                             %% send ready(h)
