@@ -1,14 +1,14 @@
 -module(hbbft_bba).
 
--export([init/3, input/2, handle_msg/3, sort_msgs/2, serialize/1, deserialize/2, status/1]).
+-export([init/3, input/2, output/1, handle_msg/3, sort_msgs/2, serialize/1, deserialize/2, status/1]).
 
 -record(bba_data, {
           state = init :: init | waiting | done,
           round = 0 :: non_neg_integer(),
           secret_key :: tpke_privkey:privkey(),
           coin :: undefined | hbbft_cc:cc_data(),
-          est :: undefined | 0 | 1,
-          output :: undefined | 0 | 1,
+          est :: output(),
+          output :: output(),
           f :: non_neg_integer(),
           n :: pos_integer(),
           %% XXX some of these also have the {val, _} keys...
@@ -42,6 +42,7 @@
          }).
 
 -type bba_data() :: #bba_data{}.
+-type output() :: undefined | 0 | 1.
 -type bba_serialized_data() :: #bba_serialized_data{}.
 
 -type bval_msg() :: {bval, non_neg_integer(), 0 | 1}.
@@ -69,6 +70,10 @@ status(BBAData) ->
       bin_values => BBAData#bba_data.bin_values,
       broadcasted => BBAData#bba_data.broadcasted
      }.
+
+-spec output(bba_data()) -> output().
+output(BBAData) ->
+    BBAData#bba_data.output.
 
 -spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer()) -> bba_data().
 init(SK, N, F) ->

@@ -161,23 +161,50 @@ handle_msg(Data = #acs_data{n=N, f=F}, J, {{bba, I}, BBAMsg}) ->
             {store_bba_state(Data, I, NewBBA), defer}
     end.
 
-check_completion(Data = #acs_data{n=N}, ToSend) ->
+check_completion(Data, ToSend) ->
     %% Figure4, Bullet4
-    %% once all instances of BA have completed, let C⊂[1..N] be the indexes of each BA that delivered 1.
-    %% Wait for the output vj for each RBCj such that j∈C. Finally output ∪j∈Cvj.
-    %% Note that this means if a BBA has returned 0, we don't need to wait for the corresponding RBC.
-    case lists:all(fun({E, RBC}) -> get_bba_result(Data, E) == false orelse rbc_completed(RBC) end, maps:to_list(Data#acs_data.rbc)) andalso
-         lists:all(fun(BBA) -> bba_completed(BBA) end, maps:values(Data#acs_data.bba)) of
-        true ->
-            ResultVector = [ {E, get_rbc_result(Data, E)} || E <- lists:seq(0, N-1), get_bba_result(Data, E) ],
-            {Data, {result_and_send, ResultVector, {send, ToSend}}};
+    %% once all instances of BA have completed, let C ⊂ [1..N] be the indexes of each BA that delivered 1.
+    %% Wait for the output vj for each RBCj such that j ∈ C. Finally output ∪j ∈ Cvj.
+    %% XXX: What? Note that this means if a BBA has returned 0, we don't need to wait for the corresponding RBC. What?
+    case lists:all(fun(BBA) -> bba_completed(BBA) end, maps:values(Data#acs_data.bba)) of
         false ->
-            {Data, {send, ToSend}}
-    end.
+            %% All bbas haven't completed yet, keep working
+            {Data, {send, ToSend}};
+        true ->
+            %% once all instances of BA have completed, let C⊂[1..N] be the indexes of each BA that delivered 1.
+            OneBBAIndices = lists:foldl(fun({BBAIndex, BBA}, Acc) ->
+                                                case hbbft_bba:output(BBA#bba_state.bba_data) of
+                                                    1 ->
+                                                        [BBAIndex | Acc];
+                                                    _ ->
+                                                        Acc
+                                                end
+                                        end,
+                                        [],
+                                        maps:to_list(Data#acs_data.bba)),
 
--spec rbc_completed(rbc_state()) -> boolean().
-rbc_completed(#rbc_state{result=Result}) ->
-    Result /= undefined.
+            %% Wait for the output vj for each RBCj such that j∈C. Finally output ∪j∈Cvj.
+            RBCIndices = lists:foldl(fun(E, Acc1) ->
+                                             case get_rbc_result(Data, E) of
+                                                 undefined -> Acc1;
+                                                 Res when is_binary(Res) ->
+                                                     [E | Acc1]
+                                             end
+                                     end,
+                                     [],
+                                     OneBBAIndices),
+
+            %% Check if we have enough
+            case length(lists:usort(OneBBAIndices)) == length(lists:usort(RBCIndices)) of
+                false ->
+                    %% Wait for the output vj for each RBCj such that j ∈ C.
+                    {Data, {send, ToSend}};
+                true ->
+                    %% Finally output ∪j ∈ Cvj.
+                    ResultVector = [ {E, get_rbc_result(Data, E)} || E <- RBCIndices, get_bba_result(Data, E) ],
+                    {Data, {result_and_send, ResultVector, {send, ToSend}}}
+            end
+    end.
 
 -spec bba_completed(bba_state()) -> boolean().
 bba_completed(#bba_state{input=Input, result=Result}) ->
