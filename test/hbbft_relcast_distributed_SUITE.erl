@@ -2,6 +2,7 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("kernel/include/inet.hrl").
+-include_lib("public_key/include/public_key.hrl").
 
 -export([
          init_per_suite/1,
@@ -40,8 +41,10 @@ init_per_testcase(TestCase, Config) ->
 
     _ = [hbbft_ct_utils:connect(Node) || Node <- NodeNames],
 
+    ECCKeys = [ public_key:generate_key({namedCurve,?secp256r1}) || _ <- Nodes],
+
     {ok, _} = ct_cover:add_nodes(Nodes),
-    [{nodes, Nodes}, {data_dir, atom_to_list(TestCase)++"data"} | Config].
+    [{nodes, Nodes}, {ecckeys, ECCKeys}, {data_dir, atom_to_list(TestCase)++"data"} | Config].
 
 end_per_testcase(_TestCase, Config) ->
     Nodes = proplists:get_value(nodes, Config),
@@ -75,7 +78,7 @@ simple_test(Config) ->
     Workers = [{Node, ct_rpc:call(Node,
                                hbbft_relcast_worker,
                                start_link,
-                               [[{id, I}, {sk, tpke_privkey:serialize(SK)}, {n, N}, {f, F}, {batchsize, BatchSize}, {data_dir, DataDir}]]
+                               [[{id, I}, {sk, tpke_privkey:serialize(SK)}, {n, N}, {f, F}, {batchsize, BatchSize}, {data_dir, DataDir}, {key_params, mk_key_params(I-1, proplists:get_value(ecckeys, Config))}]]
                               )} || {I, {Node, SK}} <- hbbft_test_utils:enumerate(NodesSKs)],
     ok = global:sync(),
 
@@ -136,3 +139,9 @@ simple_test(Config) ->
 
     [ unlink(W) || {_, {ok, W}} <- Workers ],
     ok.
+
+mk_key_params(I, Keylist) ->
+    ct:pal("I ~p~n", [I]),
+    PrivKey = lists:nth(I+1, Keylist),
+    PubKeys = lists:map(fun(#'ECPrivateKey'{parameters=_Params, publicKey=PubKey}) ->     {#'ECPoint'{point = PubKey}, _Params} end, Keylist),
+    {PubKeys, fun(Bin) -> public_key:sign(Bin, sha256, PrivKey) end, fun({PubKey, {namedCurve, ?secp256r1}}) -> public_key:compute_key(PubKey, PrivKey) end}.

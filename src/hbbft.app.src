@@ -7,7 +7,8 @@
     stdlib,
     merkerl,
     erasure,
-    erlang_tpke
+    erlang_tpke,
+    erlang_sss
    ]},
   {env,[]},
   {modules, []},

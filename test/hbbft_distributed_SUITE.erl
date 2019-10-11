@@ -2,6 +2,7 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("kernel/include/inet.hrl").
+-include_lib("public_key/include/public_key.hrl").
 
 -export([
          init_per_suite/1,
@@ -41,7 +42,8 @@ init_per_testcase(TestCase, Config) ->
     _ = [hbbft_ct_utils:connect(Node) || Node <- NodeNames],
 
     {ok, _} = ct_cover:add_nodes(Nodes),
-    [{nodes, Nodes} | Config].
+    ECCKeys = [ public_key:generate_key({namedCurve,?secp256r1}) || _ <- Nodes],
+    [{nodes, Nodes}, {ecckeys, ECCKeys} | Config].
 
 end_per_testcase(_TestCase, Config) ->
     Nodes = proplists:get_value(nodes, Config),
@@ -52,6 +54,7 @@ end_per_testcase(_TestCase, Config) ->
 
 simple_test(Config) ->
     Nodes = proplists:get_value(nodes, Config),
+    ECCKeys = proplists:get_value(ecckeys, Config),
 
     %% master starts the dealer
     N = length(Nodes),
@@ -70,7 +73,7 @@ simple_test(Config) ->
                             end, Nodes),
 
     %% start a hbbft_worker on each node
-    Workers = [{Node, rpc:call(Node, hbbft_worker, start_link, [N, F, I, tpke_privkey:serialize(SK), BatchSize, false])} || {I, {Node, SK}} <- enumerate(NodesSKs)],
+    Workers = [{Node, rpc:call(Node, hbbft_worker, start_link, [N, F, I, tpke_privkey:serialize(SK), BatchSize, false, mk_key_params(I, ECCKeys)])} || {I, {Node, SK}} <- enumerate(NodesSKs)],
     ok = global:sync(),
 
     [ link(W) || {_, {ok, W}} <- Workers ],
@@ -133,6 +136,7 @@ simple_test(Config) ->
 
 serialization_test(Config) ->
     Nodes = proplists:get_value(nodes, Config),
+    ECCKeys = proplists:get_value(ecckeys, Config),
 
     %% master starts the dealer
     N = length(Nodes),
@@ -151,7 +155,7 @@ serialization_test(Config) ->
                             end, Nodes),
 
     %% start a hbbft_worker on each node
-    Workers = [{Node, rpc:call(Node, hbbft_worker, start_link, [N, F, I, tpke_privkey:serialize(SK), BatchSize, false])} || {I, {Node, SK}} <- enumerate(NodesSKs)],
+    Workers = [{Node, rpc:call(Node, hbbft_worker, start_link, [N, F, I, tpke_privkey:serialize(SK), BatchSize, false, mk_key_params(I, ECCKeys)])} || {I, {Node, SK}} <- enumerate(NodesSKs)],
     ok = global:sync(),
 
     [ link(W) || {_, {ok, W}} <- Workers ],
@@ -225,3 +229,9 @@ random_n(N, List) ->
 
 shuffle(List) ->
     [X || {_,X} <- lists:sort([{rand:uniform(), N} || N <- List])].
+
+mk_key_params(I, Keylist) ->
+    ct:pal("I ~p~n", [I]),
+    PrivKey = lists:nth(I+1, Keylist),
+    PubKeys = lists:map(fun(#'ECPrivateKey'{parameters=_Params, publicKey=PubKey}) ->     {#'ECPoint'{point = PubKey}, _Params} end, Keylist),
+    {PubKeys, fun(Bin) -> public_key:sign(Bin, sha256, PrivKey) end, fun({PubKey, {namedCurve, ?secp256r1}}) -> public_key:compute_key(PubKey, PrivKey) end}.
