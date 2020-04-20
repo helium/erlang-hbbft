@@ -229,20 +229,26 @@ handle_msg(Data = #hbbft_data{round=R}, J, {{acs, R}, ACSMsg}) ->
             {Data#hbbft_data{acs=NewACS}, ok};
         {NewACS, {send, ACSResponse}} ->
             {Data#hbbft_data{acs=NewACS}, {send, hbbft_utils:wrap({acs, Data#hbbft_data.round}, ACSResponse)}};
-        {NewACS, {result_and_send, Results, {send, ACSResponse}}} ->
+        {NewACS, {result_and_send, Results0, {send, ACSResponse}}} ->
             %% ACS[r] has returned, time to move on to the decrypt phase
             %% start decrypt phase
-            Replies = lists:map(fun({I, Result}) ->
-                                        EncKey = get_encrypted_key(Data#hbbft_data.secret_key, Result),
-                                        Share = tpke_privkey:decrypt_share(Data#hbbft_data.secret_key, EncKey),
-                                        SerializedShare = hbbft_utils:share_to_binary(Share),
-                                        {multicast, {dec, Data#hbbft_data.round, I, SerializedShare}}
-                                end, Results),
+            EncKeys = lists:map(fun({I, Result}) ->
+                                     {I, get_encrypted_key(Data#hbbft_data.secret_key, Result)}
+                             end, Results0),
+            {Replies, Results} = lists:foldl(fun({I, Result}, {RepliesAcc, ResultsAcc}=Acc) ->
+                                          {I, EncKey} = lists:keyfind(I, 1, EncKeys),
+                                        case tpke_privkey:decrypt_share(Data#hbbft_data.secret_key, EncKey) of
+                                            {ok, Share} ->
+                                                SerializedShare = hbbft_utils:share_to_binary(Share),
+                                                {[{multicast, {dec, Data#hbbft_data.round, I, SerializedShare}}|RepliesAcc], [{I, Result}|ResultsAcc]};
+                                            error ->
+                                                Acc
+                                        end
+                                end, {[], []}, Results0),
             %% verify any shares we received before we got the ACS result
             VerifiedShares = maps:map(fun({I, _}, {undefined, Share}) ->
-                                              case lists:keyfind(I, 1, Results) of
-                                                  {I, Enc} ->
-                                                      EncKey = get_encrypted_key(Data#hbbft_data.secret_key, Enc),
+                                              case lists:keyfind(I, 1, EncKeys) of
+                                                  {I, EncKey} ->
                                                       Valid = tpke_pubkey:verify_share(tpke_privkey:public_key(Data#hbbft_data.secret_key), Share, EncKey),
                                                       {Valid, Share};
                                                   false ->
