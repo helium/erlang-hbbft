@@ -63,12 +63,13 @@ input(Data = #rbc_data{state=init, n=N, f=F, pid=Pid, leader=Leader}, Msg) when 
     M = N - 2*F,
     K = 2*F,
     %% Shards represent sj from the whitepaper
+    BranchesForShards = ?timer(init, begin
     {ok, Shards} = erasure:encode(K, M, Msg),
     %% Need to know the size of the msg for decoding
     Merkle = merkerl:new(Shards, fun merkerl:hash_value/1),
     MerkleRootHash = merkerl:root_hash(Merkle),
     %% gen_proof = branches for each merkle node (Hash(shard))
-    BranchesForShards = [merkerl:gen_proof(Hash, Merkle) || {Hash, _} <- merkerl:leaves(Merkle)],
+    [merkerl:gen_proof(Hash, Merkle) || {Hash, _} <- merkerl:leaves(Merkle)] end),
     %% TODO add our identity to the ready/echo sets?
     NewData = Data#rbc_data{msg=Msg},
     Result = [ {unicast, J, {val, MerkleRootHash, lists:nth(J+1, BranchesForShards), lists:nth(J+1, Shards)}} || J <- lists:seq(0, N-1)],
@@ -214,12 +215,12 @@ check_completion(Data = #rbc_data{n=N, f=F}, H) ->
     K = 2*F,
 
     Shards = maps:values(maps:get(H, Data#rbc_data.stripes, #{})),
-    case ?timer(decode, erasure:decode(K, M, Shards)) of
+    case erasure:decode(K, M, Shards) of
         {ok, Msg} ->
             %% recompute merkle root H
-            {ok, AllShards} = erasure:encode(K, M, Msg),
+            MerkleRootHash = ?timer(get_root_hash, begin {ok, AllShards} = erasure:encode(K, M, Msg),
             Merkle = merkerl:new(AllShards, fun merkerl:hash_value/1),
-            MerkleRootHash = merkerl:root_hash(Merkle),
+            merkerl:root_hash(Merkle) end),
             case H == MerkleRootHash of
                 true ->
                     %% root hashes match
