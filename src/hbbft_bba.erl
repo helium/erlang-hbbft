@@ -141,7 +141,7 @@ handle_msg(Data, J, {term, B}) when B == 0; B == 1 ->
             {NewData#bba_data{state=done}, {result_and_send, B, {send, [{multicast, {term, B}}]}}};
         _ ->
             %% we need to check bval/aux/conf message thresholds in light of the new TERM message
-            decide(NewData, [])
+            ?timer(decide1, decide(NewData, []))
     end;
 handle_msg(_Data, _J, _Msg) ->
     ignore.
@@ -178,7 +178,7 @@ bval(Data=#bba_data{f=F}, Id, V) ->
                                       false ->
                                           {NewData2, ToSend}
                                   end,
-            decide(NewData3, ToSend2);
+            ?timer(decide2, decide(NewData3, ToSend2));
         false ->
             {NewData, {send, ToSend}}
     end.
@@ -187,7 +187,7 @@ bval(Data=#bba_data{f=F}, Id, V) ->
 aux(Data, Id, V) ->
     Witness = add_witness(Id, V, Data#bba_data.aux_witness, false),
     NewData = Data#bba_data{aux_witness = Witness},
-    decide(NewData, []).
+    ?timer(decide_aux, decide(NewData, [])).
 
 -spec conf(bba_data(), non_neg_integer(), 0 | 1) -> {bba_data(), ok | {send, [hbbft_utils:multicast(coin_msg())]}}.
 conf(Data, Id, V) ->
@@ -195,7 +195,7 @@ conf(Data, Id, V) ->
         false ->
             Witness = maps:put(Id, V, Data#bba_data.conf_witness),
             NewData = Data#bba_data{conf_witness = Witness},
-            decide(NewData, []);
+            ?timer(decide_conf, decide(NewData, []));
         true ->
             {Data, ok}
     end.

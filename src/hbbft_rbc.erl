@@ -138,7 +138,7 @@ echo(Data = #rbc_data{n=N, f=F}, J, H, Bj, Sj) ->
                             %% – interpolate {s0 j} from any N − 2 f leaves received
                             %% – recompute Merkle root h0 and if h0 /= h then abort
                             %% – if READY(h) has not yet been sent, multicast READY(h)
-                            check_completion(NewData, H);
+                            check_completion_timed(NewData, H);
                         false ->
                             {NewData#rbc_data{state=waiting}, ok}
                     end;
@@ -165,7 +165,7 @@ ready(Data = #rbc_data{n=N, f=F}, J, H) ->
             NewData = add_ready(Data, H, J),
             case length(maps:get(H, NewData#rbc_data.num_readies, [])) >= F + 1 andalso maps:size(maps:get(H, NewData#rbc_data.stripes, #{})) >= (N - 2*F) of
                 true ->
-                    check_completion(NewData, H);
+                    ?timer(check2, check_completion(NewData, H));
                 false ->
                     %% waiting
                     {NewData, ok}
@@ -198,6 +198,9 @@ has_echo(_Data = #rbc_data{num_echoes = Echoes}, Sender) ->
 -spec has_ready(rbc_data(), non_neg_integer()) -> boolean().
 has_ready(_Data = #rbc_data{num_readies = Readies}, Sender) ->
     lists:any(fun(L) -> lists:member(Sender, L) end, maps:values(Readies)).
+
+check_completion_timed(D, H) ->
+    ?timer(check, check_completion(D, H)).
 
 %% helper to check whether rbc protocol has completed
 -spec check_completion(rbc_data(), merkerl:hash()) -> {rbc_data(), ok | {result, binary()} | hbbft_utils:multicast(ready_msg()) | {result, aborted}}.
