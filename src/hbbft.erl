@@ -92,7 +92,8 @@ status(HBBFTData) ->
       sent_sig => HBBFTData#hbbft_data.sent_sig,
       acs_results => length(HBBFTData#hbbft_data.acs_results),
       decryption_shares => group_by(maps:keys(HBBFTData#hbbft_data.dec_shares)),
-      decrypted => maps:size(HBBFTData#hbbft_data.decrypted),
+      decrypted => maps:keys(HBBFTData#hbbft_data.decrypted),
+      enc_keys => maps:keys(HBBFTData#hbbft_data.enc_keys),
       j => HBBFTData#hbbft_data.j
      }.
 
@@ -263,7 +264,11 @@ handle_msg(Data = #hbbft_data{round=R}, J, {{acs, R}, ACSMsg}) ->
                                          (_, V) ->
                                               V
                                       end, Data#hbbft_data.dec_shares),
-            {Data#hbbft_data{acs=NewACS, acs_results=Results, dec_shares=VerifiedShares, enc_keys=EncKeys}, {send,  hbbft_utils:wrap({acs, Data#hbbft_data.round}, ACSResponse) ++ Replies}};
+            %% if we are not in the ACS result set, filter out our own result
+            {ResultIndices, _} = lists:unzip(Results),
+            Decrypted = maps:with(ResultIndices, Data#hbbft_data.decrypted),
+            {Data#hbbft_data{acs=NewACS, acs_results=Results, dec_shares=VerifiedShares, enc_keys=EncKeys, decrypted=Decrypted},
+             {send,  hbbft_utils:wrap({acs, Data#hbbft_data.round}, ACSResponse) ++ Replies}};
         {NewACS, defer} ->
             {Data#hbbft_data{acs=NewACS}, defer}
     end;
