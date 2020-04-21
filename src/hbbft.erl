@@ -248,10 +248,10 @@ handle_msg(Data = #hbbft_data{round=R}, J, {{acs, R}, ACSMsg}) ->
             VerifiedShares = maps:map(fun({I, _}, {undefined, Share}) ->
                                               case lists:keyfind(I, 1, Results) of
                                                   {I, Enc} ->
-                                                      mark({acs_decrypt_start, I})
+                                                      mark({acs_decrypt_start, I}),
                                                       EncKey = get_encrypted_key(Data#hbbft_data.secret_key, Enc),
                                                       Valid = tpke_pubkey:verify_share(tpke_privkey:public_key(Data#hbbft_data.secret_key), Share, EncKey),
-                                                      mark({acs_decrypt_end, I})
+                                                      mark({acs_decrypt_end, I}),
                                                       {Valid, Share};
                                                   false ->
                                                       %% this is a share for an RBC we will never decode
