@@ -233,11 +233,12 @@ handle_msg(Data = #hbbft_data{round=R}, J, {{acs, R}, ACSMsg}) ->
             %% ACS[r] has returned, time to move on to the decrypt phase
             %% start decrypt phase
             EncKeys = lists:map(fun({I, Result}) ->
-                                     {I, get_encrypted_key(Data#hbbft_data.secret_key, Result)}
+                                        EncKey = get_encrypted_key(Data#hbbft_data.secret_key, Result),
+                                        {I, EncKey, tpke_privkey:decrypt_share(Data#hbbft_data.secret_key, EncKey)}
                              end, Results0),
             {Replies, Results} = lists:foldl(fun({I, Result}, {RepliesAcc, ResultsAcc}=Acc) ->
-                                          {I, EncKey} = lists:keyfind(I, 1, EncKeys),
-                                        case tpke_privkey:decrypt_share(Data#hbbft_data.secret_key, EncKey) of
+                                          {I, _, S} = lists:keyfind(I, 1, EncKeys),
+                                        case S of
                                             {ok, Share} ->
                                                 SerializedShare = hbbft_utils:share_to_binary(Share),
                                                 {[{multicast, {dec, Data#hbbft_data.round, I, SerializedShare}}|RepliesAcc], [{I, Result}|ResultsAcc]};
@@ -248,7 +249,7 @@ handle_msg(Data = #hbbft_data{round=R}, J, {{acs, R}, ACSMsg}) ->
             %% verify any shares we received before we got the ACS result
             VerifiedShares = maps:map(fun({I, _}, {undefined, Share}) ->
                                               case lists:keyfind(I, 1, EncKeys) of
-                                                  {I, EncKey} ->
+                                                  {I, EncKey, _} ->
                                                       Valid = tpke_pubkey:verify_share(tpke_privkey:public_key(Data#hbbft_data.secret_key), Share, EncKey),
                                                       {Valid, Share};
                                                   false ->
