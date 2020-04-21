@@ -249,7 +249,7 @@ handle_msg(Data = #hbbft_data{round=R}, J, {{acs, R}, ACSMsg}) ->
                                         end
                                 end, {[], []}, Results0),
             %% verify any shares we received before we got the ACS result
-            VerifiedShares = maps:map(fun({I, _}, {undefined, Share}) ->
+            VerifiedShares = maps:map(fun({I, _}, {undefined, Share}) when I /= J ->
                                               case lists:keyfind(I, 1, EncKeys) of
                                                   {I, EncKey, _} ->
                                                       Valid = tpke_pubkey:verify_share(tpke_privkey:public_key(Data#hbbft_data.secret_key), Share, EncKey),
