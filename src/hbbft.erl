@@ -123,7 +123,8 @@ set_stamp_fun(M, F, A, Data) when is_atom(M), is_atom(F) ->
 
 %% start acs on demand
 -spec start_on_demand(hbbft_data()) -> {hbbft_data(), already_started | {send, [rbc_wrapped_output()]}}.
-start_on_demand(Data = #hbbft_data{buf=Buf, n=N, secret_key=SK, batch_size=BatchSize, acs_init=false}) ->
+start_on_demand(Data = #hbbft_data{buf=Buf, j=J, n=N, secret_key=SK, batch_size=BatchSize, acs_init=false,
+                                   stamps=Stamps, decrypted=Decrypted}) ->
     %% pick proposed whichever is lesser from batchsize/n or buffer
     Proposed = hbbft_utils:random_n(min((BatchSize div N), length(Buf)), lists:sublist(Buf, BatchSize)),
     %% encrypt x -> tpke.enc(pk, proposed)
@@ -136,7 +137,8 @@ start_on_demand(Data = #hbbft_data{buf=Buf, n=N, secret_key=SK, batch_size=Batch
     %% time to kick off a round
     {NewACSState, {send, ACSResponse}} = hbbft_acs:input(Data#hbbft_data.acs, EncX),
     %% add this to acs set in data and send out the ACS response(s)
-    {Data#hbbft_data{acs=NewACSState, acs_init=true},
+    {Data#hbbft_data{acs=NewACSState, acs_init=true, stamps=lists:keystore(J, 1, Stamps, {J, Stamp}),
+                     decrypted=maps:put(J, Proposed, Decrypted)},
      {send, hbbft_utils:wrap({acs, Data#hbbft_data.round}, ACSResponse)}};
 start_on_demand(Data) ->
     {Data, already_started}.
@@ -357,7 +359,7 @@ handle_msg(_Data, _J, _Msg) ->
     ignore.
 
 -spec maybe_start_acs(hbbft_data()) -> {hbbft_data(), ok | {send, [rbc_wrapped_output()]}}.
-maybe_start_acs(Data = #hbbft_data{n=N, secret_key=SK, batch_size=BatchSize}) ->
+maybe_start_acs(Data = #hbbft_data{n=N, j=J, secret_key=SK, batch_size=BatchSize, decrypted=Decrypted, stamps=Stamps}) ->
     case length(Data#hbbft_data.buf) > BatchSize andalso Data#hbbft_data.acs_init == false of
         true ->
             %% compose a transaction bundle
@@ -374,7 +376,8 @@ maybe_start_acs(Data = #hbbft_data{n=N, secret_key=SK, batch_size=BatchSize}) ->
             %% time to kick off a round
             {NewACSState, {send, ACSResponse}} = hbbft_acs:input(Data#hbbft_data.acs, EncX),
             %% add this to acs set in data and send out the ACS response(s)
-            {Data#hbbft_data{acs=NewACSState, acs_init=true},
+            {Data#hbbft_data{acs=NewACSState, acs_init=true, stamps=lists:keystore(J, 1, Stamps, {J, Stamp}),
+                             decrypted=maps:put(J, Proposed, Decrypted)},
              {send, hbbft_utils:wrap({acs, Data#hbbft_data.round}, ACSResponse)}};
         false ->
             %% not enough transactions for this round yet
