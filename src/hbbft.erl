@@ -264,10 +264,13 @@ handle_msg(Data = #hbbft_data{round=R}, J, {{acs, R}, ACSMsg}) ->
                                          (_, V) ->
                                               V
                                       end, Data#hbbft_data.dec_shares),
-            %% if we are not in the ACS result set, filter out our own result
+            %% if we are not in the ACS result set, filter out our own results
             {ResultIndices, _} = lists:unzip(Results),
             Decrypted = maps:with(ResultIndices, Data#hbbft_data.decrypted),
-            {Data#hbbft_data{acs=NewACS, acs_results=Results, dec_shares=VerifiedShares, enc_keys=EncKeys, decrypted=Decrypted},
+            Stamps = lists:filter(fun({I, _Stamp}) ->
+                                          lists:member(I, ResultIndices)
+                                  end, Data#hbbft_data.stamps),
+            {Data#hbbft_data{acs=NewACS, acs_results=Results, dec_shares=VerifiedShares, enc_keys=EncKeys, decrypted=Decrypted, stamps=Stamps},
              {send,  hbbft_utils:wrap({acs, Data#hbbft_data.round}, ACSResponse) ++ Replies}};
         {NewACS, defer} ->
             {Data#hbbft_data{acs=NewACS}, defer}
