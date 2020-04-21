@@ -1,5 +1,7 @@
 -module(hbbft_acs).
 
+-include("timer.hrl").
+
 -export([init/4, input/2, handle_msg/3, serialize/1, deserialize/2, status/1]).
 
 -ifdef(TEST).
@@ -166,14 +168,15 @@ check_completion(Data = #acs_data{n=N}, ToSend) ->
     %% once all instances of BA have completed, let C⊂[1..N] be the indexes of each BA that delivered 1.
     %% Wait for the output vj for each RBCj such that j∈C. Finally output ∪j∈Cvj.
     %% Note that this means if a BBA has returned 0, we don't need to wait for the corresponding RBC.
-    case lists:all(fun(BBA) -> bba_completed(BBA) end, maps:values(Data#acs_data.bba)) andalso
-         lists:all(fun({E, RBC}) -> (get_bba_result(Data, E) == true andalso rbc_completed(RBC)) orelse get_bba_result(Data, E) == false end, maps:to_list(Data#acs_data.rbc)) of
-        true ->
-            ResultVector = [ {E, get_rbc_result(Data, E)} || E <- lists:seq(0, N-1), get_bba_result(Data, E) ],
-            {Data, {result_and_send, ResultVector, {send, ToSend}}};
-        false ->
-            {Data, {send, ToSend}}
-    end.
+    ?timer(check_completion,
+           case lists:all(fun(BBA) -> bba_completed(BBA) end, maps:values(Data#acs_data.bba)) andalso
+               lists:all(fun({E, RBC}) -> (get_bba_result(Data, E) == true andalso rbc_completed(RBC)) orelse get_bba_result(Data, E) == false end, maps:to_list(Data#acs_data.rbc)) of
+               true ->
+                   ResultVector = [ {E, get_rbc_result(Data, E)} || E <- lists:seq(0, N-1), get_bba_result(Data, E) ],
+                   {Data, {result_and_send, ResultVector, {send, ToSend}}};
+               false ->
+                   {Data, {send, ToSend}}
+           end).
 
 -spec rbc_completed(rbc_state()) -> boolean().
 rbc_completed(#rbc_state{result=Result}) ->

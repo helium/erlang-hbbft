@@ -1,5 +1,7 @@
 -module(hbbft_rbc).
 
+-include("timer.hrl").
+
 -export([init/4, input/2, handle_msg/3, status/1]).
 
 -record(rbc_data, {
@@ -96,7 +98,7 @@ handle_msg(Data, J, {ready, H}) ->
 %% only multicast ECHO when VAL msssage is from the known leader
 -spec val(rbc_data(), non_neg_integer(), merkerl:hash(), merkerl:proof(), binary()) -> {rbc_data(), ok | {send, send_commands()}} | ignore.
 val(Data = #rbc_data{seen_val=false, leader=Leader}, J, H, Bj, Sj) when J == Leader ->
-    case merkerl:verify_proof(merkerl:hash_value(Sj), H, Bj) of
+    case ?timer(verify_proof, merkerl:verify_proof(merkerl:hash_value(Sj), H, Bj)) of
         ok ->
             %% the merkle proof is valid, update seen_val for this path
             {Data#rbc_data{seen_val=true}, {send, [{multicast, {echo, H, Bj, Sj}}]}};
@@ -124,7 +126,7 @@ echo(Data = #rbc_data{n=N, f=F}, J, H, Bj, Sj) ->
             %% already got an ECHO From J, discard
             ignore;
         false ->
-            case merkerl:verify_proof(merkerl:hash_value(Sj), H, Bj) of
+            case ?timer(verify_proof2, merkerl:verify_proof(merkerl:hash_value(Sj), H, Bj)) of
                 ok ->
                     %% valid branch
                     DataWithEchoes = add_echo(Data, H, J),
@@ -209,7 +211,7 @@ check_completion(Data = #rbc_data{n=N, f=F}, H) ->
     K = 2*F,
 
     Shards = maps:values(maps:get(H, Data#rbc_data.stripes, #{})),
-    case erasure:decode(K, M, Shards) of
+    case ?timer(decode, erasure:decode(K, M, Shards)) of
         {ok, Msg} ->
             %% recompute merkle root H
             {ok, AllShards} = erasure:encode(K, M, Msg),

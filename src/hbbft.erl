@@ -1,5 +1,7 @@
 -module(hbbft).
 
+-include("timer.hrl").
+
 -export([init/6, init/7, init/9,
          get_stamp_fun/1,
          set_stamp_fun/4,
@@ -226,32 +228,28 @@ handle_msg(Data = #hbbft_data{round=R}, _J, {{acs, R2}, _ACSMsg}) when R2 > R ->
     {Data, defer};
 handle_msg(Data = #hbbft_data{round=R}, J, {{acs, R}, ACSMsg}) ->
     %% ACS message for this round
-    mark({acs, J}),
     case hbbft_acs:handle_msg(Data#hbbft_data.acs, J, ACSMsg) of
         ignore -> ignore;
         {NewACS, ok} ->
             {Data#hbbft_data{acs=NewACS}, ok};
         {NewACS, {send, ACSResponse}} ->
-            mark({acs_response, J}),
             {Data#hbbft_data{acs=NewACS}, {send, hbbft_utils:wrap({acs, Data#hbbft_data.round}, ACSResponse)}};
         {NewACS, {result_and_send, Results, {send, ACSResponse}}} ->
             %% ACS[r] has returned, time to move on to the decrypt phase
             %% start decrypt phase
-            mark({acs_r_s, J}),
-            Replies = lists:map(fun({I, Result}) ->
-                                        EncKey = get_encrypted_key(Data#hbbft_data.secret_key, Result),
-                                        Share = tpke_privkey:decrypt_share(Data#hbbft_data.secret_key, EncKey),
-                                        SerializedShare = hbbft_utils:share_to_binary(Share),
-                                        {multicast, {dec, Data#hbbft_data.round, I, SerializedShare}}
-                                end, Results),
+            Replies = ?timer(decrypt_shares,
+                             lists:map(fun({I, Result}) ->
+                                               EncKey = get_encrypted_key(Data#hbbft_data.secret_key, Result),
+                                               Share = tpke_privkey:decrypt_share(Data#hbbft_data.secret_key, EncKey),
+                                               SerializedShare = hbbft_utils:share_to_binary(Share),
+                                               {multicast, {dec, Data#hbbft_data.round, I, SerializedShare}}
+                                       end, Results)),
             %% verify any shares we received before we got the ACS result
             VerifiedShares = maps:map(fun({I, _}, {undefined, Share}) ->
                                               case lists:keyfind(I, 1, Results) of
                                                   {I, Enc} ->
-                                                      mark({acs_decrypt_start, I}),
                                                       EncKey = get_encrypted_key(Data#hbbft_data.secret_key, Enc),
                                                       Valid = tpke_pubkey:verify_share(tpke_privkey:public_key(Data#hbbft_data.secret_key), Share, EncKey),
-                                                      mark({acs_decrypt_end, I}),
                                                       {Valid, Share};
                                                   false ->
                                                       %% this is a share for an RBC we will never decode
@@ -290,14 +288,12 @@ handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
             case lists:keymember(I, 1, Data#hbbft_data.acs_results)         %% was this instance included in the ACS result set?
                 andalso length(SharesForThisBundle) > Data#hbbft_data.f of %% do we have f+1 decryption shares?
                 true ->
-                    mark({dec_bundle, I}),
                     {I, Enc} = lists:keyfind(I, 1, Data#hbbft_data.acs_results),
                     EncKey = get_encrypted_key(Data#hbbft_data.secret_key, Enc),
                     case combine_shares(Data#hbbft_data.f, Data#hbbft_data.secret_key, SharesForThisBundle, EncKey) of
                         undefined ->
-                            %% can't recover the key, consider this ACS failed if we have 2f+1 shares and still can't recover the key
-                            mark({dec_bundle_unknown, I}),
-
+                            %% can't recover the key, consider this ACS failed if we have 2f+1 shares
+                            %% and still can't recover the key
                             case length(SharesForThisBundle) > 2 * Data#hbbft_data.f of
                                 true ->
                                     %% ok, just declare this ACS returned an empty list
@@ -307,9 +303,8 @@ handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
                                     {Data#hbbft_data{dec_shares=NewShares}, ok}
                             end;
                         DecKey ->
-                            case decrypt(DecKey, Enc) of
+                            case ?timer({decrypt, I}, decrypt(DecKey, Enc)) of
                                 error ->
-                                    mark({dec_bundle_err, I}),
                                     %% can't decrypt, consider this ACS a failure
                                     %% just declare this ACS returned an empty list because we had
                                     %% f+1 valid shares but the resulting decryption key was unusuable to decrypt
@@ -317,7 +312,6 @@ handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
                                     NewDecrypted = maps:put(I, [], Data#hbbft_data.decrypted),
                                     check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted});
                                 Decrypted ->
-                                    mark({dec_bundle_good, I}),
                                     [Stamp | Transactions] = decode_list(Decrypted, []),
                                     NewDecrypted = maps:put(I, Transactions, Data#hbbft_data.decrypted),
                                     Stamps = [{I, Stamp} | Data#hbbft_data.stamps],
@@ -620,7 +614,8 @@ combine_shares(F, SK, SharesForThisBundle, EncKey) ->
     ValidSharesForThisBundle = [ S || {true, S} <- SharesForThisBundle ],
     case length(ValidSharesForThisBundle) > F of
         true ->
-            tpke_pubkey:combine_shares(tpke_privkey:public_key(SK), EncKey, ValidSharesForThisBundle);
+            ?timer(combine_shares,
+                   tpke_pubkey:combine_shares(tpke_privkey:public_key(SK), EncKey, ValidSharesForThisBundle));
         false ->
             %% not enough valid shares to bother trying to combine them
             undefined

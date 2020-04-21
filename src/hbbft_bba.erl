@@ -1,5 +1,7 @@
 -module(hbbft_bba).
 
+-include("timer.hrl").
+
 -export([init/3, input/2, handle_msg/3, sort_msgs/2, serialize/1, deserialize/2, status/1]).
 
 -record(bba_data, {
