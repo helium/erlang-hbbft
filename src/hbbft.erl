@@ -42,7 +42,9 @@
           sig_shares = #{} :: #{non_neg_integer() => {non_neg_integer(), erlang_pbc:element()}},
           thingtosign :: undefined | erlang_pbc:element(),
           stampfun :: undefined | {atom(), atom(), list()},
-          stamps = [] :: [{non_neg_integer(), any()}]
+          stamps = [] :: [{non_neg_integer(), any()}],
+          failed_combine = [] :: [non_neg_integer()],
+          failed_decrypt = [] :: [non_neg_integer()]
          }).
 
 -record(hbbft_serialized_data, {
@@ -64,7 +66,9 @@
           dec_shares = #{} :: #{non_neg_integer() => {non_neg_integer(), binary()}},
           thingtosign :: undefined | binary(),
           stampfun :: undefined | {atom(), atom(), list()},
-          stamps = [] :: [binary()]
+          stamps = [] :: [binary()],
+          failed_combine = [] :: [non_neg_integer()],
+          failed_decrypt = [] :: [non_neg_integer()]
          }).
 
 -type hbbft_data() :: #hbbft_data{}.
@@ -90,11 +94,16 @@ status(HBBFTData) ->
       acs => hbbft_acs:status(HBBFTData#hbbft_data.acs),
       sent_txns => HBBFTData#hbbft_data.sent_txns,
       sent_sig => HBBFTData#hbbft_data.sent_sig,
-      acs_results => length(HBBFTData#hbbft_data.acs_results),
+      acs_results => element(1, lists:unzip(HBBFTData#hbbft_data.acs_results)),
       decryption_shares => group_by(maps:keys(HBBFTData#hbbft_data.dec_shares)),
+      valid_decryption_shares => group_by(maps:keys(maps:filter(fun(_, {Valid, _}) -> Valid == true end, HBBFTData#hbbft_data.dec_shares))),
+      invalid_decryption_shares => group_by(maps:keys(maps:filter(fun(_, {Valid, _}) -> Valid == false end, HBBFTData#hbbft_data.dec_shares))),
+      unvalidated_decryption_shares => group_by(maps:keys(maps:filter(fun(_, {Valid, _}) -> Valid == undefined end, HBBFTData#hbbft_data.dec_shares))),
       decrypted => maps:keys(HBBFTData#hbbft_data.decrypted),
       enc_keys => maps:keys(HBBFTData#hbbft_data.enc_keys),
-      j => HBBFTData#hbbft_data.j
+      j => HBBFTData#hbbft_data.j,
+      failed_combine => HBBFTData#hbbft_data.failed_combine,
+      failed_decrypt => HBBFTData#hbbft_data.failed_decrypt
      }.
 
 -spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer(), non_neg_integer(), pos_integer(), infinity | pos_integer()) -> hbbft_data().
@@ -186,6 +195,7 @@ next_round(Data = #hbbft_data{secret_key=SK, n=N, f=F, j=J}) ->
                               acs_init=false, acs_results=[],
                               sent_txns=false, sent_sig=false, enc_keys=#{},
                               dec_shares=#{}, decrypted=#{},
+                              failed_combine=[], failed_decrypt=[],
                               sig_shares=#{}, thingtosign=undefined, stamps=[]},
     maybe_start_acs(NewData).
 
@@ -200,6 +210,7 @@ next_round(Data = #hbbft_data{secret_key=SK, n=N, f=F, j=J, buf=Buf}, NextRound,
                               acs_init=false, acs_results=[],
                               sent_txns=false, sent_sig=false, enc_keys=#{},
                               dec_shares=#{}, decrypted=#{}, buf=NewBuf,
+                              failed_combine=[], failed_decrypt=[],
                               sig_shares=#{}, thingtosign=undefined, stamps=[]},
     maybe_start_acs(NewData).
 
@@ -288,20 +299,26 @@ handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
         false ->
             %% the Share now is a binary, deserialize it and then store in the dec_shares map
             DeserializedShare = hbbft_utils:binary_to_share(Share, tpke_privkey:public_key(Data#hbbft_data.secret_key)),
-            Valid = case maps:find(I, Data#hbbft_data.enc_keys) of
-                        {ok, EncKey0} ->
-                            tpke_pubkey:verify_share(tpke_privkey:public_key(Data#hbbft_data.secret_key), DeserializedShare, EncKey0);
-                        error ->
-                            %% the corresponding ACS has not yet returned so we can't verify the share yet
-                            undefined
-                    end,
-            NewShares = maps:put({I, J}, {Valid, DeserializedShare}, Data#hbbft_data.dec_shares),
+            %% add share to map and validate any previously unvalidated shares
+            NewShares = maps:map(fun({I1, _}, {undefined, AShare}) when I1 /= J -> %% don't bother validating our own shares
+                                              case maps:find(I1, Data#hbbft_data.enc_keys) of
+                                                  {ok, EncKey} ->
+                                                      %% we validated the ciphertext above so we don't need to re-check it here
+                                                      Valid = tpke_pubkey:verify_share(tpke_privkey:public_key(Data#hbbft_data.secret_key), AShare, EncKey),
+                                                      {Valid, AShare};
+                                                  error ->
+                                                      %% this is a share for an RBC we will never decode
+                                                      {undefined, AShare}
+                                              end;
+                                         (_, V) ->
+                                              V
+                                      end, maps:put({I, J}, {undefined, DeserializedShare}, Data#hbbft_data.dec_shares)),
             SharesForThisBundle = [ S || {{Idx, _}, S} <- maps:to_list(NewShares), I == Idx],
             case lists:keymember(I, 1, Data#hbbft_data.acs_results)         %% was this instance included in the ACS result set?
                  andalso maps:is_key(I, Data#hbbft_data.enc_keys)           %% do we have a valid ciphertext
                  andalso length(SharesForThisBundle) > Data#hbbft_data.f of %% do we have f+1 decryption shares?
                 true ->
-                  EncKey = maps:get(I, Data#hbbft_data.enc_keys),
+                    EncKey = maps:get(I, Data#hbbft_data.enc_keys),
                     case combine_shares(Data#hbbft_data.f, Data#hbbft_data.secret_key, SharesForThisBundle, EncKey) of
                         undefined ->
                             %% can't recover the key, consider this ACS failed if we have 2f+1 shares and still can't recover the key
@@ -309,7 +326,7 @@ handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
                                 true ->
                                     %% ok, just declare this ACS returned an empty list
                                     NewDecrypted = maps:put(I, [], Data#hbbft_data.decrypted),
-                                    check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted});
+                                    check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted, failed_combine=[I|Data#hbbft_data.failed_combine]});
                                 false ->
                                     {Data#hbbft_data{dec_shares=NewShares}, ok}
                             end;
@@ -322,7 +339,7 @@ handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
                                     %% f+1 valid shares but the resulting decryption key was unusuable to decrypt
                                     %% the transaction bundle
                                     NewDecrypted = maps:put(I, [], Data#hbbft_data.decrypted),
-                                    check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted});
+                                    check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted, failed_decrypt=[I|Data#hbbft_data.failed_decrypt]});
                                 Decrypted ->
                                     [Stamp | Transactions] = decode_list(Decrypted, []),
                                     NewDecrypted = maps:put(I, Transactions, Data#hbbft_data.decrypted),
@@ -441,50 +458,7 @@ serialize(#hbbft_data{secret_key=SK}=Data, true) ->
     %% serialize the private key as well
     {serialize_hbbft_data(Data), tpke_privkey:serialize(SK)}.
 
--spec deserialize(hbbft_serialized_data(), tpke_privkey:privkey()) -> hbbft_data().
-deserialize(#hbbft_serialized_data{batch_size=BatchSize,
-                                   n=N,
-                                   f=F,
-                                   j=J,
-                                   round=Round,
-                                   max_buf=MaxBuf,
-                                   acs=ACSData,
-                                   acs_init=ACSInit,
-                                   sent_txns=SentTxns,
-                                   sent_sig=SentSig,
-                                   acs_results=ACSResults,
-                                   decrypted=Decrypted,
-                                   sig_shares=SigShares,
-                                   dec_shares=DecShares,
-                                   thingtosign=ThingToSign,
-                                   stampfun=Stampfun,
-                                   stamps=Stamps}, SK) ->
-
-    NewThingToSign = case ThingToSign of
-                         undefined -> undefined;
-                         _ -> tpke_pubkey:deserialize_element(tpke_privkey:public_key(SK), ThingToSign)
-                     end,
-    #hbbft_data{secret_key=SK,
-                batch_size=BatchSize,
-                n=N,
-                f=F,
-                j=J,
-                round=Round,
-                buf=[],
-                max_buf=MaxBuf,
-                acs=hbbft_acs:deserialize(ACSData, SK),
-                acs_init=ACSInit,
-                sent_txns=SentTxns,
-                sent_sig=SentSig,
-                acs_results=ACSResults,
-                decrypted=Decrypted,
-                dec_shares=maps:map(fun(_, {Valid, Share}) ->
-                                            {Valid, hbbft_utils:binary_to_share(Share, tpke_privkey:public_key(SK))}
-                                    end, DecShares),
-                sig_shares=maps:map(fun(_, Share) -> hbbft_utils:binary_to_share(Share, tpke_privkey:public_key(SK)) end, SigShares),
-                thingtosign=NewThingToSign,
-                stampfun=Stampfun,
-                stamps=Stamps};
+-spec deserialize(map(), tpke_privkey:privkey()) -> hbbft_data().
 deserialize(M0, SK) ->
     M = maps:map(fun(acs, V) -> V;
                 (_K, V) -> binary_to_term(V)
@@ -506,7 +480,10 @@ deserialize(M0, SK) ->
       dec_shares := DecShares,
       thingtosign := ThingToSign,
       stampfun := Stampfun,
-      stamps := Stamps} = M,
+      stamps := Stamps,
+      failed_combine := FailedCombine,
+      failed_decrypt := FailedDecrypt
+     } = M,
 
     NewThingToSign = case ThingToSign of
                          undefined -> undefined;
@@ -533,7 +510,10 @@ deserialize(M0, SK) ->
                 sig_shares=maps:map(fun(_, Share) -> hbbft_utils:binary_to_share(Share, tpke_privkey:public_key(SK)) end, SigShares),
                 thingtosign=NewThingToSign,
                 stampfun=Stampfun,
-                stamps=Stamps}.
+                stamps=Stamps,
+                failed_combine=FailedCombine,
+                failed_decrypt=FailedDecrypt
+               }.
 
 -spec serialize_hbbft_data(hbbft_data()) -> hbbft_serialized_data() | #{atom() => binary() | map()}.
 serialize_hbbft_data(#hbbft_data{batch_size=BatchSize,
@@ -553,7 +533,10 @@ serialize_hbbft_data(#hbbft_data{batch_size=BatchSize,
                                  decrypted=Decrypted,
                                  thingtosign=ThingToSign,
                                  stampfun=Stampfun,
-                                 stamps=Stamps}) ->
+                                 stamps=Stamps,
+                                 failed_combine=FailedCombine,
+                                 failed_decrypt=FailedDecrypt
+                                }) ->
 
     NewThingToSign = case ThingToSign of
                          undefined -> undefined;
@@ -577,7 +560,10 @@ serialize_hbbft_data(#hbbft_data{batch_size=BatchSize,
           sig_shares => maps:map(fun(_, V) -> hbbft_utils:share_to_binary(V) end, SigShares),
           thingtosign => NewThingToSign,
           stampfun => Stampfun,
-          stamps => Stamps},
+          stamps => Stamps,
+          failed_combine => FailedCombine,
+          failed_decrypt => FailedDecrypt
+         },
     maps:map(fun(acs, V) -> V;
                 (_K, V) -> term_to_binary(V, [compressed])
              end, M).
