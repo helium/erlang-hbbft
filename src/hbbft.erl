@@ -11,7 +11,6 @@
          next_round/3,
          round/1,
          buf/1, buf/2,
-         get_encrypted_key/2,
          encrypt/2,
          decrypt/2,
          handle_msg/3,
@@ -21,6 +20,10 @@
          status/1,
          have_key/1,
          is_serialized/1]).
+
+-ifdef(TEST).
+-export([get_encrypted_key/2]).
+-endif.
 
 -record(hbbft_data, {
           batch_size :: pos_integer(),
@@ -420,7 +423,7 @@ encrypt(PK, Bin) ->
     %% the result of the encryption is a 3-tuple that contains 2 PBC Elements and a 32 byte binary
     %% we need to encode all this crap into a binary value that we can unpack again sanely
     EncryptedKey = tpke_pubkey:encrypt(PK, Key),
-    EncryptedKeyBin = hbbft_utils:ciphertext_to_binary(EncryptedKey),
+    EncryptedKeyBin = tpke_pubkey:ciphertext_to_binary(EncryptedKey),
     %% encrypt the bundle with AES-GCM and put the IV and the encrypted key in the Additional Authenticated Data (AAD)
     AAD = <<IV:16/binary, (byte_size(EncryptedKeyBin)):16/integer-unsigned, EncryptedKeyBin/binary>>,
     {CipherText, CipherTag} = crypto:block_encrypt(aes_gcm, Key, IV, {AAD, Bin}),
@@ -430,12 +433,11 @@ encrypt(PK, Bin) ->
 -spec get_encrypted_key(tpke_privkey:privkey(), binary()) -> {ok, tpke_pubkey:ciphertext()} | error.
 get_encrypted_key(SK, <<_IV:16/binary, EncKeySize:16/integer-unsigned, EncKey:EncKeySize/binary, _/binary>>) ->
     PubKey = tpke_privkey:public_key(SK),
-    CipherText = hbbft_utils:binary_to_ciphertext(EncKey, PubKey),
-    case tpke_pubkey:verify_ciphertext(PubKey, CipherText) of
-        true ->
-            {ok, CipherText};
-        false ->
-            error
+    try tpke_pubkey:binary_to_ciphertext(EncKey, PubKey) of
+        CipherText ->
+            {ok, CipherText}
+    catch error:inconsistent_ciphertext ->
+              error
     end.
 
 -spec decrypt(binary(), binary()) -> binary() | error.
@@ -503,7 +505,7 @@ deserialize(M0, SK) ->
                 sent_sig=SentSig,
                 acs_results=ACSResults,
                 decrypted=Decrypted,
-                enc_keys=maps:map(fun(_, Ciphertext) -> hbbft_utils:binary_to_ciphertext(Ciphertext, tpke_privkey:public_key(SK)) end, EncKeys),
+                enc_keys=maps:map(fun(_, Ciphertext) -> tpke_pubkey:binary_to_ciphertext(Ciphertext, tpke_privkey:public_key(SK)) end, EncKeys),
                 dec_shares=maps:map(fun(_, {Valid, Share}) ->
                                             {Valid, hbbft_utils:binary_to_share(Share, tpke_privkey:public_key(SK))}
                                     end, DecShares),
@@ -555,7 +557,7 @@ serialize_hbbft_data(#hbbft_data{batch_size=BatchSize,
           j => J,
           sent_sig => SentSig,
           acs_results => ACSResults,
-          enc_keys => maps:map(fun(_, Ciphertext) -> hbbft_utils:ciphertext_to_binary(Ciphertext) end, EncKeys),
+          enc_keys => maps:map(fun(_, Ciphertext) -> tpke_pubkey:ciphertext_to_binary(Ciphertext) end, EncKeys),
           dec_shares => maps:map(fun(_, {Valid, Share}) -> {Valid, hbbft_utils:share_to_binary(Share)} end, DecShares),
           sig_shares => maps:map(fun(_, V) -> hbbft_utils:share_to_binary(V) end, SigShares),
           thingtosign => NewThingToSign,
