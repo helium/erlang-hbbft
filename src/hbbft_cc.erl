@@ -77,7 +77,7 @@ share(Data, J, Share) ->
     case maps:is_key(J, Data#cc_data.shares) of
         false ->
             %% store the deserialized share in the shares map, convenient to use later to verify signature
-            DeserializedShare = hbbft_utils:binary_to_share(Share, Data#cc_data.sk),
+            DeserializedShare = hbbft_utils:binary_to_share(Share, tpke_privkey:public_key(Data#cc_data.sk)),
             case tpke_pubkey:verify_signature_share(tpke_privkey:public_key(Data#cc_data.sk), DeserializedShare, Data#cc_data.sid) of
                 true ->
                     NewData = Data#cc_data{shares=maps:put(J, DeserializedShare, Data#cc_data.shares)},
@@ -121,4 +121,4 @@ serialize_shares(Shares) ->
 
 -spec deserialize_shares(#{non_neg_integer() => binary()}, tpke_privkey:privkey()) -> #{non_neg_integer() => tpke_privkey:share()}.
 deserialize_shares(Shares, SK) ->
-    maps:map(fun(_K, V) -> hbbft_utils:binary_to_share(V, SK) end, Shares).
+    maps:map(fun(_K, V) -> hbbft_utils:binary_to_share(V, tpke_privkey:public_key(SK)) end, Shares).
