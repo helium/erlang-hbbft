@@ -112,7 +112,8 @@ set_stamp_fun(M, F, A, Data) when is_atom(M), is_atom(F) ->
 
 %% start acs on demand
 -spec start_on_demand(hbbft_data()) -> {hbbft_data(), already_started | {send, [rbc_wrapped_output()]}}.
-start_on_demand(Data = #hbbft_data{buf=Buf, n=N, secret_key=SK, batch_size=BatchSize, acs_init=false}) ->
+start_on_demand(Data = #hbbft_data{buf=Buf, j=J, n=N, secret_key=SK, batch_size=BatchSize, acs_init=false,
+                                  stamps=Stamps, decrypted=Decrypted}) ->
     %% pick proposed whichever is lesser from batchsize/n or buffer
     Proposed = hbbft_utils:random_n(min((BatchSize div N), length(Buf)), lists:sublist(Buf, BatchSize)),
     %% encrypt x -> tpke.enc(pk, proposed)
@@ -125,7 +126,12 @@ start_on_demand(Data = #hbbft_data{buf=Buf, n=N, secret_key=SK, batch_size=Batch
     %% time to kick off a round
     {NewACSState, {send, ACSResponse}} = hbbft_acs:input(Data#hbbft_data.acs, EncX),
     %% add this to acs set in data and send out the ACS response(s)
-    {Data#hbbft_data{acs=NewACSState, acs_init=true},
+    %%
+    %% Also, store our own proposal and stamp so we can avoid combining/decrypting it
+    %% later if it gets included in the ACS result
+    {Data#hbbft_data{acs=NewACSState, acs_init=true,
+                     stamps=lists:keystore(J, 1, Stamps, {J, Stamp}),
+                     decrypted=maps:put(J, Proposed, Decrypted)},
      {send, hbbft_utils:wrap({acs, Data#hbbft_data.round}, ACSResponse)}};
 start_on_demand(Data) ->
     {Data, already_started}.
@@ -237,10 +243,16 @@ handle_msg(Data = #hbbft_data{round=R}, J, {{acs, R}, ACSMsg}) ->
                                         end
                              end, {[], [], #{}}, Results0),
             %% verify any shares we received before we got the ACS result
-            VerifiedShares = maps:map(fun({I, _}, {undefined, Share}) ->
+            %%
+            %% check if we have a copy of our own proposal. this will always be true
+            %% unless we did an upgrade in the middle of a round. we can remove this check
+            %% later
+            HasOwnProposal = maps:is_key(J, Data#hbbft_data.decrypted),
+            VerifiedShares = maps:map(fun({I, _}, {undefined, Share}) when
+                                                %% don't verify if this is our own proposal and we have a copy of it
+                                                not (I == J andalso HasOwnProposal)  ->
                                               case maps:find(I, EncKeys) of
                                                   {ok, EncKey} ->
-                                                      %% we validated the ciphertext above so we don't need to re-check it here
                                                       Valid = tpke_pubkey:verify_share(tpke_privkey:public_key(Data#hbbft_data.secret_key), Share, EncKey),
                                                       {Valid, Share};
                                                   error ->
@@ -250,7 +262,14 @@ handle_msg(Data = #hbbft_data{round=R}, J, {{acs, R}, ACSMsg}) ->
                                          (_, V) ->
                                               V
                                       end, Data#hbbft_data.dec_shares),
-            {Data#hbbft_data{acs=NewACS, acs_results=Results, dec_shares=VerifiedShares, enc_keys=EncKeys}, {send,  hbbft_utils:wrap({acs, Data#hbbft_data.round}, ACSResponse) ++ Replies}};
+            %% if we are not in the ACS result set, filter out our own results
+            {ResultIndices, _} = lists:unzip(Results),
+            Decrypted = maps:with(ResultIndices, Data#hbbft_data.decrypted),
+            Stamps = lists:filter(fun({I, _Stamp}) ->
+                                          lists:member(I, ResultIndices)
+                                  end, Data#hbbft_data.stamps),
+            {Data#hbbft_data{acs=NewACS, acs_results=Results, dec_shares=VerifiedShares, decrypted=Decrypted, stamps=Stamps, enc_keys=EncKeys},
+             {send,  hbbft_utils:wrap({acs, Data#hbbft_data.round}, ACSResponse) ++ Replies}};
         {NewACS, defer} ->
             {Data#hbbft_data{acs=NewACS}, defer}
     end;
@@ -268,7 +287,14 @@ handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
             %% the Share now is a binary, deserialize it and then store in the dec_shares map
             DeserializedShare = hbbft_utils:binary_to_share(Share, tpke_privkey:public_key(Data#hbbft_data.secret_key)),
             %% add share to map and validate any previously unvalidated shares
-            NewShares = maps:map(fun({I1, _}, {undefined, AShare}) ->
+            %%
+            %% check if we have a copy of our own proposal. this will always be true
+            %% unless we did an upgrade in the middle of a round. we can remove this check
+            %% later
+            HasOwnProposal = maps:is_key(J, Data#hbbft_data.decrypted),
+            NewShares = maps:map(fun({I1, _}, {undefined, AShare}) when
+                                           %% don't verify if this is our own proposal and we have a copy of it
+                                           not (I1 == J andalso HasOwnProposal) ->
                                               case maps:find(I1, Data#hbbft_data.enc_keys) of
                                                   {ok, EncKey} ->
                                                       %% we validated the ciphertext above so we don't need to re-check it here
@@ -356,7 +382,8 @@ handle_msg(_Data, _J, _Msg) ->
     ignore.
 
 -spec maybe_start_acs(hbbft_data()) -> {hbbft_data(), ok | {send, [rbc_wrapped_output()]}}.
-maybe_start_acs(Data = #hbbft_data{n=N, secret_key=SK, batch_size=BatchSize}) ->
+maybe_start_acs(Data = #hbbft_data{n=N, j=J, secret_key=SK, batch_size=BatchSize,
+                                  decrypted=Decrypted, stamps=Stamps}) ->
     case length(Data#hbbft_data.buf) > BatchSize andalso Data#hbbft_data.acs_init == false of
         true ->
             %% compose a transaction bundle
@@ -373,7 +400,11 @@ maybe_start_acs(Data = #hbbft_data{n=N, secret_key=SK, batch_size=BatchSize}) ->
             %% time to kick off a round
             {NewACSState, {send, ACSResponse}} = hbbft_acs:input(Data#hbbft_data.acs, EncX),
             %% add this to acs set in data and send out the ACS response(s)
-            {Data#hbbft_data{acs=NewACSState, acs_init=true},
+            %%
+            %% Also, store our own proposal and stamp so we can avoid combining/decrypting it
+            %% later if it gets included in the ACS result
+            {Data#hbbft_data{acs=NewACSState, acs_init=true, stamps=lists:keystore(J, 1, Stamps, {J, Stamp}),
+                             decrypted=maps:put(J, Proposed, Decrypted)},
              {send, hbbft_utils:wrap({acs, Data#hbbft_data.round}, ACSResponse)}};
         false ->
             %% not enough transactions for this round yet
