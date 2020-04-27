@@ -220,7 +220,7 @@ encrypt_decrypt_test(Config) ->
 
     PlainText = crypto:strong_rand_bytes(24),
     Enc = hbbft:encrypt(PubKey, PlainText),
-    EncKey = hbbft:get_encrypted_key(hd(PrivateKeys), Enc),
+    {ok, EncKey} = hbbft:get_encrypted_key(hd(PrivateKeys), Enc),
     DecKey = tpke_pubkey:combine_shares(PubKey, EncKey, [ tpke_privkey:decrypt_share(SK, EncKey) || SK <- PrivateKeys]),
     ?assertEqual(PlainText, hbbft:decrypt(DecKey, Enc)),
     ok.

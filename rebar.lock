@@ -9,7 +9,7 @@
   1},
  {<<"erlang_tpke">>,
   {git,"https://github.com/helium/erlang_tpke.git",
-       {ref,"b1ccd54d6f1763c1e59b03c97e57dcd814af985e"}},
+       {ref,"e784d6352e13db51cbd4d7462477a9980bfe9509"}},
   0},
  {<<"merkerl">>,{pkg,<<"merkerl">>,<<"1.0.1">>},0}]}.
 [
