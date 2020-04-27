@@ -61,22 +61,10 @@ init_test(Config) ->
 
     %% wait for all the worker's mailboxes to settle and
     %% wait for the chains to converge
-    ok = hbbft_ct_utils:wait_until(fun() ->
-                                           Chains = sets:from_list(lists:map(fun(W) ->
-                                                                                     {ok, Blocks} = hbbft_worker:get_blocks(W),
-                                                                                     Blocks
-                                                                             end, Workers)),
+    ok = wait_for_chains(Workers, 2),
 
-                                           0 == lists:sum([element(2, erlang:process_info(W, message_queue_len)) || W <- Workers ]) andalso
-                                           1 == sets:size(Chains) andalso
-                                           0 /= length(hd(sets:to_list(Chains)))
-                                   end, 60*2, 500),
+    Chains = get_common_chain(Workers),
 
-
-    Chains = sets:from_list(lists:map(fun(W) ->
-                                              {ok, Blocks} = hbbft_worker:get_blocks(W),
-                                              Blocks
-                                      end, Workers)),
     1 = sets:size(Chains),
     [Chain] = sets:to_list(Chains),
     io:format("chain is of height ~p~n", [length(Chain)]),
@@ -251,22 +239,10 @@ start_on_demand_test(Config) ->
 
     %% wait for all the worker's mailboxes to settle and
     %% wait for the chains to converge
-    ok = hbbft_ct_utils:wait_until(fun() ->
-                                           Chains = sets:from_list(lists:map(fun(W) ->
-                                                                                     {ok, Blocks} = hbbft_worker:get_blocks(W),
-                                                                                     Blocks
-                                                                             end, Workers)),
+    ok = wait_for_chains(Workers, 1),
 
-                                           0 == lists:sum([element(2, erlang:process_info(W, message_queue_len)) || W <- Workers ]) andalso
-                                           1 == sets:size(Chains) andalso
-                                           0 /= length(hd(sets:to_list(Chains)))
-                                   end, 60*2, 500),
+    Chains = get_common_chain(Workers),
 
-
-    Chains = sets:from_list(lists:map(fun(W) ->
-                                              {ok, Blocks} = hbbft_worker:get_blocks(W),
-                                              Blocks
-                                      end, Workers)),
     1 = sets:size(Chains),
     [Chain] = sets:to_list(Chains),
     io:format("chain is of height ~p~n", [length(Chain)]),
@@ -305,33 +281,24 @@ one_actor_wrong_key_test(Config) ->
 
     %% wait for all the worker's mailboxes to settle and
     %% wait for the chains to converge
-    ok = hbbft_ct_utils:wait_until(fun() ->
-                                           Chains = sets:from_list(lists:map(fun(W) ->
-                                                                                     {ok, Blocks} = hbbft_worker:get_blocks(W),
-                                                                                     Blocks
-                                                                             end, tl(Workers))),
+    Result = wait_for_chains(Workers, 1),
 
-                                           0 == lists:sum([element(2, erlang:process_info(W, message_queue_len)) || W <- Workers ]) andalso
-                                           1 == sets:size(Chains) andalso
-                                           0 /= length(hd(sets:to_list(Chains)))
-                                   end, 60*2, 500),
+    Chains = get_common_chain(Workers),
 
+    ct:pal("Chains ~p", [sets:to_list(Chains)]),
 
-    Chains = sets:from_list(lists:map(fun(W) ->
-                                              {ok, Blocks} = hbbft_worker:get_blocks(W),
-                                              Blocks
-                                      end, tl(Workers))),
     1 = sets:size(Chains),
     [Chain] = sets:to_list(Chains),
     io:format("chain is of height ~p~n", [length(Chain)]),
     %% verify they are cryptographically linked
-    true = hbbft_worker:verify_chain(Chain, PubKey),
+    true = hbbft_worker:verify_chain(lists:reverse(Chain), PubKey),
     %% check all the transactions are unique
     BlockTxns = lists:flatten([ hbbft_worker:block_transactions(B) || B <- Chain ]),
     true = length(BlockTxns) == sets:size(sets:from_list(BlockTxns)),
     %% check they're all members of the original message list
     true = sets:is_subset(sets:from_list(BlockTxns), sets:from_list(Msgs)),
     io:format("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
+    ok = Result,
     ok.
 
 one_actor_corrupted_key_test(Config) ->
@@ -359,22 +326,10 @@ one_actor_corrupted_key_test(Config) ->
 
     %% wait for all the worker's mailboxes to settle and
     %% wait for the chains to converge
-    ok = hbbft_ct_utils:wait_until(fun() ->
-                                           Chains = sets:from_list(lists:map(fun(W) ->
-                                                                                     {ok, Blocks} = hbbft_worker:get_blocks(W),
-                                                                                     Blocks
-                                                                             end, (Workers))),
+    ok = wait_for_chains(Workers, 2),
 
-                                           0 == lists:sum([element(2, erlang:process_info(W, message_queue_len)) || W <- Workers ]) andalso
-                                           1 == sets:size(Chains) andalso
-                                           0 /= length(hd(sets:to_list(Chains)))
-                                   end, 60*2, 500),
+    Chains = get_common_chain(Workers),
 
-
-    Chains = sets:from_list(lists:map(fun(W) ->
-                                              {ok, Blocks} = hbbft_worker:get_blocks(W),
-                                              Blocks
-                                      end, (Workers))),
     1 = sets:size(Chains),
     [Chain] = sets:to_list(Chains),
     io:format("chain is of height ~p~n", [length(Chain)]),
@@ -489,4 +444,26 @@ merge_replies(N, NewReplies, Replies) ->
                       end,
             merge_replies(N-1, lists:keydelete(N, 1, NewReplies), lists:keystore(N, 1, Replies, NewSend))
     end.
+
+wait_for_chains(Workers, MinHeight) ->
+    hbbft_ct_utils:wait_until(fun() ->
+                                      Chains = lists:map(fun(W) ->
+                                                                 {ok, Blocks} = hbbft_worker:get_blocks(W),
+                                                                 Blocks
+                                                         end, Workers),
+
+                                      lists:all(fun(C) -> length(C) >= MinHeight end, Chains)
+                              end, 60*2, 500).
+
+get_common_chain(Workers) ->
+    AllChains = lists:map(fun(W) ->
+                               {ok, Blocks} = hbbft_worker:get_blocks(W),
+                               Blocks
+                       end, Workers),
+    %% find the shortest chain and check all chains have the same common prefix
+    ShortestChainLen = hd(lists:sort([ length(C) || C <- AllChains ])),
+
+    %% chains are stored in reverse, so we have to reverse them to get the first N blocks and then re-reverse them to restore expected ordering
+    sets:from_list(lists:map(fun(C) -> lists:reverse(lists:sublist(lists:reverse(C), ShortestChainLen)) end, AllChains)).
+
 

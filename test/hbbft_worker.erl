@@ -3,7 +3,8 @@
 -behaviour(gen_server).
 
 -export([start_link/6, submit_transaction/2, start_on_demand/1, get_blocks/1]).
--export([verify_chain/2, block_transactions/1]).
+-export([verify_chain/2, block_transactions/1, status/1, set_filter/2]).
+-export([bba_filter/1]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
@@ -21,7 +22,8 @@
           tempblock :: undefined | #block{},
           sk :: tpke_privkey:privkey(),
           ssk :: tpke_privkey:privkey_serialized(),
-          to_serialize = false :: boolean()
+          to_serialize = false :: boolean(),
+          filter = fun(_ID, _Msg) -> true end :: fun((any()) -> boolean())
          }).
 
 start_link(N, F, ID, SK, BatchSize, ToSerialize) ->
@@ -35,6 +37,19 @@ start_on_demand(Pid) ->
 
 get_blocks(Pid) ->
     gen_server:call(Pid, get_blocks, infinity).
+
+status(Pid) ->
+    gen_server:call(Pid, status, infinity).
+
+set_filter(Fun, Pid) when is_function(Fun) ->
+    gen_server:call(Pid, {set_filter, Fun}, infinity).
+
+bba_filter(ID) ->
+    fun(I, {{acs,_},{{bba, I}, _}}=Msg) when I == ID ->
+            io:format("~p filtering ~p~n", [node(), Msg]),
+            false;
+       (_, _) -> true
+    end.
 
 verify_chain([], _) ->
     true;
@@ -99,13 +114,28 @@ handle_call({submit_txn, Txn}, _From, State = #state{hbbft=HBBFT, sk=SK}) ->
     {reply, ok, NewState};
 handle_call(get_blocks, _From, State) ->
     {reply, {ok, State#state.blocks}, State};
+handle_call(status, _From, State  = #state{hbbft=HBBFT, sk=SK}) ->
+    {reply, hbbft:status(maybe_deserialize_hbbft(HBBFT, SK)), State};
+handle_call({set_filter, Fun}, _From, State) ->
+    {reply, ok, State#state{filter=Fun}};
 handle_call(Msg, _From, State) ->
     io:format("unhandled msg ~p~n", [Msg]),
     {reply, ok, State}.
 
-handle_cast({hbbft, PeerID, Msg}, State = #state{hbbft=HBBFT, sk=SK}) ->
-    NewState = dispatch(hbbft:handle_msg(maybe_deserialize_hbbft(HBBFT, SK), PeerID, Msg), State),
-    {noreply, NewState};
+handle_cast({hbbft, PeerID, Msg}, State = #state{hbbft=HBBFT, sk=SK, filter=Filter}) ->
+    case Filter(PeerID, Msg) of
+        true ->
+            case hbbft:handle_msg(maybe_deserialize_hbbft(HBBFT, SK), PeerID, Msg) of
+                {NewHBBFT, defer} ->
+                    gen_server:cast(self(), {hbbft, PeerID, Msg}),
+                    {noreply, State#state{hbbft=maybe_serialize_HBBFT(NewHBBFT, State#state.to_serialize)}};
+                Result ->
+                    NewState = dispatch(Result, State),
+                    {noreply, NewState}
+            end;
+        false ->
+            {noreply, State}
+    end;
 handle_cast({block, NewBlock}, State=#state{sk=SK, hbbft=HBBFT}) ->
     case lists:member(NewBlock, State#state.blocks) of
         false ->
@@ -154,10 +184,10 @@ dispatch({NewHBBFT, {result, {signature, Sig}}}, State = #state{tempblock=NewBlo
 dispatch({NewHBBFT, ok}, State) ->
     State#state{hbbft=maybe_serialize_HBBFT(NewHBBFT, State#state.to_serialize)};
 dispatch({NewHBBFT, Other}, State) ->
-    io:format("UNHANDLED ~p~n", [Other]),
+    io:format("~p UNHANDLED ~p~n", [self(), Other]),
     State#state{hbbft=maybe_serialize_HBBFT(NewHBBFT, State#state.to_serialize)};
 dispatch(Other, State) ->
-    io:format("UNHANDLED2 ~p~n", [Other]),
+    io:format("~p UNHANDLED2 ~p~n", [self(), Other]),
     State.
 
 do_send([], _) ->

@@ -2,8 +2,10 @@
 
 -behaviour(gen_server).
 
--export([start_link/1, submit_transaction/2, get_blocks/1, start_on_demand/1, relcast_status/1]).
--export([verify_chain/2, block_transactions/1]).
+-export([start_link/1, submit_transaction/2, get_blocks/1, start_on_demand/1, relcast_status/1, status/1]).
+-export([verify_chain/2, block_transactions/1, set_filter/2]).
+
+-export([bba_filter/1]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
@@ -18,7 +20,8 @@
           id :: integer(),
           peers :: map(),
           tempblock = undefined :: block(),
-          blocks = [] :: [block()]
+          blocks = [] :: [block()],
+          filter = fun(_ID, _Msg) -> true end :: fun((any()) -> boolean())
          }).
 
 -type block() :: #block{}.
@@ -39,11 +42,25 @@ start_on_demand(Pid) ->
 relcast_status(Pid) ->
     gen_server:call(Pid, relcast_status, infinity).
 
+status(Pid) ->
+    gen_server:call(Pid, status, infinity).
+
+set_filter(Fun, Pid) when is_function(Fun) ->
+    gen_server:call(Pid, {set_filter, Fun}, infinity).
+
+bba_filter(ID) ->
+    fun(I, {{acs,_},{{bba, I}, _}}=Msg) when I == ID ->
+            io:format("~p filtering ~p~n", [node(), Msg]),
+            false;
+       (_, _) -> true
+    end.
+
 init(Args) ->
     N = proplists:get_value(n, Args),
     ID = proplists:get_value(id, Args),
     DataDir = proplists:get_value(data_dir, Args),
     Members = lists:seq(1, N),
+    erlang:send_after(1500, self(), inbound_tick),
     {ok, Relcast} = relcast:start(ID, Members, hbbft_handler, Args,
                                   [{create, true},
                                    {data_dir, DataDir ++ integer_to_list(ID)}]),
@@ -60,25 +77,29 @@ handle_call(start_on_demand, _From, State) ->
     {reply, Resp, do_send(State#state{relcast=Relcast})};
 handle_call(relcast_status, _From, State) ->
     {reply, relcast:status(State#state.relcast), State};
+handle_call(status, From, State) ->
+    relcast:command({status, From}, State#state.relcast),
+    {noreply, State};
+handle_call({set_filter, Fun}, _From, State) ->
+    {reply, ok, State#state{filter=Fun}};
 handle_call(Msg, _From, State) ->
     io:format("unhandled msg ~p~n", [Msg]),
     {reply, ok, State}.
 
-handle_cast({hbbft, FromId, Msg}, State) ->
-    case relcast:deliver(1, Msg, FromId, State#state.relcast) of
-        {ok, NewRelcast} ->
-            gen_server:cast({global, name(FromId)}, {ack, State#state.id}),
-            {noreply, do_send(State#state{relcast=NewRelcast})};
-        {defer, NewRelcast} ->
-            gen_server:cast({global, name(FromId)}, {ack, State#state.id}),
-            {noreply, do_send(State#state{relcast=NewRelcast})};
-        _ ->
+handle_cast({hbbft, FromId, Seq, Msg}, State = #state{filter=Filter}) ->
+    case Filter(FromId, binary_to_term(Msg)) of
+        true ->
+            case relcast:deliver(Seq, Msg, FromId, State#state.relcast) of
+                {ok, NewRelcast} ->
+                    {noreply, do_send(State#state{relcast=NewRelcast})}
+            end;
+        false ->
             {noreply, State}
     end;
-handle_cast({ack, Sender}, State) ->
+handle_cast({ack, Sender, Seq}, State) ->
     %% ct:pal("ack, Sender: ~p", [Sender]),
-    {ok, NewRelcast} = relcast:ack(Sender, maps:get(Sender, State#state.peers, undefined), State#state.relcast),
-    {noreply, do_send(State#state{relcast=NewRelcast, peers=maps:put(Sender, undefined, State#state.peers)})};
+    {ok, NewRelcast} = relcast:ack(Sender, Seq, State#state.relcast),
+    {noreply, do_send(State#state{relcast=NewRelcast})};
 handle_cast({block, Block, SerializedPubKey}, State) ->
     case lists:member(Block, State#state.blocks) of
         false ->
@@ -102,6 +123,17 @@ handle_cast(Msg, State) ->
     io:format("unhandled msg ~p~n", [Msg]),
     {noreply, State}.
 
+handle_info(inbound_tick, State = #state{relcast=Store}) ->
+    case relcast:process_inbound(Store) of
+        {ok, Acks, Store1} ->
+            dispatch_acks(State#state.id, Acks),
+            ok;
+        {stop, Timeout, Store1} ->
+            erlang:send_after(Timeout, self(), force_close),
+            ok
+    end,
+    erlang:send_after(1500, self(), inbound_tick),
+    {noreply, do_send(State#state{relcast=Store1})};
 handle_info({transactions, Txns}, State) ->
     %% make sure all the transactions are unique
     ExistingTxns = lists:flatten([ block_transactions(B) || B <- State#state.blocks ]),
@@ -148,12 +180,15 @@ do_send(State) ->
 do_send([], State) ->
     State;
 do_send([{I, undefined} | Tail], State) ->
-    case relcast:take(I, State#state.relcast) of
+    case relcast:take(I, State#state.relcast, 25) of
         {not_found, NewRelcast} ->
             do_send(Tail, State#state{relcast=NewRelcast});
-        {ok, Ref, _, Msg, NewRelcast} ->
-            gen_server:cast({global, name(I)}, {hbbft, State#state.id, Msg}),
-            do_send(Tail, State#state{relcast=NewRelcast, peers=maps:put(I, Ref, State#state.peers)})
+        {pipeline_full, NewRelcast} ->
+            do_send(Tail, State#state{relcast=NewRelcast});
+        {ok, Msgs, Acks, NewRelcast} ->
+            dispatch_acks(State#state.id, Acks),
+            [ gen_server:cast({global, name(I)}, {hbbft, State#state.id, Seq, Msg}) || {Seq, Msg} <- lists:reverse(Msgs)],
+            do_send(Tail, State#state{relcast=NewRelcast})
     end;
 do_send([_ | Tail], State) ->
     do_send(Tail, State).
@@ -216,3 +251,11 @@ verify_chain(Chain, PubKey) ->
 
 block_transactions(Block) ->
     Block#block.transactions.
+
+dispatch_acks(_, none) ->
+    ok;
+dispatch_acks(ID, Acks) ->
+    lists:foreach(fun({I, Seqs}) ->
+                          [ gen_server:cast({global, name(I)}, {ack, ID, Seq}) || Seq <- Seqs ]
+                  end, maps:to_list(Acks)).
+

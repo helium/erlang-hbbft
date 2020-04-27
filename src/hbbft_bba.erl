@@ -66,8 +66,8 @@ status(BBAData) ->
       aux_witness => BBAData#bba_data.aux_witness,
       bval_witness => BBAData#bba_data.bval_witness,
       term_witness => BBAData#bba_data.terminate_witness,
-      bin_values => BBAData#bba_data.bin_values,
-      broadcasted => BBAData#bba_data.broadcasted
+      bin_values => vals(BBAData#bba_data.bin_values),
+      bvals_broadcasted => vals(BBAData#bba_data.broadcasted)
      }.
 
 -spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer()) -> bba_data().
@@ -386,6 +386,12 @@ rand_val(2#11) -> hd(hbbft_utils:random_n(1, [0, 1])).
 %% get single value from set
 val(2#1) -> 0;
 val(2#10) -> 1.
+
+vals(0) -> [];
+vals(2#1) -> [0];
+vals(2#10) -> [1];
+vals(2#11) -> [0, 1].
+
 
 add_witness(Id, Value, Witness, AllowUnion) ->
     Old = maps:get(Id, Witness, 0),

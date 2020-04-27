@@ -50,6 +50,10 @@ handle_command(start_on_demand, State) ->
             %ct:pal("started hbbft on demand", []),
             {reply, ok, fixup_msgs(ToSend), State#state{hbbft=HBBFT}}
     end;
+handle_command({status, From}, State) ->
+    Status = hbbft:status(State#state.hbbft),
+    gen_server:reply(From, Status),
+    {reply, ok, ignore};
 handle_command(_Msg, _State) ->
     %ct:pal("unhandled handle_command, Msg: ~p", [_Msg]),
     {reply, ok, ignore}.
