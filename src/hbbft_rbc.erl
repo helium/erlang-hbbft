@@ -39,8 +39,10 @@
 -spec status(rbc_data()) -> map().
 status(RBCData) ->
     #{state => RBCData#rbc_data.state,
-      echoes => maps:values(RBCData#rbc_data.num_echoes),
-      readies => maps:values(RBCData#rbc_data.num_readies),
+      echoes => hash_key(RBCData#rbc_data.num_echoes),
+      readies => hash_key(RBCData#rbc_data.num_readies),
+      stripes => hash_key(maps:map(fun(_K, V) -> maps:keys(V) end, RBCData#rbc_data.stripes)),
+      seen_val => RBCData#rbc_data.seen_val,
       ready_sent => RBCData#rbc_data.ready_sent,
       leader => RBCData#rbc_data.leader
      }.
@@ -116,8 +118,7 @@ val(#rbc_data{leader=_Leader}, _J, _H, _Bi, _Si) ->
 -spec echo(rbc_data(), non_neg_integer(), merkerl:hash(), merkerl:proof(), binary()) -> {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()} | abort} | ignore.
 echo(#rbc_data{state=done}, _J, _H, _Bj, _Sj) ->
     ignore;
-echo(Data = #rbc_data{n=N, f=F}, J, H, Bj, Sj) ->
-
+echo(Data, J, H, Bj, Sj) ->
     %% check if you've already seen an ECHO from the sender
     case has_echo(Data, J) of
         true ->
@@ -129,17 +130,7 @@ echo(Data = #rbc_data{n=N, f=F}, J, H, Bj, Sj) ->
                     %% valid branch
                     DataWithEchoes = add_echo(Data, H, J),
                     NewData = add_stripe(DataWithEchoes, H, J, Sj),
-                    case length(maps:get(H, NewData#rbc_data.num_echoes, [])) >= (N - F) andalso maps:size(maps:get(H, NewData#rbc_data.stripes, #{})) >= (N - 2*F) of
-                        true ->
-                            %% Figure2. Bullet4
-                            %% upon receiving valid ECHO(h, ·, ·) messages from N − f distinct parties,
-                            %% – interpolate {s0 j} from any N − 2 f leaves received
-                            %% – recompute Merkle root h0 and if h0 /= h then abort
-                            %% – if READY(h) has not yet been sent, multicast READY(h)
-                            check_completion(NewData, H);
-                        false ->
-                            {NewData#rbc_data{state=waiting}, ok}
-                    end;
+                    check_completion(NewData, H);
                 {error, _} ->
                     %% otherwise discard
                     ignore
@@ -152,22 +143,15 @@ echo(Data = #rbc_data{n=N, f=F}, J, H, Bj, Sj) ->
 -spec ready(rbc_data(), non_neg_integer(), merkerl:hash()) -> {rbc_data(), ok | {send, send_commands()} | {result, V :: binary()}} | ignore.
 ready(#rbc_data{state=done}, _J, _H) ->
     ignore;
-ready(Data = #rbc_data{n=N, f=F}, J, H) ->
-    %% increment num_readies
-
+ready(Data, J, H) ->
     %% check if you've already seen this ready
     case has_ready(Data, J) of
         true ->
             ignore;
         false ->
+            %% increment num_readies
             NewData = add_ready(Data, H, J),
-            case length(maps:get(H, NewData#rbc_data.num_readies, [])) >= F + 1 andalso maps:size(maps:get(H, NewData#rbc_data.stripes, #{})) >= (N - 2*F) of
-                true ->
-                    check_completion(NewData, H);
-                false ->
-                    %% waiting
-                    {NewData, ok}
-            end
+            check_completion(NewData, H)
     end.
 
 %% helper functions
@@ -209,40 +193,50 @@ check_completion(Data = #rbc_data{n=N, f=F}, H) ->
     K = 2*F,
 
     Shards = maps:values(maps:get(H, Data#rbc_data.stripes, #{})),
-    case erasure:decode(K, M, Shards) of
-        {ok, Msg} ->
-            %% recompute merkle root H
-            {ok, AllShards} = erasure:encode(K, M, Msg),
-            Merkle = merkerl:new(AllShards, fun merkerl:hash_value/1),
-            MerkleRootHash = merkerl:root_hash(Merkle),
-            case H == MerkleRootHash of
-                true ->
-                    %% root hashes match
-                    %% check if ready already sent
-                    case Data#rbc_data.ready_sent of
-                        true ->
-                            %% Figure2. Bullet6
-                            %% check if we have enough readies and enough echoes
-                            %% N-2F echoes and 2F + 1 readies
-                            case length(maps:get(H, Data#rbc_data.num_echoes, [])) >= M andalso length(maps:get(H, Data#rbc_data.num_readies, [])) >= (2*F + 1) of
-                                true ->
-                                    %% decode V. Done
-                                    {Data#rbc_data{state=done}, {result, Msg}};
-                                false ->
-                                    %% wait for enough echoes and readies?
-                                    {Data#rbc_data{state=waiting, msg=Msg}, ok}
-                            end;
-                        false ->
-                            %% send ready(h)
-                            {Data#rbc_data{state=waiting, msg=Msg, ready_sent=true}, {send, [{multicast, {ready, H}}]}}
+    Echoes = maps:get(H, Data#rbc_data.num_echoes, []),
+    Readies = maps:get(H, Data#rbc_data.num_readies, []),
+
+    case {length(Echoes), length(Readies)} of
+        {NumEchoes, NumReadies} when NumReadies >= 2*F + 1 andalso NumEchoes >= N - 2*F ->
+            %% upon receiving 2f+1 matching READY(h) messages, wait for N−2f ECHO messages, then decode v
+            case Data#rbc_data.msg of
+                undefined ->
+                    %% we didn't compute it below
+                    case decode_result(K, M, Shards, H) of
+                        {ok, Msg} ->
+                            {Data#rbc_data{state=done}, {result, Msg}};
+                        {error, hash_mismatch} ->
+                            %% the protocol does not specify what to do here
+                            %% but failing seems the safest course of action
+                            {Data#rbc_data{state=done}, {result, aborted}};
+                        {error, _} ->
+                            %% likely we had some invalid shards, wait for some more
+                            {Data, ok}
                     end;
-                false ->
+                Msg ->
+                    {Data#rbc_data{state=done}, {result, Msg}}
+            end;
+        {NumEchoes, _} when NumEchoes >= N - F andalso Data#rbc_data.ready_sent == false ->
+            %% upon receiving validECHO(h,·,·) messages from N−f distinct parties,
+            %% - interpolate {s′j} from any N−2f leaves received
+            %% – recompute Merkle root h′and if h′ /= h then abort
+            %% – if READY(h) has not yet been sent, multicast READY(h)
+            case decode_result(K, M, Shards, H) of
+                {ok, Msg} ->
+                    {Data#rbc_data{ready_sent=true, msg=Msg}, {send, [{multicast, {ready, H}}]}};
+                {error, hash_mismatch} ->
                     %% abort
                     %% may incriminate the leader
-                    {Data#rbc_data{state=done}, {result, aborted}}
+                    {Data#rbc_data{state=done}, {result, aborted}};
+                {error, _} ->
+                    %% likely we had some invalid shards, wait for some more
+                    {Data, ok}
             end;
-        {error, _Reason} ->
-            {Data#rbc_data{state=waiting}, ok}
+        {_, NumReadies} when NumReadies >= F + 1 andalso Data#rbc_data.ready_sent == false ->
+            %% upon receiving f+1 matching READY(h) messages, if READY has not yet been sent, multicast READY(h)
+            {Data#rbc_data{ready_sent=true}, {send, [{multicast, {ready, H}}]}};
+        _ ->
+            {Data, ok}
     end.
 
 -spec insert_once(non_neg_integer(), [non_neg_integer()]) -> [non_neg_integer(), ...].
@@ -251,3 +245,36 @@ insert_once(Element, List) ->
         true -> List;
         false -> [Element | List]
     end.
+
+decode_result(K, M, Shards, H) ->
+    case erasure:decode(K, M, Shards) of
+        {ok, Msg} ->
+            %% recompute merkle root H
+            {ok, AllShards} = erasure:encode(K, M, Msg),
+            Merkle = merkerl:new(AllShards, fun merkerl:hash_value/1),
+            MerkleRootHash = merkerl:root_hash(Merkle),
+            case H == MerkleRootHash of
+                true ->
+                    {ok, Msg};
+                false ->
+                    {error, hash_mismatch}
+            end;
+        Error ->
+            %% TODO fix erlang_erasure to return the invalid shard so we can remove it
+            %% and retry if we have at least N−2f shares left. Realistically this should
+            %% be very hard because the merkle hash is also over the shard metadata so
+            %% any shard that gets this far is likely valid, assuming an honest leader.
+            Error
+    end.
+
+hash_key(Map) ->
+    Keys = maps:keys(Map),
+    Len = case length(Keys) of
+              N when N < 2 ->
+                  6;
+              _ ->
+                  erlang:max(6, binary:longest_common_prefix(Keys))
+          end,
+    maps:fold(fun(Key, Value, Acc) ->
+                      maps:put(binary:part(Key, 0, Len), Value, Acc)
+              end, #{}, Map).
