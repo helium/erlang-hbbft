@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+
+  ci:
+    runs-on: ubuntu-latest
+    container: madninja/builder-erlang:2
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - uses: actions/cache@v1
+      name: Restore cache
+      with:
+        path: ~/.cache/rebar3
+        key: ${{ runner.os }}-rebar3-${{ hashFiles(format('{0}{1}', github.workspace, '/rebar.lock')) }}
+
+    - name: Compile
+      run: rebar3 compile
+
+    - name: Dialyzer
+      run: rebar3 dialyzer
+
+    - name: Run tests
+      run: rebar3 do eunit, ct
