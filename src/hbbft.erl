@@ -344,8 +344,13 @@ handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
                                             check_completion(Data#hbbft_data{dec_shares=NewShares,
                                                                              decrypted=NewDecrypted, stamps=Stamps});
                                         {error, _} ->
-                                            lager:warning("got bad chunk encoding, dropping decrypted txns"),
-                                            check_completion(Data)
+                                            %% this is an invalid proposal. Because the shares are verifiable
+                                            %% we know that everyone will fail to decrypt so we declare this as an empty share,
+                                            %% as in the decryption failure case above, and continue
+                                            %% TODO track failed decodes like we track failed decrypts
+                                            NewDecrypted = maps:put(I, [], Data#hbbft_data.decrypted),
+                                            check_completion(Data#hbbft_data{dec_shares=NewShares,
+                                                                             decrypted=NewDecrypted})
                                     end
                             end
                     end;
