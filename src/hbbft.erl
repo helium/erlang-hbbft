@@ -337,10 +337,16 @@ handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
                                     check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted,
                                                                     failed_decrypt=[I|Data#hbbft_data.failed_decrypt]});
                                 Decrypted ->
-                                    [Stamp | Transactions] = decode_list(Decrypted, []),
-                                    NewDecrypted = maps:put(I, Transactions, Data#hbbft_data.decrypted),
-                                    Stamps = [{I, Stamp} | Data#hbbft_data.stamps],
-                                    check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted, stamps=Stamps})
+                                    case decode_list(Decrypted, []) of
+                                        [Stamp | Transactions] ->
+                                            NewDecrypted = maps:put(I, Transactions, Data#hbbft_data.decrypted),
+                                            Stamps = [{I, Stamp} | Data#hbbft_data.stamps],
+                                            check_completion(Data#hbbft_data{dec_shares=NewShares,
+                                                                             decrypted=NewDecrypted, stamps=Stamps});
+                                        {error, _} ->
+                                            lager:warning("got bad chunk encoding, dropping decrypted txns"),
+                                            check_completion(Data)
+                                    end
                             end
                     end;
                 false ->
@@ -621,9 +627,18 @@ combine_shares(F, SK, SharesForThisBundle, EncKey) ->
 encode_list([], Acc) ->
     list_to_binary(lists:reverse(Acc));
 encode_list([H|T], Acc) ->
-    encode_list(T, [<<(byte_size(H)):16/integer-unsigned-little, H/binary>> | Acc]).
+    Sz = byte_size(H),
+    case Sz >= 16#ffffff of
+        true ->
+            encode_list(T, Acc);
+        false ->
+            encode_list(T, [<<Sz:24/integer-unsigned-little, H/binary>> | Acc])
+    end.
 
 decode_list(<<>>, Acc) ->
     lists:reverse(Acc);
-decode_list(<<Length:16/integer-unsigned-little, Entry:Length/binary, Tail/binary>>, Acc) ->
-    decode_list(Tail, [Entry|Acc]).
+decode_list(<<Length:24/integer-unsigned-little, Entry:Length/binary, Tail/binary>>, Acc) ->
+    decode_list(Tail, [Entry|Acc]);
+decode_list(_, _Acc) ->
+    {error, bad_chunk_encoding}.
+
