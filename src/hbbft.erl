@@ -57,6 +57,15 @@
 -type rbc_wrapped_output() :: hbbft_utils:unicast({{acs, non_neg_integer()}, {{rbc, non_neg_integer()}, hbbft_rbc:val_msg()}}) | hbbft_utils:multicast({{acs, non_neg_integer()}, {{rbc, non_neg_integer()}, hbbft_rbc:echo_msg() | hbbft_rbc:ready_msg()}}).
 -type bba_wrapped_output() :: hbbft_utils:multicast({{acs, non_neg_integer()}, hbbft_acs:bba_msg()}).
 
+-if(?OTP_RELEASE > 22).
+%% Ericsson why do you hate us so?
+-define(ENCRYPT(Key, IV, AAD, PlainText, TagLength), crypto:crypto_one_time_aead(aes_256_gcm, Key, IV, PlainText, AAD, TagLength, true)).
+-define(DECRYPT(Key, IV, AAD, CipherText, Tag), crypto:crypto_one_time_aead(aes_256_gcm, Key, IV, CipherText, AAD, Tag, false)).
+-else.
+-define(ENCRYPT(Key, IV, AAD, PlainText, TagLength), crypto:block_encrypt(aes_gcm, Key, IV, {AAD, PlainText, TagLength})).
+-define(DECRYPT(Key, IV, AAD, CipherText, Tag), crypto:block_decrypt(aes_gcm, Key, IV, {AAD, CipherText, Tag})).
+-endif.
+
 -spec have_key(hbbft_data()) -> boolean().
 have_key(#hbbft_data{secret_key = Key}) ->
     %% we don't have a key if it's undefined
@@ -434,7 +443,7 @@ encrypt(PK, Bin) ->
     EncryptedKeyBin = tpke_pubkey:ciphertext_to_binary(EncryptedKey),
     %% encrypt the bundle with AES-GCM and put the IV and the encrypted key in the Additional Authenticated Data (AAD)
     AAD = <<IV:16/binary, (byte_size(EncryptedKeyBin)):16/integer-unsigned, EncryptedKeyBin/binary>>,
-    {CipherText, CipherTag} = crypto:block_encrypt(aes_gcm, Key, IV, {AAD, Bin}),
+    {CipherText, CipherTag} = ?ENCRYPT(Key, IV, AAD, Bin, 16),
     %% assemble a final binary packet
     <<AAD/binary, CipherTag:16/binary, CipherText/binary>>.
 
@@ -451,7 +460,7 @@ get_encrypted_key(SK, <<_IV:16/binary, EncKeySize:16/integer-unsigned, EncKey:En
 -spec decrypt(binary(), binary()) -> binary() | error.
 decrypt(Key, Bin) ->
     <<IV:16/binary, EncKeySize:16/integer-unsigned, EncKey:EncKeySize/binary, Tag:16/binary, CipherText/binary>> = Bin,
-    crypto:block_decrypt(aes_gcm, Key, IV, {<<IV:16/binary, EncKeySize:16/integer-unsigned, EncKey:(EncKeySize)/binary>>, CipherText, Tag}).
+    ?DECRYPT(Key, IV, <<IV:16/binary, EncKeySize:16/integer-unsigned, EncKey:(EncKeySize)/binary>>, CipherText, Tag).
 
 -spec serialize(hbbft_data()) -> {#{atom() => binary() | map()},
                                   tpke_privkey:privkey_serialized() | tpke_privkey:privkey()}.
