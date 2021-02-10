@@ -271,7 +271,7 @@ start_on_demand_test(Config) ->
     %% feed the badgers some msgs
     lists:foreach(fun(Msg) ->
                           Destinations = hbbft_test_utils:random_n(rand:uniform(length(RemainingWorkers)), RemainingWorkers),
-                          io:format("destinations ~p~n", [Destinations]),
+                          ct:log("destinations ~p~n", [Destinations]),
                           [ok = hbbft_relcast_worker:submit_transaction(Msg, D) || D <- Destinations]
                   end, Msgs),
 
@@ -310,7 +310,7 @@ start_on_demand_test(Config) ->
                                       end, Workers)),
     1 = sets:size(Chains),
     [Chain] = sets:to_list(Chains),
-    io:format("chain is of height ~p~n", [length(Chain)]),
+    ct:log("chain is of height ~p~n", [length(Chain)]),
     %% verify they are cryptographically linked
     true = hbbft_relcast_worker:verify_chain(Chain, PubKey),
     %% check all the transactions are unique
@@ -319,7 +319,7 @@ start_on_demand_test(Config) ->
     true = length(BlockTxns) == sets:size(sets:from_list(BlockTxns)),
     %% check they're all members of the original message list
     true = sets:is_subset(sets:from_list(BlockTxns), sets:from_list([KnownMsg | Msgs])),
-    io:format("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
+    ct:log("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
     [gen_server:stop(W) || W <- Workers],
     ok.
 
