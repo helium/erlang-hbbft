@@ -31,7 +31,7 @@ end_per_suite(_Config) ->
 
 init_per_testcase(_, Config) ->
     eprof:start_profiling([self()]),
-    N = list_to_integer(os:getenv("N", "34")),
+    N = list_to_integer(os:getenv("N", "10")), % N > 25 runs for minutes.
     F = N div 4,
     Module = hbbft_acs,
     {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
