@@ -4,7 +4,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("relcast/include/fakecast.hrl").
 
--export([all/0, init_per_testcase/2, end_per_testcase/2]).
+-export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
 -export([
          init_test/1,
          one_dead_test/1,
@@ -22,7 +22,15 @@ all() ->
      fakecast_test
     ].
 
+init_per_suite(Config) ->
+    {ok, _} = eprof:start(),
+    Config.
+
+end_per_suite(_Config) ->
+  ok.
+
 init_per_testcase(_, Config) ->
+    eprof:start_profiling([self()]),
     N = list_to_integer(os:getenv("N", "34")),
     F = N div 4,
     Module = hbbft_acs,
@@ -31,6 +39,8 @@ init_per_testcase(_, Config) ->
     [{n, N}, {f, F}, {module, Module}, {privatekeys, PrivateKeys} | Config].
 
 end_per_testcase(_, _Config) ->
+    eprof:stop_profiling(),
+    eprof:analyze(total),
     ok.
 
 init_test(Config) ->
