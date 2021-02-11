@@ -2,6 +2,13 @@
 
 -export([do_send_outer/4, shuffle/1, random_n/2, enumerate/1, merge_replies/3]).
 
+% TODO Type of Acc elements
+% TODO Type of States elements
+% TODO Type of Results elements
+-spec do_send_outer(Module :: atom(), Results :: list(), States, Acc) ->
+    {States, Acc}
+      when Acc :: sets:set(tuple()),
+           States :: list().
 do_send_outer(_Mod, [], States, Acc) ->
     {States, Acc};
 do_send_outer(Mod, [{result, {Id, Result}} | T], Pids, Acc) ->
