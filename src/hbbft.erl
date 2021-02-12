@@ -216,14 +216,22 @@ buf(_Data=#hbbft_data{buf = Buf}) ->
 buf(Buf, Data) ->
     Data#hbbft_data{buf=Buf}.
 
--spec handle_msg(hbbft_data(), non_neg_integer(), acs_msg() | dec_msg() | sign_msg()) -> {hbbft_data(), ok |
-                                                                                          defer |
-                                                                                          {send, [hbbft_utils:multicast(dec_msg() |
-                                                                                                                        sign_msg()) |
-                                                                                                  rbc_wrapped_output() |
-                                                                                                  bba_wrapped_output()]} |
-                                                                                          {result, {transactions, list(), [binary()]}} |
-                                                                                          {result, {signature, binary()}}} | ignore.
+-spec handle_msg(State, J :: non_neg_integer(), Msg) ->
+    {State, Next} | ignore
+      when State :: hbbft_data(),
+           Msg :: acs_msg() | dec_msg() | sign_msg(),
+           Next
+           :: ok
+           | defer
+           | {send, [NextMsg]}
+           | {result, Result},
+           NextMsg
+           :: hbbft_utils:multicast(dec_msg() | sign_msg())
+           | rbc_wrapped_output()
+           | bba_wrapped_output(),
+           Result
+           :: {signature, binary()}
+           | {transactions, list(), [binary()]}.
 handle_msg(Data = #hbbft_data{round=R}, _J, {{acs, R2}, _ACSMsg}) when R2 > R ->
     %% ACS requested we defer this message for now
     {Data, defer};
