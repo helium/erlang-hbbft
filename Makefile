@@ -12,7 +12,7 @@ cover:
 	$(REBAR) cover
 
 test: compile
-	$(REBAR) as test do eunit,ct
+	$(REBAR) as test do dialyzer,eunit,ct
 
 typecheck:
 	$(REBAR) dialyzer

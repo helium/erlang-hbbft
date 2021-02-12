@@ -46,7 +46,7 @@ set_filter(Fun, Pid) when is_function(Fun) ->
 
 bba_filter(ID) ->
     fun(I, {{acs,_},{{bba, I}, _}}=Msg) when I == ID ->
-            io:format("~p filtering ~p~n", [node(), Msg]),
+            ct:log("~p filtering ~p~n", [node(), Msg]),
             false;
        (_, _) -> true
     end.
@@ -54,7 +54,7 @@ bba_filter(ID) ->
 verify_chain([], _) ->
     true;
 verify_chain([G], PubKey) ->
-    io:format("verifying genesis block~n"),
+    ct:log("verifying genesis block~n"),
     %% genesis block has no prev hash
     case G#block.prev_hash == <<>> of
         true ->
@@ -63,15 +63,15 @@ verify_chain([G], PubKey) ->
             Signature = tpke_pubkey:deserialize_element(PubKey, G#block.signature),
             tpke_pubkey:verify_signature(PubKey, Signature, HM);
         false ->
-            io:format("no genesis block~n"),
+            ct:log("no genesis block~n"),
             false
     end;
 verify_chain(Chain, PubKey) ->
-    io:format("Chain verification depth ~p~n", [length(Chain)]),
+    ct:log("Chain verification depth ~p~n", [length(Chain)]),
     case verify_block_fit(Chain, PubKey) of
         true -> verify_chain(tl(Chain), PubKey);
         false ->
-            io:format("bad signature~n"),
+            ct:log("bad signature~n"),
             false
     end.
 
@@ -87,11 +87,11 @@ verify_block_fit([A, B | _], PubKey) ->
                 true ->
                     true;
                 false ->
-                    io:format("bad signature~n"),
+                    ct:log("bad signature~n"),
                     false
             end;
         false ->
-            io:format("parent hash mismatch ~p ~p~n", [A#block.prev_hash, hash_block(B)]),
+            ct:log("parent hash mismatch ~p ~p~n", [A#block.prev_hash, hash_block(B)]),
             false
     end.
 
@@ -119,7 +119,7 @@ handle_call(status, _From, State  = #state{hbbft=HBBFT, sk=SK}) ->
 handle_call({set_filter, Fun}, _From, State) ->
     {reply, ok, State#state{filter=Fun}};
 handle_call(Msg, _From, State) ->
-    io:format("unhandled msg ~p~n", [Msg]),
+    ct:log("unhandled msg ~p~n", [Msg]),
     {reply, ok, State}.
 
 handle_cast({hbbft, PeerID, Msg}, State = #state{hbbft=HBBFT, sk=SK, filter=Filter}) ->
@@ -139,29 +139,29 @@ handle_cast({hbbft, PeerID, Msg}, State = #state{hbbft=HBBFT, sk=SK, filter=Filt
 handle_cast({block, NewBlock}, State=#state{sk=SK, hbbft=HBBFT}) ->
     case lists:member(NewBlock, State#state.blocks) of
         false ->
-            io:format("XXXXXXXX~n"),
+            ct:log("XXXXXXXX~n"),
             %% a new block, check if it fits on our chain
             case verify_block_fit([NewBlock|State#state.blocks], tpke_privkey:public_key(SK)) of
                 true ->
                     %% advance to the next round
-                    io:format("~p skipping to next round~n", [self()]),
+                    ct:log("~p skipping to next round~n", [self()]),
                     %% remove any transactions we have from our queue (drop the signature messages, they're not needed)
                     {NewHBBFT, _} = hbbft:finalize_round(maybe_deserialize_hbbft(HBBFT, SK), NewBlock#block.transactions, term_to_binary(NewBlock)),
                     NewState = dispatch(hbbft:next_round(maybe_deserialize_hbbft(NewHBBFT, SK)), State#state{blocks=[NewBlock | State#state.blocks]}),
                     {noreply, NewState#state{tempblock=undefined}};
                 false ->
-                    io:format("invalid block proposed~n"),
+                    ct:log("invalid block proposed~n"),
                     {noreply, State}
             end;
         true ->
             {noreply, State}
     end;
 handle_cast(Msg, State) ->
-    io:format("unhandled msg ~p~n", [Msg]),
+    ct:log("unhandled msg ~p~n", [Msg]),
     {noreply, State}.
 
 handle_info(Msg, State) ->
-    io:format("unhandled msg ~p~n", [Msg]),
+    ct:log("unhandled msg ~p~n", [Msg]),
     {noreply, State}.
 
 dispatch({NewHBBFT, {send, ToSend}}, State) ->
@@ -184,20 +184,20 @@ dispatch({NewHBBFT, {result, {signature, Sig}}}, State = #state{tempblock=NewBlo
 dispatch({NewHBBFT, ok}, State) ->
     State#state{hbbft=maybe_serialize_HBBFT(NewHBBFT, State#state.to_serialize)};
 dispatch({NewHBBFT, Other}, State) ->
-    io:format("~p UNHANDLED ~p~n", [self(), Other]),
+    ct:log("~p UNHANDLED ~p~n", [self(), Other]),
     State#state{hbbft=maybe_serialize_HBBFT(NewHBBFT, State#state.to_serialize)};
 dispatch(Other, State) ->
-    io:format("~p UNHANDLED2 ~p~n", [self(), Other]),
+    ct:log("~p UNHANDLED2 ~p~n", [self(), Other]),
     State.
 
 do_send([], _) ->
     ok;
 do_send([{unicast, Dest, Msg}|T], State) ->
-    io:format("~p unicasting ~p to ~p~n", [State#state.id, Msg, global:whereis_name(name(Dest))]),
+    ct:log("~p unicasting ~p to ~p~n", [State#state.id, Msg, global:whereis_name(name(Dest))]),
     gen_server:cast({global, name(Dest)}, {hbbft, State#state.id, Msg}),
     do_send(T, State);
 do_send([{multicast, Msg}|T], State) ->
-    io:format("~p multicasting ~p to ~p~n", [State#state.id, Msg, [global:whereis_name(name(Dest)) || Dest <- lists:seq(0, State#state.n - 1)]]),
+    ct:log("~p multicasting ~p to ~p~n", [State#state.id, Msg, [global:whereis_name(name(Dest)) || Dest <- lists:seq(0, State#state.n - 1)]]),
     [ gen_server:cast({global, name(Dest)}, {hbbft, State#state.id, Msg}) || Dest <- lists:seq(0, State#state.n - 1)],
     do_send(T, State).
 

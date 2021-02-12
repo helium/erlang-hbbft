@@ -26,13 +26,13 @@ get_results(Pid) ->
 
 init([N, F, Id, Leader]) ->
     RBC = hbbft_rbc:init(N, F, Id, Leader),
-    io:format("RBC: ~p~n", [RBC]),
+    ct:log("RBC: ~p~n", [RBC]),
     {ok, #state{rbc=RBC, n=N, id=Id, leader=Leader}}.
 
 handle_call(get_results, _From, State) ->
     {reply, State#state.result, State};
 handle_call(Msg, _from, State) ->
-    io:format("unhandled msg ~p~n", [Msg]),
+    ct:log("unhandled msg ~p~n", [Msg]),
     {reply, ok, State}.
 
 
@@ -43,11 +43,11 @@ handle_cast({rbc, PeerID, Msg}, State = #state{rbc=RBC}) ->
     NewState = dispatch(hbbft_rbc:handle_msg(RBC, PeerID, Msg), State),
     {noreply, NewState};
 handle_cast(Msg, State) ->
-    io:format("unhandled msg ~p~n", [Msg]),
+    ct:log("unhandled msg ~p~n", [Msg]),
     {noreply, State}.
 
 handle_info(Msg, State) ->
-    io:format("unhandled msg ~p~n", [Msg]),
+    ct:log("unhandled msg ~p~n", [Msg]),
     {noreply, State}.
 
 
@@ -70,10 +70,10 @@ dispatch({NewRBC, {result, Result}}, State) ->
 dispatch({NewRBC, ok}, State) ->
     State#state{rbc=NewRBC};
 dispatch({NewRBC, Other}, State) ->
-    io:format("UNHANDLED ~p~n", [Other]),
+    ct:log("UNHANDLED ~p~n", [Other]),
     State#state{rbc=NewRBC};
 dispatch(Other, State) ->
-    io:format("UNHANDLED2 ~p~n", [Other]),
+    ct:log("UNHANDLED2 ~p~n", [Other]),
     State.
 
 name(X) ->

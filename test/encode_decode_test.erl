@@ -11,15 +11,15 @@ encoded_decoded_equality_test() ->
     ?assert(encoded_decoded_equality_test(14, 4, crypto:strong_rand_bytes(1024))).
 
 encoded_decoded_equality_test(N, F, Msg) ->
-	%% io:format("Msg: ~p~n", [Msg]),
+	%% ct:log("Msg: ~p~n", [Msg]),
 	Threshold = N - 2*F,
-	%% io:format("Threshold: ~p~n", [Threshold]),
+	%% ct:log("Threshold: ~p~n", [Threshold]),
 	{ok, Sj} = erasure:encode(Threshold, N, Msg),
-	%% io:format("Sj: ~p~n", [Sj]),
+	%% ct:log("Sj: ~p~n", [Sj]),
 	Bits = random_n(Threshold, Sj),
-	%% io:format("Bits: ~p~n", [Bits]),
+	%% ct:log("Bits: ~p~n", [Bits]),
 	{ok, Bin} = erasure:decode(Threshold, N, Bits),
-	%% io:format("Bin: ~p~n", [Bin]),
+	%% ct:log("Bin: ~p~n", [Bin]),
 	Bin == Msg.
 
 %% helpers

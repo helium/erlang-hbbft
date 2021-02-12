@@ -55,7 +55,7 @@ init_test(Config) ->
     %% feed the badgers some msgs
     lists:foreach(fun(Msg) ->
                           Destinations = random_n(rand:uniform(N), Workers),
-                          io:format("destinations ~p~n", [Destinations]),
+                          ct:log("destinations ~p~n", [Destinations]),
                           [ok = hbbft_worker:submit_transaction(Msg, D) || D <- Destinations]
                   end, Msgs),
 
@@ -67,7 +67,7 @@ init_test(Config) ->
 
     1 = sets:size(Chains),
     [Chain] = sets:to_list(Chains),
-    io:format("chain is of height ~p~n", [length(Chain)]),
+    ct:log("chain is of height ~p~n", [length(Chain)]),
     %% verify they are cryptographically linked
     true = hbbft_worker:verify_chain(Chain, PubKey),
     %% check all the transactions are unique
@@ -75,7 +75,7 @@ init_test(Config) ->
     true = length(BlockTxns) == sets:size(sets:from_list(BlockTxns)),
     %% check they're all members of the original message list
     true = sets:is_subset(sets:from_list(BlockTxns), sets:from_list(Msgs)),
-    io:format("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
+    ct:log("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
     ok.
 
 one_actor_no_txns_test(Config) ->
@@ -229,7 +229,7 @@ start_on_demand_test(Config) ->
     %% feed the badgers some msgs
     lists:foreach(fun(Msg) ->
                           Destinations = random_n(rand:uniform(length(RemainingWorkers)), RemainingWorkers),
-                          io:format("destinations ~p~n", [Destinations]),
+                          ct:log("destinations ~p~n", [Destinations]),
                           [ok = hbbft_worker:submit_transaction(Msg, D) || D <- Destinations]
                   end, Msgs),
 
@@ -245,7 +245,7 @@ start_on_demand_test(Config) ->
 
     1 = sets:size(Chains),
     [Chain] = sets:to_list(Chains),
-    io:format("chain is of height ~p~n", [length(Chain)]),
+    ct:log("chain is of height ~p~n", [length(Chain)]),
     %% verify they are cryptographically linked
     true = hbbft_worker:verify_chain(Chain, PubKey),
     %% check all the transactions are unique
@@ -254,7 +254,7 @@ start_on_demand_test(Config) ->
     true = length(BlockTxns) == sets:size(sets:from_list(BlockTxns)),
     %% check they're all members of the original message list
     true = sets:is_subset(sets:from_list(BlockTxns), sets:from_list([KnownMsg | Msgs])),
-    io:format("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
+    ct:log("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
     ok.
 
 one_actor_wrong_key_test(Config) ->
@@ -275,7 +275,7 @@ one_actor_wrong_key_test(Config) ->
     %% feed the badgers some msgs
     lists:foreach(fun(Msg) ->
                           Destinations = random_n(rand:uniform(N), Workers),
-                          io:format("destinations ~p~n", [Destinations]),
+                          ct:log("destinations ~p~n", [Destinations]),
                           [ok = hbbft_worker:submit_transaction(Msg, D) || D <- Destinations]
                   end, Msgs),
 
@@ -289,7 +289,7 @@ one_actor_wrong_key_test(Config) ->
 
     1 = sets:size(Chains),
     [Chain] = sets:to_list(Chains),
-    io:format("chain is of height ~p~n", [length(Chain)]),
+    ct:log("chain is of height ~p~n", [length(Chain)]),
     %% verify they are cryptographically linked
     true = hbbft_worker:verify_chain(lists:reverse(Chain), PubKey),
     %% check all the transactions are unique
@@ -297,7 +297,7 @@ one_actor_wrong_key_test(Config) ->
     true = length(BlockTxns) == sets:size(sets:from_list(BlockTxns)),
     %% check they're all members of the original message list
     true = sets:is_subset(sets:from_list(BlockTxns), sets:from_list(Msgs)),
-    io:format("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
+    ct:log("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
     ok = Result,
     ok.
 
@@ -320,7 +320,7 @@ one_actor_corrupted_key_test(Config) ->
     %% feed the badgers some msgs
     lists:foreach(fun(Msg) ->
                           Destinations = random_n(rand:uniform(N), Workers),
-                          io:format("destinations ~p~n", [Destinations]),
+                          ct:log("destinations ~p~n", [Destinations]),
                           [ok = hbbft_worker:submit_transaction(Msg, D) || D <- Destinations]
                   end, Msgs),
 
@@ -332,7 +332,7 @@ one_actor_corrupted_key_test(Config) ->
 
     1 = sets:size(Chains),
     [Chain] = sets:to_list(Chains),
-    io:format("chain is of height ~p~n", [length(Chain)]),
+    ct:log("chain is of height ~p~n", [length(Chain)]),
     %% verify they are cryptographically linked
     true = hbbft_worker:verify_chain(Chain, PubKey),
     %% check all the transactions are unique
@@ -340,7 +340,7 @@ one_actor_corrupted_key_test(Config) ->
     true = length(BlockTxns) == sets:size(sets:from_list(BlockTxns)),
     %% check they're all members of the original message list
     true = sets:is_subset(sets:from_list(BlockTxns), sets:from_list(Msgs)),
-    io:format("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
+    ct:log("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
     ok.
 
 

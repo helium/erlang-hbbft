@@ -50,7 +50,7 @@ set_filter(Fun, Pid) when is_function(Fun) ->
 
 bba_filter(ID) ->
     fun(I, {{acs,_},{{bba, I}, _}}=Msg) when I == ID ->
-            io:format("~p filtering ~p~n", [node(), Msg]),
+            ct:log("~p filtering ~p~n", [node(), Msg]),
             false;
        (_, _) -> true
     end.
@@ -83,7 +83,7 @@ handle_call(status, From, State) ->
 handle_call({set_filter, Fun}, _From, State) ->
     {reply, ok, State#state{filter=Fun}};
 handle_call(Msg, _From, State) ->
-    io:format("unhandled msg ~p~n", [Msg]),
+    ct:log("unhandled msg ~p~n", [Msg]),
     {reply, ok, State}.
 
 handle_cast({hbbft, FromId, Seq, Msg}, State = #state{filter=Filter}) ->
@@ -113,14 +113,14 @@ handle_cast({block, Block, SerializedPubKey}, State) ->
                                                  })
                     };
                 false ->
-                    io:format("invalid block proposed~n"),
+                    ct:log("invalid block proposed~n"),
                     {noreply, State}
             end;
         true ->
             {noreply, State}
     end;
 handle_cast(Msg, State) ->
-    io:format("unhandled msg ~p~n", [Msg]),
+    ct:log("unhandled msg ~p~n", [Msg]),
     {noreply, State}.
 
 handle_info(inbound_tick, State = #state{relcast=Store}) ->
@@ -163,7 +163,7 @@ handle_info({signature, Sig, Pubkey}, State=#state{tempblock=TempBlock, peers=Pe
             {noreply, State}
     end;
 handle_info(Msg, State) ->
-    io:format("unhandled msg ~p~n", [Msg]),
+    ct:log("unhandled msg ~p~n", [Msg]),
     {noreply, State}.
 
 terminate(Reason, State) ->
@@ -217,18 +217,18 @@ verify_block_fit([A, B | _], PubKey) ->
                 true ->
                     true;
                 false ->
-                    io:format("bad signature~n"),
+                    ct:log("bad signature~n"),
                     false
             end;
         false ->
-            io:format("parent hash mismatch ~p ~p~n", [A#block.prev_hash, hash_block(B)]),
+            ct:log("parent hash mismatch ~p ~p~n", [A#block.prev_hash, hash_block(B)]),
             false
     end.
 
 verify_chain([], _) ->
     true;
 verify_chain([G], PubKey) ->
-    io:format("verifying genesis block~n"),
+    ct:log("verifying genesis block~n"),
     %% genesis block has no prev hash
     case G#block.prev_hash == <<>> of
         true ->
@@ -237,15 +237,15 @@ verify_chain([G], PubKey) ->
             Signature = tpke_pubkey:deserialize_element(PubKey, G#block.signature),
             tpke_pubkey:verify_signature(PubKey, Signature, HM);
         false ->
-            io:format("no genesis block~n"),
+            ct:log("no genesis block~n"),
             false
     end;
 verify_chain(Chain, PubKey) ->
-    io:format("Chain verification depth ~p~n", [length(Chain)]),
+    ct:log("Chain verification depth ~p~n", [length(Chain)]),
     case verify_block_fit(Chain, PubKey) of
         true -> verify_chain(tl(Chain), PubKey);
         false ->
-            io:format("bad signature~n"),
+            ct:log("bad signature~n"),
             false
     end.
 
