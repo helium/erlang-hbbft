@@ -407,6 +407,7 @@ handle_msg(Data = #hbbft_data{round=R, thingtosign=ThingToSign}, J, {sign, R, Bi
             ignore
     end;
 handle_msg(_Data, _J, _Msg) ->
+    % TODO Consider either crashing or returning {ok, _} | {error, _} result.
     ignore.
 
 -spec maybe_start_acs(hbbft_data()) -> {hbbft_data(), ok | {send, [rbc_wrapped_output()]}}.
