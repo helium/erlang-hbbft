@@ -22,8 +22,16 @@
          is_serialized/1]).
 
 -ifdef(TEST).
--export([get_encrypted_key/2]).
+-export([
+         encode_list/1,
+         get_encrypted_key/2,
+         abstraction_breaking_set_acs_results/2,
+         abstraction_breaking_set_enc_keys/2
+        ]).
 -endif.
+
+-type acs_results() :: [{non_neg_integer(), binary()}].
+-type enc_keys() :: #{non_neg_integer() => tpke_pubkey:ciphertext()}.
 
 -record(hbbft_data, {
           batch_size :: pos_integer(),
@@ -38,8 +46,8 @@
           acs_init = false :: boolean(),
           sent_txns = false :: boolean(),
           sent_sig = false :: boolean(),
-          acs_results = [] :: [{non_neg_integer(), binary()}],
-          enc_keys = #{} :: #{non_neg_integer() => tpke_pubkey:ciphertext()}, %% will only ever hold verified ciphertexts
+          acs_results = [] :: acs_results(),
+          enc_keys = #{} :: enc_keys(), %% will only ever hold verified ciphertexts
           dec_shares = #{} :: #{{non_neg_integer(), non_neg_integer()} => {boolean() | undefined, {non_neg_integer(), erlang_pbc:element()}}},
           decrypted = #{} :: #{non_neg_integer() => [binary()]},
           sig_shares = #{} :: #{non_neg_integer() => {non_neg_integer(), erlang_pbc:element()}},
@@ -110,6 +118,20 @@ init(SK, N, F, J, BatchSize, MaxBuf, StampFun, Round, Buf) ->
                 max_buf=MaxBuf,
                 stampfun=StampFun}.
 
+-ifdef(TEST).
+-spec abstraction_breaking_set_acs_results(State, acs_results()) ->
+    State
+      when State :: hbbft_data().
+abstraction_breaking_set_acs_results(State, AcsResults) ->
+    State#hbbft_data{acs_results=AcsResults}.
+
+-spec abstraction_breaking_set_enc_keys(State, enc_keys()) ->
+    State
+      when State :: hbbft_data().
+abstraction_breaking_set_enc_keys(State, EncKeys) ->
+    State#hbbft_data{enc_keys=EncKeys}.
+-endif.
+
 
 -spec get_stamp_fun(hbbft_data()) -> {atom(), atom(), list()} | undefined.
 get_stamp_fun(#hbbft_data{stampfun=S}) ->
@@ -131,7 +153,7 @@ start_on_demand(Data = #hbbft_data{buf=Buf, j=J, n=N, secret_key=SK, batch_size=
                 {M, F, A} -> erlang:apply(M, F, A)
             end,
     true = is_binary(Stamp),
-    EncX = encrypt(tpke_privkey:public_key(SK), encode_list([Stamp|Proposed], [])),
+    EncX = encrypt(tpke_privkey:public_key(SK), encode_list([Stamp|Proposed])),
     %% time to kick off a round
     {NewACSState, {send, ACSResponse}} = hbbft_acs:input(Data#hbbft_data.acs, EncX),
     %% add this to acs set in data and send out the ACS response(s)
@@ -354,7 +376,20 @@ handle_msg(Data = #hbbft_data{round=R}, J, {dec, R, I, Share}) ->
                                     check_completion(Data#hbbft_data{dec_shares=NewShares, decrypted=NewDecrypted,
                                                                     failed_decrypt=[I|Data#hbbft_data.failed_decrypt]});
                                 Decrypted ->
+                                    #hbbft_data{batch_size=B, n=N} = Data,
                                     case decode_list(Decrypted, []) of
+                                        [_Stamp | Transactions]
+                                          when length(Transactions) > (B div N) ->
+                                            % Batch exceeds agreed-upon size.
+                                            % Ignoring this proposal.
+                                            check_completion(
+                                                Data#hbbft_data{
+                                                    dec_shares =
+                                                        NewShares,
+                                                    decrypted =
+                                                        maps:put(I, [], Data#hbbft_data.decrypted)
+                                                }
+                                            );
                                         [Stamp | Transactions] ->
                                             NewDecrypted = maps:put(I, Transactions, Data#hbbft_data.decrypted),
                                             Stamps = [{I, Stamp} | Data#hbbft_data.stamps],
@@ -425,7 +460,7 @@ maybe_start_acs(Data = #hbbft_data{n=N, j=J, secret_key=SK, batch_size=BatchSize
                 {M, F, A} -> erlang:apply(M, F, A)
             end,
             true = is_binary(Stamp),
-            EncX = encrypt(tpke_privkey:public_key(SK), encode_list([Stamp|Proposed], [])),
+            EncX = encrypt(tpke_privkey:public_key(SK), encode_list([Stamp|Proposed])),
             %% time to kick off a round
             {NewACSState, {send, ACSResponse}} = hbbft_acs:input(Data#hbbft_data.acs, EncX),
             %% add this to acs set in data and send out the ACS response(s)
@@ -647,6 +682,9 @@ combine_shares(F, SK, SharesForThisBundle, EncKey) ->
             undefined
     end.
 
+encode_list(L) ->
+    encode_list(L, []).
+
 encode_list([], Acc) ->
     list_to_binary(lists:reverse(Acc));
 encode_list([H|T], Acc) ->
@@ -664,4 +702,3 @@ decode_list(<<Length:24/integer-unsigned-little, Entry:Length/binary, Tail/binar
     decode_list(Tail, [Entry|Acc]);
 decode_list(_, _Acc) ->
     {error, bad_chunk_encoding}.
-
