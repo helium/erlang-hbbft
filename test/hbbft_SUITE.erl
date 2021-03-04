@@ -15,6 +15,8 @@
          start_on_demand_test/1,
          one_actor_wrong_key_test/1,
          one_actor_corrupted_key_test/1,
+         one_actor_oversized_batch_test/1,
+         batch_size_limit_minimal_test/1,
          initial_fakecast_test/1
         ]).
 
@@ -29,6 +31,8 @@ all() ->
      start_on_demand_test,
      one_actor_wrong_key_test,
      one_actor_corrupted_key_test,
+     one_actor_oversized_batch_test,
+     batch_size_limit_minimal_test,
      initial_fakecast_test
     ].
 
@@ -343,6 +347,95 @@ one_actor_corrupted_key_test(Config) ->
     ct:log("chain contains ~p distinct transactions~n", [length(BlockTxns)]),
     ok.
 
+one_actor_oversized_batch_test(Config) ->
+    N = proplists:get_value(n, Config),
+    F = proplists:get_value(f, Config),
+    B = proplists:get_value(batchsize, Config),
+    PK = proplists:get_value(pubkey, Config),
+    [SK1 | SKs] = proplists:get_value(privatekeys, Config),
+
+    BadWorker = % with an oversized batch parameter
+        ok(hbbft_worker:start_link(N, F, 0, tpke_privkey:serialize(SK1), B + 1, false)),
+    GoodWorkers =
+        [ok(hbbft_worker:start_link(N, F, I + 1, tpke_privkey:serialize(SKi), B, false))
+        || {I, SKi} <- enumerate(SKs)
+        ],
+
+    % Each node needs at least B/N transactions.
+    GoodTxns = [list_to_binary("GOOD_" ++ integer_to_list(I)) || I <- lists:seq(1, B * N)],
+    BadTxns  = [list_to_binary("BAD_"  ++ integer_to_list(I)) || I <- lists:seq(1, B)],
+
+    % Submit transactions:
+    lists:foreach(
+      fun (T) -> ok = hbbft_worker:submit_transaction(T, BadWorker) end,
+      BadTxns),
+    lists:foreach(
+      fun (T) ->
+              Destinations = random_n(rand:uniform(N), GoodWorkers),
+              [ok = hbbft_worker:submit_transaction(T, D) || D <- Destinations]
+      end,
+      GoodTxns),
+
+    % Wait for all the worker's mailboxes to settle:
+    ok = wait_for_chains([BadWorker | GoodWorkers], 2),
+
+    % Wait for the chains to converge:
+    Chains = get_common_chain(GoodWorkers),
+    1 = sets:size(Chains),
+    [Chain] = sets:to_list(Chains),
+    CommittedTxns =
+        lists:flatten([hbbft_worker:block_transactions(Block) || Block <- Chain]),
+
+    % Transactions are cryptographically linked:
+    ?assertMatch(true, hbbft_worker:verify_chain(Chain, PK)),
+
+    % Transactions are unique:
+    ?assertMatch([], CommittedTxns -- lists:usort(CommittedTxns)),
+
+    % Finally, quod erat demonstrandum - that
+    % only the expected transactions were committed:
+    ?assertMatch([], CommittedTxns -- GoodTxns),
+    ok.
+
+batch_size_limit_minimal_test(_) ->
+    % Same test goal as one_actor_oversized_batch_test, but
+    % the absolute minimal to test the state transition.
+    N = 1,
+    F = 0,
+    BatchSize = 1,
+    {ok, Dealer} = dealer:new(N, F + 1, 'SS512'),
+    {ok, {PK, [SK | _]}} = dealer:deal(Dealer),
+
+    % Protocol begins.
+    ProtocolInstanceId = 0,
+    State_0 = hbbft:init(SK, N, F, ProtocolInstanceId, BatchSize, infinity),
+
+    % Transactions submitted. One more than max batch size.
+    Buf = [list_to_binary(integer_to_list(Txn)) || Txn <- lists:seq(1, BatchSize + 1)],
+
+    % Pretending ACS happened here.
+    Stamp = <<"trust-me-im-a-stamp">>,
+    Enc = hbbft:encrypt(PK, hbbft:encode_list([Stamp | Buf])),
+    {ok, EncKey} = hbbft:get_encrypted_key(SK, Enc),
+    AcsInstanceId = 0, % E?
+    State_1 = hbbft:abstraction_breaking_set_acs_results(State_0, [{AcsInstanceId, Enc}]),
+    State_2 = hbbft:abstraction_breaking_set_enc_keys(State_1, #{AcsInstanceId => EncKey}),
+
+    % Decoding transactions from ACS, which we expect to be rejectected.
+    {State_3, Result} =
+        hbbft:handle_msg(
+            State_2,
+            ProtocolInstanceId,
+            {
+                dec,
+                hbbft:round(State_2),
+                AcsInstanceId,
+                hbbft_utils:share_to_binary(tpke_privkey:decrypt_share(SK, EncKey))
+            }
+        ),
+    ?assertMatch({result, {transactions, [], []}}, Result),
+    ?assertMatch(#{sent_txns := true}, hbbft:status(State_3)),
+    ok.
 
 -record(state,
         {
@@ -418,6 +511,8 @@ initial_fakecast_test(Config) ->
 
 %% helper functions
 
+ok({ok, X}) -> X.
+
 enumerate(List) ->
     lists:zip(lists:seq(0, length(List) - 1), List).
 
@@ -465,5 +560,3 @@ get_common_chain(Workers) ->
 
     %% chains are stored in reverse, so we have to reverse them to get the first N blocks and then re-reverse them to restore expected ordering
     sets:from_list(lists:map(fun(C) -> lists:reverse(lists:sublist(lists:reverse(C), ShortestChainLen)) end, AllChains)).
-
-
