@@ -72,11 +72,12 @@ simple_test(Config) ->
                             end, Nodes),
 
     %% start a hbbft_relcast_worker on each node
-    Workers = [{Node, ct_rpc:call(Node,
-                               hbbft_relcast_worker,
-                               start_link,
-                               [[{id, I}, {sk, tpke_privkey:serialize(SK)}, {n, N}, {f, F}, {batchsize, BatchSize}, {data_dir, DataDir}]]
-                              )} || {I, {Node, SK}} <- hbbft_test_utils:enumerate(NodesSKs)],
+    Workers = [{Node, rpc:block_call(
+                        Node,
+                        hbbft_relcast_worker,
+                        start_link,
+                        [[{id, I}, {sk, tpke_privkey:serialize(SK)}, {n, N}, {f, F}, {batchsize, BatchSize}, {data_dir, DataDir}]]
+                       )} || {I, {Node, SK}} <- hbbft_test_utils:enumerate(NodesSKs)],
     ok = global:sync(),
 
     [ link(W) || {_, {ok, W}} <- Workers ],
@@ -177,11 +178,12 @@ partition_test_(Config, Filter) ->
     ct:pal("Partitioning ~p from ~p", [FirstNode, PartitionedNodes]),
 
     %% start a hbbft_relcast_worker on each node
-    Workers = [{Node, ct_rpc:call(Node,
-                               hbbft_relcast_worker,
-                               start_link,
-                               [[{id, I}, {sk, tpke_privkey:serialize(SK)}, {n, N}, {f, F}, {batchsize, BatchSize}, {data_dir, DataDir}]]
-                              )} || {I, {Node, SK}} <- hbbft_test_utils:enumerate(NodesSKs)],
+    Workers = [{Node, rpc:block_call(
+                        Node,
+                        hbbft_relcast_worker,
+                        start_link,
+                        [[{id, I}, {sk, tpke_privkey:serialize(SK)}, {n, N}, {f, F}, {batchsize, BatchSize}, {data_dir, DataDir}]]
+                       )} || {I, {Node, SK}} <- hbbft_test_utils:enumerate(NodesSKs)],
     ok = global:sync(),
 
 
