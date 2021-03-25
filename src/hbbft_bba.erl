@@ -5,7 +5,7 @@
 -record(bba_data, {
           state = init :: init | waiting | done,
           round = 0 :: non_neg_integer(),
-          secret_key :: tpke_privkey:privkey(),
+          secret_key :: tc_key_share:tc_key_share(),
           coin :: undefined | hbbft_cc:cc_data(),
           est :: undefined | 0 | 1,
           output :: undefined | 0 | 1,
@@ -70,7 +70,7 @@ status(BBAData) ->
       bvals_broadcasted => vals(BBAData#bba_data.broadcasted)
      }.
 
--spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer()) -> bba_data().
+-spec init(tc_key_share:tc_key_share(), pos_integer(), non_neg_integer()) -> bba_data().
 init(SK, N, F) ->
     #bba_data{secret_key=SK, n=N, f=F}.
 
@@ -243,7 +243,7 @@ serialize(#bba_data{state=State,
                          broadcasted=Broadcasted,
                          bin_values=BinValues}.
 
--spec deserialize(bba_serialized_data(), tpke_privkey:privkey()) -> bba_data().
+-spec deserialize(bba_serialized_data(), tc_key_share:tc_key_share()) -> bba_data().
 deserialize(#bba_serialized_data{state=State,
                                  round=Round,
                                  coin=Coin,
@@ -356,7 +356,10 @@ check(N, F, ToCheck, Map, Terms, Fun) ->
 maybe_init_coin(Data) ->
     case Data#bba_data.coin of
         undefined ->
-            hbbft_cc:init(Data#bba_data.secret_key, term_to_binary({Data#bba_data.round}), Data#bba_data.n, Data#bba_data.f);
+            hbbft_cc:init(Data#bba_data.secret_key,
+                          term_to_binary({Data#bba_data.round}),
+                          Data#bba_data.n,
+                          Data#bba_data.f);
         C -> C
     end.
 

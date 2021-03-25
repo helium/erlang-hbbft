@@ -69,7 +69,7 @@ status(ACSData) ->
       rbc => maps:map(fun(_K, #rbc_state{rbc_data=RBCData, result=R}) -> #{rbc => hbbft_rbc:status(RBCData), result => is_binary(R)} end, ACSData#acs_data.rbc),
       bba => maps:map(fun(_K, #bba_state{bba_data=BBAData, result=R, input=I}) -> #{bba => hbbft_bba:status(BBAData), result => R, input => I} end, ACSData#acs_data.bba)}.
 
--spec init(tpke_privkey:privkey(), pos_integer(), non_neg_integer(), non_neg_integer()) -> acs_data().
+-spec init(tc_key_share:tc_key_share(), pos_integer(), non_neg_integer(), non_neg_integer()) -> acs_data().
 init(SK, N, F, J) ->
     %% instantiate all the RBCs
     %% J=leader, I=Pid
@@ -261,7 +261,7 @@ serialize(#acs_data{done=Done, n=N, f=F, j=J, rbc=RBCMap, bba=BBAMap}) ->
     M1#{rbc => serialize_state(RBCMap, rbc),
         bba => serialize_state(BBAMap, bba)}.
 
--spec deserialize(acs_serialized_data() | #{}, tpke_privkey:privkey()) -> acs_data().
+-spec deserialize(acs_serialized_data() | #{}, tc_key_share:tc_key_share()) -> acs_data().
 deserialize(#acs_serialized_data{done=Done, n=N, f=F, j=J, rbc=RBCMap, bba=BBAMap}, SK) ->
     #acs_data{done=Done, n=N, f=F, j=J,
               rbc=deserialize_state(RBCMap, rbc),
@@ -292,7 +292,7 @@ bba_k(K) ->
 deserialize_state(State, rbc) ->
     maps:fold(fun(K, V, M) -> M#{deser_rbc_key(K) => deserialize_rbc_state(V)} end, #{}, State).
 
--spec deserialize_state(#{non_neg_integer() => bba_serialized_state()}, bba, tpke_privkey:privkey()) -> #{}.
+-spec deserialize_state(#{non_neg_integer() => bba_serialized_state()}, bba, tc_key_share:tc_key_share()) -> #{}.
 deserialize_state(State, bba, SK) ->
     maps:fold(fun(K, V, M) -> M#{deser_bba_key(K) => deserialize_bba_state(V, SK)} end, #{}, State).
 
@@ -326,7 +326,7 @@ serialize_bba_state(#bba_state{bba_data=BBAData, input=Input, result=Result}) ->
     term_to_binary(#bba_serialized_state{bba_data=hbbft_bba:serialize(BBAData), input=Input, result=Result},
                    [compressed]).
 
--spec deserialize_bba_state(bba_serialized_state() | #{}, tpke_privkey:privkey()) -> bba_state().
+-spec deserialize_bba_state(bba_serialized_state() | #{}, tc_key_share:tc_key_share()) -> bba_state().
 deserialize_bba_state(#bba_serialized_state{bba_data=BBAData, input=Input, result=Result}, SK) ->
     #bba_state{bba_data=hbbft_bba:deserialize(BBAData, SK), input=Input, result=Result};
 deserialize_bba_state(BinRec, SK) ->

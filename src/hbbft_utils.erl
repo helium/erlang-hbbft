@@ -5,18 +5,26 @@
 
 -export_type([unicast/1, multicast/1]).
 
--export([share_to_binary/1, binary_to_share/2, wrap/2, random_n/2, shuffle/1]).
+-export([sig_share_to_binary/1, binary_to_sig_share/1, dec_share_to_binary/1, binary_to_dec_share/1, wrap/2, random_n/2, shuffle/1]).
 
--spec share_to_binary(tpke_privkey:share()) -> binary().
-share_to_binary({ShareIdx, ShareElement}) ->
+sig_share_to_binary({ShareIdx, SigShare}) ->
     %% Assume less than 256 members in the consensus group
-    ShareBinary = erlang_pbc:element_to_binary(ShareElement),
+    ShareBinary = signature_share:serialize(SigShare),
     <<ShareIdx:8/integer-unsigned, ShareBinary/binary>>.
 
--spec binary_to_share(binary(), tpke_pubkey:pubkey()) -> tpke_privkey:share().
-binary_to_share(<<ShareIdx:8/integer-unsigned, ShareBinary/binary>>, PK) ->
-    ShareElement = tpke_pubkey:deserialize_element(PK, ShareBinary),
-    {ShareIdx, ShareElement}.
+binary_to_sig_share(<<ShareIdx:8/integer-unsigned, ShareBinary/binary>>) ->
+    SigShare = signature_share:deserialize(ShareBinary),
+    {ShareIdx, SigShare}.
+
+dec_share_to_binary({ShareIdx, SigShare}) ->
+    %% Assume less than 256 members in the consensus group
+    ShareBinary = decryption_share:serialize(SigShare),
+    <<ShareIdx:8/integer-unsigned, ShareBinary/binary>>.
+
+binary_to_dec_share(<<ShareIdx:8/integer-unsigned, ShareBinary/binary>>) ->
+    SigShare = decryption_share:deserialize(ShareBinary),
+    {ShareIdx, SigShare}.
+
 
 %% wrap a subprotocol's outbound messages with a protocol identifier
 -spec wrap(Tag :: atom() | {atom(), non_neg_integer()}, [{multicast, Msg :: any()} | {unicast, non_neg_integer(),  Msg :: any()}]) -> [{multicast, {Tag, Msg}} | {unicast, non_neg_integer(), {Tag, Msg}}].

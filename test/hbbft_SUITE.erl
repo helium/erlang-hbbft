@@ -37,13 +37,12 @@ all() ->
     ].
 
 init_per_testcase(_, Config) ->
-    N = 5,
+    N = 4,
     F = N div 4,
     Module = hbbft,
     BatchSize = 20,
-    {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
-    {ok, {PubKey, PrivateKeys}} = dealer:deal(Dealer),
-    [{n, N}, {f, F}, {batchsize, BatchSize}, {module, Module}, {pubkey, PubKey}, {privatekeys, PrivateKeys} | Config].
+    PrivateKeys = tc_key_share:deal(N, F),
+    [{n, N}, {f, F}, {batchsize, BatchSize}, {module, Module}, {privatekeys, PrivateKeys} | Config].
 
 end_per_testcase(_, _Config) ->
     ok.
@@ -52,9 +51,9 @@ init_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
     BatchSize = proplists:get_value(batchsize, Config),
-    PubKey = proplists:get_value(pubkey, Config),
     PrivateKeys = proplists:get_value(privatekeys, Config),
-    Workers = [ element(2, hbbft_worker:start_link(N, F, I, tpke_privkey:serialize(SK), BatchSize, false)) || {I, SK} <- enumerate(PrivateKeys) ],
+    ct:pal("privkeys ~p", [PrivateKeys]),
+    Workers = [ element(2, hbbft_worker:start_link(N, F, I, tc_key_share:serialize(SK), BatchSize, false)) || {I, SK} <- enumerate(PrivateKeys) ],
     Msgs = [ crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N*20)],
     %% feed the badgers some msgs
     lists:foreach(fun(Msg) ->
@@ -73,7 +72,7 @@ init_test(Config) ->
     [Chain] = sets:to_list(Chains),
     ct:log("chain is of height ~p~n", [length(Chain)]),
     %% verify they are cryptographically linked
-    true = hbbft_worker:verify_chain(Chain, PubKey),
+    true = hbbft_worker:verify_chain(Chain, hd(PrivateKeys)),
     %% check all the transactions are unique
     BlockTxns = lists:flatten([ hbbft_worker:block_transactions(B) || B <- Chain ]),
     true = length(BlockTxns) == sets:size(sets:from_list(BlockTxns)),

@@ -4,12 +4,12 @@
 
 -record(cc_data, {
           state = waiting :: waiting | done,
-          sk :: tpke_privkey:privkey(),
+          sk :: tc_key_share:tc_key_share(),
           %% Note: sid is assumed to be a unique nonce that serves as name of this common coin
-          sid :: erlang_pbc:element(),
+          sid :: binary(),
           n :: pos_integer(),
           f :: non_neg_integer(),
-          shares = maps:new() :: #{non_neg_integer() => tpke_privkey:share()}
+          shares = maps:new() :: #{non_neg_integer() => {non_neg_integer(), signature_share:sig_share()}}
          }).
 
 -record(cc_serialized_data, {
@@ -41,12 +41,12 @@ status(CCData) ->
 %% secret key shares {ski }, one for each party (secret key ski is
 %% distributed to party Pi). Note that a single setup can be used to
 %% support a family of Coins indexed by arbitrary sid strings.
--spec init(tpke_privkey:privkey(), binary() | erlang_pbc:element(), pos_integer(), non_neg_integer()) -> cc_data().
-init(SecretKeyShard, Bin, N, F) when is_binary(Bin) ->
-    Sid = tpke_pubkey:hash_message(tpke_privkey:public_key(SecretKeyShard), Bin),
-    init(SecretKeyShard, Sid, N, F);
-init(SecretKeyShard, Sid, N, F) ->
-    #cc_data{sk=SecretKeyShard, n=N, f=F, sid=Sid}.
+-spec init(tc_key_share:tc_key_share(),
+           binary(),
+           pos_integer(),
+           non_neg_integer()) -> cc_data().
+init(KeyShare, Sid, N, F) ->
+    #cc_data{sk=KeyShare, n=N, f=F, sid=Sid}.
 
 
 %% Figure12. Bullet2
@@ -55,9 +55,8 @@ init(SecretKeyShard, Sid, N, F) ->
 get_coin(Data = #cc_data{state=done}) ->
     {Data, ok};
 get_coin(Data) ->
-    Share = tpke_privkey:sign(Data#cc_data.sk, Data#cc_data.sid),
-    SerializedShare = hbbft_utils:share_to_binary(Share),
-    {Data, {send, [{multicast, {share, SerializedShare}}]}}.
+    Share = tc_key_share:sign_share(Data#cc_data.sk, Data#cc_data.sid),
+    {Data, {send, [{multicast, {share, hbbft_utils:sig_share_to_binary(Share)}}]}}.
 
 
 %% upon receiving at least f + 1 shares, attempt to combine them
@@ -77,20 +76,23 @@ share(Data, J, Share) ->
     case maps:is_key(J, Data#cc_data.shares) of
         false ->
             %% store the deserialized share in the shares map, convenient to use later to verify signature
-            DeserializedShare = hbbft_utils:binary_to_share(Share, tpke_privkey:public_key(Data#cc_data.sk)),
-            case tpke_pubkey:verify_signature_share(tpke_privkey:public_key(Data#cc_data.sk), DeserializedShare, Data#cc_data.sid) of
+            DeserializedShare = hbbft_utils:binary_to_sig_share(Share),
+            case tc_key_share:verify_signature_share(Data#cc_data.sk,
+                                                     DeserializedShare,
+                                                     Data#cc_data.sid) of
                 true ->
                     NewData = Data#cc_data{shares=maps:put(J, DeserializedShare, Data#cc_data.shares)},
                     %% check if we have at least f+1 shares
                     case maps:size(NewData#cc_data.shares) > Data#cc_data.f of
                         true ->
                             %% combine shares
-                            {ok, Sig} = tpke_pubkey:combine_verified_signature_shares(tpke_privkey:public_key(NewData#cc_data.sk), maps:values(NewData#cc_data.shares)),
+                            {ok, Sig} = tc_key_share:combine_signature_shares(NewData#cc_data.sk, maps:values(NewData#cc_data.shares)),
+
                             %% check if the signature is valid
-                            case tpke_pubkey:verify_signature(tpke_privkey:public_key(NewData#cc_data.sk), Sig, NewData#cc_data.sid) of
+                            case tc_key_share:verify(NewData#cc_data.sk, Sig, NewData#cc_data.sid) of
                                 true ->
                                     %% TODO do something better here!
-                                    <<Val:32/integer, _/binary>> = erlang_pbc:element_to_binary(Sig),
+                                    <<Val:32/integer, _/binary>> = signature:to_bytes(Sig),
                                     {NewData#cc_data{state=done}, {result, Val}};
                                 false ->
                                     {NewData, ok}
@@ -108,17 +110,16 @@ share(Data, J, Share) ->
 
 -spec serialize(cc_data()) -> cc_serialized_data().
 serialize(#cc_data{state=State, sid=SID, n=N, f=F, shares=Shares}) ->
-    #cc_serialized_data{state=State, sid=erlang_pbc:element_to_binary(SID), n=N, f=F, shares=serialize_shares(Shares)}.
+    #cc_serialized_data{state=State, sid=ciphertext:serialize(SID), n=N, f=F, shares=serialize_shares(Shares)}.
 
--spec deserialize(cc_serialized_data(), tpke_privkey:privkey()) -> cc_data().
+-spec deserialize(cc_serialized_data(), secret_key_share:sk_share()) -> cc_data().
 deserialize(#cc_serialized_data{state=State, sid=SID, n=N, f=F, shares=Shares}, SK) ->
-    Element = tpke_pubkey:deserialize_element(tpke_privkey:public_key(SK), SID),
-    #cc_data{state=State, sk=SK, sid=Element, n=N, f=F, shares=deserialize_shares(Shares, SK)}.
+    #cc_data{state=State, sk=SK, sid=ciphertext:deserialize(SID), n=N, f=F, shares=deserialize_shares(Shares)}.
 
--spec serialize_shares(#{non_neg_integer() => tpke_privkey:share()}) -> #{non_neg_integer() => binary()}.
+-spec serialize_shares(#{non_neg_integer() => signature_share:sig_share()}) -> #{non_neg_integer() => binary()}.
 serialize_shares(Shares) ->
-    maps:map(fun(_K, V) -> hbbft_utils:share_to_binary(V) end, Shares).
+    maps:map(fun(_K, V) -> hbbft_utils:sig_share_to_binary(V) end, Shares).
 
--spec deserialize_shares(#{non_neg_integer() => binary()}, tpke_privkey:privkey()) -> #{non_neg_integer() => tpke_privkey:share()}.
-deserialize_shares(Shares, SK) ->
-    maps:map(fun(_K, V) -> hbbft_utils:binary_to_share(V, tpke_privkey:public_key(SK)) end, Shares).
+-spec deserialize_shares(#{non_neg_integer() => binary()}) -> #{non_neg_integer() => signature_share:sig_share()}.
+deserialize_shares(Shares) ->
+    maps:map(fun(_K, V) -> hbbft_utils:binary_to_sig_share(V) end, Shares).

@@ -20,8 +20,8 @@
           hbbft :: hbbft:hbbft_data(),
           blocks :: [#block{}],
           tempblock :: undefined | #block{},
-          sk :: tpke_privkey:privkey(),
-          ssk :: tpke_privkey:privkey_serialized(),
+          sk :: tc_key_share:tc_key_share(),
+          ssk :: binary(),
           to_serialize = false :: boolean(),
           filter = fun(_ID, _Msg) -> true end :: fun((any()) -> boolean())
          }).
@@ -59,9 +59,8 @@ verify_chain([G], PubKey) ->
     case G#block.prev_hash == <<>> of
         true ->
             %% genesis block should have a valid signature
-            HM = tpke_pubkey:hash_message(PubKey, term_to_binary(G#block{signature= <<>>})),
-            Signature = tpke_pubkey:deserialize_element(PubKey, G#block.signature),
-            tpke_pubkey:verify_signature(PubKey, Signature, HM);
+            %Signature = signature:deserialize(G#block.signature),
+            tc_key_share:verify(PubKey, G#block.signature, term_to_binary(G#block{signature= <<>>}));
         false ->
             ct:log("no genesis block~n"),
             false
@@ -81,9 +80,8 @@ verify_block_fit([A, B | _], PubKey) ->
     case A#block.prev_hash == hash_block(B) of
         true ->
             %% A should have a valid signature
-            HM = tpke_pubkey:hash_message(PubKey, term_to_binary(A#block{signature= <<>>})),
-            Signature = tpke_pubkey:deserialize_element(PubKey, A#block.signature),
-            case tpke_pubkey:verify_signature(PubKey, Signature, HM) of
+            %Signature = signature:deserialize(A#block.signature),
+            case tc_key_share:verify(PubKey, A#block.signature, term_to_binary(A#block{signature= <<>>})) of
                 true ->
                     true;
                 false ->
@@ -100,7 +98,7 @@ block_transactions(Block) ->
 
 init([N, F, ID, SK, BatchSize, ToSerialize]) ->
     %% deserialize the secret key once
-    DSK = tpke_privkey:deserialize(SK),
+    DSK = tc_key_share:deserialize(SK),
     %% init hbbft
     HBBFT = hbbft:init(DSK, N, F, ID, BatchSize, infinity),
     %% store the serialized state and serialized SK
@@ -141,7 +139,7 @@ handle_cast({block, NewBlock}, State=#state{sk=SK, hbbft=HBBFT}) ->
         false ->
             ct:log("XXXXXXXX~n"),
             %% a new block, check if it fits on our chain
-            case verify_block_fit([NewBlock|State#state.blocks], tpke_privkey:public_key(SK)) of
+            case verify_block_fit([NewBlock|State#state.blocks], SK) of
                 true ->
                     %% advance to the next round
                     ct:log("~p skipping to next round~n", [self()]),
@@ -168,6 +166,7 @@ dispatch({NewHBBFT, {send, ToSend}}, State) ->
     do_send(ToSend, State),
     State#state{hbbft=maybe_serialize_HBBFT(NewHBBFT, State#state.to_serialize)};
 dispatch({NewHBBFT, {result, {transactions, _, Txns}}}, State) ->
+    ct:pal("got transactions ~p", [Txns]),
     NewBlock = case State#state.blocks of
                    [] ->
                        %% genesis block
