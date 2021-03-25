@@ -19,8 +19,8 @@ init_per_testcase(_, Config) ->
     F = 1,
     Module = hbbft,
     BatchSize = 10,
-    {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
-    {ok, {PubKey, PrivateKeys}} = dealer:deal(Dealer),
+    PrivateKeys = tc_key_share:deal(N, F),
+    PubKey = tc_key_share:public_key(hd(PrivateKeys)),
     [{n, N}, {f, F}, {batchsize, BatchSize}, {module, Module}, {pubkey, PubKey}, {privatekeys, PrivateKeys} | Config].
 
 end_per_testcase(_, _Config) ->
@@ -95,12 +95,12 @@ mr(_Message, _From, _To, _State, NewState,
           all_msgs = Msgs,
           txns = StateTxns} = ModelState) ->
     %% !!!!!!  note that this is fragile and may break if the record changes
-    Round = element(7, NewState),
+    Round = element(8, NewState),
 
     %% finalize the round for this node
     NewNewState = hbbft:finalize_round(NewState, Txns),
     {NewNewNewState, Actions} = hbbft:next_round(NewNewState),
-    fakecast:trace("buffer remaining ~p", [length(element(8, NewNewNewState))]),
+    fakecast:trace("buffer remaining ~p", [length(element(9, NewNewNewState))]),
 
     %% check if all messages have been put into the queue, and if all
     %% messages have appeared as transactions.

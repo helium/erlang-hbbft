@@ -34,9 +34,8 @@ init_per_testcase(_, Config) ->
     N = list_to_integer(os:getenv("N", "10")), % N > 25 runs for minutes.
     F = N div 4,
     Module = hbbft_acs,
-    {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
-    {ok, {_PubKey, PrivateKeys}} = dealer:deal(Dealer),
-    [{n, N}, {f, F}, {module, Module}, {privatekeys, PrivateKeys} | Config].
+    KeyShares = tc_key_share:deal(N, F),
+    [{n, N}, {f, F}, {module, Module}, {key_shares, KeyShares} | Config].
 
 end_per_testcase(_, _Config) ->
     eprof:stop_profiling(),
@@ -47,9 +46,9 @@ init_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
     Module = proplists:get_value(module, Config),
-    PrivateKeys = proplists:get_value(privatekeys, Config),
+    KeyShares = proplists:get_value(key_shares, Config),
     Msgs = [ crypto:strong_rand_bytes(512) || _ <- lists:seq(1, N)],
-    StatesWithId = [{J, hbbft_acs:init(Sk, N, F, J)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
+    StatesWithId = [{J, hbbft_acs:init(Sk, N, F, J)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), KeyShares)],
     MixedList = lists:zip(Msgs, StatesWithId),
     Res = lists:map(fun({Msg, {J, State}}) ->
                             {NewState, Result} = hbbft_acs:input(State, Msg),
@@ -69,9 +68,9 @@ one_dead_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
     Module = proplists:get_value(module, Config),
-    PrivateKeys = proplists:get_value(privatekeys, Config),
+    KeyShares = proplists:get_value(key_shares, Config),
     Msgs = [ crypto:strong_rand_bytes(512) || _ <- lists:seq(1, N)],
-    StatesWithId = [{J, hbbft_acs:init(Sk, N, F, J)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
+    StatesWithId = [{J, hbbft_acs:init(Sk, N, F, J)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), KeyShares)],
     MixedList = lists:zip(Msgs, StatesWithId),
     Res = lists:map(fun({Msg, {J, State}}) ->
                             {NewState, Result} = hbbft_acs:input(State, Msg),
@@ -91,9 +90,9 @@ f_dead_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
     Module = proplists:get_value(module, Config),
-    PrivateKeys = proplists:get_value(privatekeys, Config),
+    KeyShares = proplists:get_value(key_shares, Config),
     Msgs = [ crypto:strong_rand_bytes(512) || _ <- lists:seq(1, N)],
-    StatesWithId = [{J, hbbft_acs:init(Sk, N, F, J)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
+    StatesWithId = [{J, hbbft_acs:init(Sk, N, F, J)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), KeyShares)],
     MixedList = lists:zip(Msgs, StatesWithId),
     Res = lists:map(fun({Msg, {J, State}}) ->
                             {NewState, Result} = hbbft_acs:input(State, Msg),
@@ -113,9 +112,9 @@ fplusone_dead_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
     Module = proplists:get_value(module, Config),
-    PrivateKeys = proplists:get_value(privatekeys, Config),
+    KeyShares = proplists:get_value(key_shares, Config),
     Msgs = [ crypto:strong_rand_bytes(512) || _ <- lists:seq(1, N)],
-    StatesWithId = [{J, hbbft_acs:init(Sk, N, F, J)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)],
+    StatesWithId = [{J, hbbft_acs:init(Sk, N, F, J)} || {J, Sk} <- lists:zip(lists:seq(0, N - 1), KeyShares)],
     MixedList = lists:zip(Msgs, StatesWithId),
     Res = lists:map(fun({Msg, {J, State}}) ->
                             {NewState, Result} = hbbft_acs:input(State, Msg),
@@ -162,9 +161,9 @@ fakecast_test(Config) ->
     N = 4, % proplists:get_value(n, Config),
     F = 1, % proplists:get_value(f, Config),
     Module = proplists:get_value(module, Config),
-    PrivateKeys0 = proplists:get_value(privatekeys, Config),
+    KeyShares0 = proplists:get_value(key_shares, Config),
 
-    {PrivateKeys, _} = lists:split(N, PrivateKeys0),
+    {KeyShares, _} = lists:split(N, KeyShares0),
 
     Init = fun() ->
                    {ok,
@@ -172,7 +171,7 @@ fakecast_test(Config) ->
                        test_mod = Module,
                        nodes = lists:seq(1, N),  %% are names useful?
                        configs = [[Sk, N, F, ID]
-                                  || {ID, Sk} <- lists:zip(lists:seq(0, N - 1), PrivateKeys)]
+                                  || {ID, Sk} <- lists:zip(lists:seq(0, N - 1), KeyShares)]
                     },
                     #state{node_count = N - F}
                    }

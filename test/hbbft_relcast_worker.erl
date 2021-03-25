@@ -18,6 +18,7 @@
 -record(state, {
           relcast :: term(),
           id :: integer(),
+          sk :: tc_key_share:tc_key_share(),
           peers :: map(),
           tempblock = undefined :: block(),
           blocks = [] :: [block()],
@@ -58,6 +59,7 @@ bba_filter(ID) ->
 init(Args) ->
     N = proplists:get_value(n, Args),
     ID = proplists:get_value(id, Args),
+    SK = proplists:get_value(sk, Args),
     DataDir = proplists:get_value(data_dir, Args),
     Members = lists:seq(1, N),
     erlang:send_after(1500, self(), inbound_tick),
@@ -65,7 +67,7 @@ init(Args) ->
                                   [{create, true},
                                    {data_dir, DataDir ++ integer_to_list(ID)}]),
     Peers = maps:from_list([{I, undefined} || I <- Members, I /= ID ]),
-    {ok, do_send(#state{relcast=Relcast, id=ID, peers=Peers})}.
+    {ok, do_send(#state{relcast=Relcast, id=ID, peers=Peers, sk=tc_key_share:deserialize(SK)})}.
 
 handle_call({submit_txn, Txn}, _From, State=#state{relcast=Relcast0}) ->
     {Resp, Relcast} = relcast:command({txn, Txn}, Relcast0),
@@ -100,11 +102,10 @@ handle_cast({ack, Sender, Seq}, State) ->
     %% ct:pal("ack, Sender: ~p", [Sender]),
     {ok, NewRelcast} = relcast:ack(Sender, Seq, State#state.relcast),
     {noreply, do_send(State#state{relcast=NewRelcast})};
-handle_cast({block, Block, SerializedPubKey}, State) ->
+handle_cast({block, Block}, State) ->
     case lists:member(Block, State#state.blocks) of
         false ->
-            PubKey = tpke_pubkey:deserialize(SerializedPubKey),
-            case verify_block_fit([Block | State#state.blocks], PubKey) of
+            case verify_block_fit([Block | State#state.blocks], tc_key_share:public_key(State#state.sk)) of
                 true ->
                     {ok, Relcast} = relcast:command(next_round, State#state.relcast),
                     {noreply, do_send(State#state{relcast=Relcast,
@@ -141,15 +142,15 @@ handle_info({transactions, Txns}, State) ->
     NewBlock = new_block(UniqueTxns, State),
     {ok, Relcast} = relcast:command({finalize_round, Txns, term_to_binary(NewBlock)}, State#state.relcast),
     {noreply, do_send(State#state{relcast=Relcast, tempblock=NewBlock})};
-handle_info({signature, Sig, Pubkey}, State=#state{tempblock=TempBlock, peers=Peers}) when TempBlock /= undefined ->
+handle_info({signature, Sig}, State=#state{tempblock=TempBlock, peers=Peers}) when TempBlock /= undefined ->
     %% ct:pal("Got signature: ~p", [Sig]),
     %% ct:pal("TempBlock: ~p", [TempBlock]),
     NewBlock = TempBlock#block{signature=Sig},
     case lists:member(NewBlock, State#state.blocks) of
         false ->
-            case verify_block_fit([NewBlock | State#state.blocks], Pubkey) of
+            case verify_block_fit([NewBlock | State#state.blocks], tc_key_share:public_key(State#state.sk)) of
                 true ->
-                    _ = [gen_server:cast({global, name(I)}, {block, NewBlock, tpke_pubkey:serialize(Pubkey)}) || {I, _} <- maps:to_list(Peers)],
+                    _ = [gen_server:cast({global, name(I)}, {block, NewBlock}) || {I, _} <- maps:to_list(Peers)],
                     {ok, Relcast} = relcast:command(next_round, State#state.relcast),
                     {noreply, do_send(State#state{relcast=Relcast,
                                                   tempblock=undefined,
@@ -211,9 +212,9 @@ verify_block_fit([A, B | _], PubKey) ->
     case A#block.prev_hash == hash_block(B) of
         true ->
             %% A should have a valid signature
-            HM = tpke_pubkey:hash_message(PubKey, term_to_binary(A#block{signature= <<>>})),
-            Signature = tpke_pubkey:deserialize_element(PubKey, A#block.signature),
-            case tpke_pubkey:verify_signature(PubKey, Signature, HM) of
+            Msg = term_to_binary(A#block{signature= <<>>}),
+            Signature = tc_signature:deserialize(A#block.signature),
+            case tc_pubkey:verify(PubKey, Signature, Msg) of
                 true ->
                     true;
                 false ->
@@ -233,9 +234,9 @@ verify_chain([G], PubKey) ->
     case G#block.prev_hash == <<>> of
         true ->
             %% genesis block should have a valid signature
-            HM = tpke_pubkey:hash_message(PubKey, term_to_binary(G#block{signature= <<>>})),
-            Signature = tpke_pubkey:deserialize_element(PubKey, G#block.signature),
-            tpke_pubkey:verify_signature(PubKey, Signature, HM);
+            Msg = term_to_binary(G#block{signature= <<>>}),
+            Signature = tc_signature:deserialize(G#block.signature),
+            tc_pubkey:verify(PubKey, Signature, Msg);
         false ->
             ct:log("no genesis block~n"),
             false

@@ -30,9 +30,8 @@ init_per_testcase(_, Config) ->
     N = list_to_integer(os:getenv("N", "34")),
     F = (N - 1) div 3,
     Module = hbbft_bba,
-    {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
-    {ok, {PubKey, PrivateKeys}} = dealer:deal(Dealer),
-    [{n, N}, {f, F}, {dealer, Dealer}, {module, Module}, {pubkey, PubKey}, {privatekeys, PrivateKeys} | Config].
+    KeyShares = tc_key_share:deal(N, F),
+    [{n, N}, {f, F}, {module, Module}, {key_shares, KeyShares} | Config].
 
 end_per_testcase(_, _Config) ->
     ok.
@@ -42,9 +41,8 @@ termination_test(Config) ->
     Fun = fun(Vals) ->
                   N = 7,
                   F = 2,
-                  {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
-                  {ok, {_PubKey, PrivateKeys}} = dealer:deal(Dealer),
-                  States = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
+                  KeyShares = tc_key_share:deal(N, F),
+                  States = [hbbft_bba:init(Sk, N, F) || Sk <- KeyShares],
                   StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
                   MixedList = lists:zip(Vals, StatesWithId),
                   %% all valid members should call get_coin
@@ -74,9 +72,9 @@ init_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
     Module = proplists:get_value(module, Config),
-    {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
-    {ok, {_PubKey, PrivateKeys}} = dealer:deal(Dealer),
-    States = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
+    KeyShares = tc_key_share:deal(N, F+1),
+
+    States = [hbbft_bba:init(Sk, N, F) || Sk <- KeyShares],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
     %% all valid members should call get_coin
     Res = lists:map(fun({J, State}) ->
@@ -95,8 +93,8 @@ init_with_zeroes_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
     Module = proplists:get_value(module, Config),
-    PrivateKeys = proplists:get_value(privatekeys, Config),
-    States = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
+    KeyShares = proplists:get_value(key_shares, Config),
+    States = [hbbft_bba:init(Sk, N, F) || Sk <- KeyShares],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
     ZeroList = lists:zip([1|lists:duplicate(N-1, 0)], StatesWithId),
     %% all valid members should call get_coin
@@ -117,8 +115,8 @@ init_with_ones_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
     Module = proplists:get_value(module, Config),
-    PrivateKeys = proplists:get_value(privatekeys, Config),
-    States = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
+    KeyShares = proplists:get_value(key_shares, Config),
+    States = [hbbft_bba:init(Sk, N, F) || Sk <- KeyShares],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
     OneList = lists:zip(lists:duplicate(N-1, 1) ++ [0], StatesWithId),
     %% all valid members should call get_coin
@@ -139,9 +137,8 @@ init_with_mixed_zeros_and_ones_test(Config) ->
     Module = proplists:get_value(module, Config),
     N = 10,
     F = 2,
-    {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
-    {ok, {_PubKey, PrivateKeys}} = dealer:deal(Dealer),
-    States = [hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys],
+    KeyShares = tc_key_share:deal(N, F),
+    States = [hbbft_bba:init(Sk, N, F) || Sk <- KeyShares],
     StatesWithId = lists:zip(lists:seq(0, length(States) - 1), States),
     MixedList = lists:zip([1, 1, 1, 0, 1, 0, 0, 0, 0, 0], StatesWithId),
     %% all valid members should call get_coin
@@ -162,8 +159,8 @@ f_dead_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
     Module = proplists:get_value(module, Config),
-    PrivateKeys = proplists:get_value(privatekeys, Config),
-    States = lists:sublist([hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys], 1, N-F),
+    KeyShares = proplists:get_value(key_shares, Config),
+    States = lists:sublist([hbbft_bba:init(Sk, N, F) || Sk <- KeyShares], 1, N-F),
     StatesWithId = lists:zip(lists:seq(0, N - 1 - F), States),
     %% all valid members should call get_coin
     Res = lists:map(fun({J, State}) ->
@@ -182,8 +179,8 @@ fplusone_dead_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
     Module = proplists:get_value(module, Config),
-    PrivateKeys = proplists:get_value(privatekeys, Config),
-    States = lists:sublist([hbbft_bba:init(Sk, N, F) || Sk <- PrivateKeys], 1, N - (F + 1)),
+    KeyShares = proplists:get_value(key_shares, Config),
+    States = lists:sublist([hbbft_bba:init(Sk, N, F) || Sk <- KeyShares], 1, N - (F + 1)),
     StatesWithId = lists:zip(lists:seq(0, N - 1 - (F + 1)), States),
     %% all valid members should call get_coin
     Res = lists:map(fun({J, State}) ->
@@ -256,14 +253,14 @@ fakecast_test(Config) ->
     Module = proplists:get_value(module, Config),
     N = 4,
     F = 1,
-    {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
-    {ok, {_PubKey, PrivateKeys}} = dealer:deal(Dealer),
+    KeyShares = tc_key_share:deal(N, F + 1),
+
     Init = fun() ->
                    {ok,
                     #fc_conf{
                        test_mod = Module,
                        nodes = [aaa, bbb, ccc, ddd],
-                       configs = [[Sk, N, F] || Sk <- PrivateKeys]
+                       configs = [[Sk, N, F] || Sk <- KeyShares]
                       },
                     #state{node_count = N}
                    }

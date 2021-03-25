@@ -6,8 +6,9 @@
    [kernel,
     stdlib,
     merkerl,
-    erasure,
-    erlang_tpke
+    erlang_tc,
+    erlang_tpke,
+    erasure
    ]},
   {env,[]},
   {modules, []},
