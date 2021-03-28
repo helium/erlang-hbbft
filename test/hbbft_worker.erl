@@ -53,35 +53,35 @@ bba_filter(ID) ->
 
 verify_chain([], _) ->
     true;
-verify_chain([G], PubKey) ->
+verify_chain([G], KeyShare) ->
     ct:log("verifying genesis block~n"),
     %% genesis block has no prev hash
     case G#block.prev_hash == <<>> of
         true ->
             %% genesis block should have a valid signature
-            %Signature = signature:deserialize(G#block.signature),
-            tc_key_share:verify(PubKey, G#block.signature, term_to_binary(G#block{signature= <<>>}));
+            Signature = signature:deserialize(G#block.signature),
+            tc_key_share:verify(KeyShare, Signature, term_to_binary(G#block{signature= <<>>}));
         false ->
             ct:log("no genesis block~n"),
             false
     end;
-verify_chain(Chain, PubKey) ->
+verify_chain(Chain, KeyShare) ->
     ct:log("Chain verification depth ~p~n", [length(Chain)]),
-    case verify_block_fit(Chain, PubKey) of
-        true -> verify_chain(tl(Chain), PubKey);
+    case verify_block_fit(Chain, KeyShare) of
+        true -> verify_chain(tl(Chain), KeyShare);
         false ->
             ct:log("bad signature~n"),
             false
     end.
 
 verify_block_fit([B], _) when B#block.prev_hash == <<>> -> true;
-verify_block_fit([A, B | _], PubKey) ->
+verify_block_fit([A, B | _], KeyShare) ->
     %% A should have the the prev_hash of B
     case A#block.prev_hash == hash_block(B) of
         true ->
             %% A should have a valid signature
-            %Signature = signature:deserialize(A#block.signature),
-            case tc_key_share:verify(PubKey, A#block.signature, term_to_binary(A#block{signature= <<>>})) of
+            Signature = signature:deserialize(A#block.signature),
+            case tc_key_share:verify(KeyShare, Signature, term_to_binary(A#block{signature= <<>>})) of
                 true ->
                     true;
                 false ->
@@ -166,7 +166,7 @@ dispatch({NewHBBFT, {send, ToSend}}, State) ->
     do_send(ToSend, State),
     State#state{hbbft=maybe_serialize_HBBFT(NewHBBFT, State#state.to_serialize)};
 dispatch({NewHBBFT, {result, {transactions, _, Txns}}}, State) ->
-    ct:pal("got transactions ~p", [Txns]),
+    %% ct:pal("got transactions ~p", [Txns]),
     NewBlock = case State#state.blocks of
                    [] ->
                        %% genesis block

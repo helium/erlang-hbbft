@@ -92,7 +92,7 @@ share(Data, J, Share) ->
                             case tc_key_share:verify(NewData#cc_data.sk, Sig, NewData#cc_data.sid) of
                                 true ->
                                     %% TODO do something better here!
-                                    <<Val:32/integer, _/binary>> = signature:to_bytes(Sig),
+                                    <<Val:32/integer, _/binary>> = signature:serialize(Sig),
                                     {NewData#cc_data{state=done}, {result, Val}};
                                 false ->
                                     {NewData, ok}
@@ -110,11 +110,11 @@ share(Data, J, Share) ->
 
 -spec serialize(cc_data()) -> cc_serialized_data().
 serialize(#cc_data{state=State, sid=SID, n=N, f=F, shares=Shares}) ->
-    #cc_serialized_data{state=State, sid=ciphertext:serialize(SID), n=N, f=F, shares=serialize_shares(Shares)}.
+    #cc_serialized_data{state=State, sid=SID, n=N, f=F, shares=serialize_shares(Shares)}.
 
 -spec deserialize(cc_serialized_data(), secret_key_share:sk_share()) -> cc_data().
 deserialize(#cc_serialized_data{state=State, sid=SID, n=N, f=F, shares=Shares}, SK) ->
-    #cc_data{state=State, sk=SK, sid=ciphertext:deserialize(SID), n=N, f=F, shares=deserialize_shares(Shares)}.
+    #cc_data{state=State, sk=SK, sid=SID, n=N, f=F, shares=deserialize_shares(Shares)}.
 
 -spec serialize_shares(#{non_neg_integer() => signature_share:sig_share()}) -> #{non_neg_integer() => binary()}.
 serialize_shares(Shares) ->

@@ -16,14 +16,14 @@ binary_to_sig_share(<<ShareIdx:8/integer-unsigned, ShareBinary/binary>>) ->
     SigShare = signature_share:deserialize(ShareBinary),
     {ShareIdx, SigShare}.
 
-dec_share_to_binary({ShareIdx, SigShare}) ->
+dec_share_to_binary({ShareIdx, DecShare}) ->
     %% Assume less than 256 members in the consensus group
-    ShareBinary = decryption_share:serialize(SigShare),
+    ShareBinary = decryption_share:serialize(DecShare),
     <<ShareIdx:8/integer-unsigned, ShareBinary/binary>>.
 
 binary_to_dec_share(<<ShareIdx:8/integer-unsigned, ShareBinary/binary>>) ->
-    SigShare = decryption_share:deserialize(ShareBinary),
-    {ShareIdx, SigShare}.
+    DecShare = decryption_share:deserialize(ShareBinary),
+    {ShareIdx, DecShare}.
 
 
 %% wrap a subprotocol's outbound messages with a protocol identifier

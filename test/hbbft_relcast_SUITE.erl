@@ -10,7 +10,6 @@
          two_actors_no_txns_test/1,
          one_actor_missing_test/1,
          two_actors_missing_test/1,
-         encrypt_decrypt_test/1,
          start_on_demand_test/1
         ]).
 
@@ -21,7 +20,6 @@ all() ->
      two_actors_no_txns_test,
      one_actor_missing_test,
      two_actors_missing_test,
-     encrypt_decrypt_test,
      start_on_demand_test
     ].
 
@@ -30,9 +28,8 @@ init_per_testcase(TestCase, Config) ->
     F = N div 4,
     Module = hbbft,
     BatchSize = 20,
-    {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
-    {ok, {PubKey, PrivateKeys}} = dealer:deal(Dealer),
-
+    PrivateKeys = tc_key_share:deal(N, F),
+    PubKey = tc_key_share:public_key(hd(PrivateKeys)),
     [{n, N},
      {f, F},
      {batchsize, BatchSize},
@@ -56,7 +53,7 @@ init_test(Config) ->
     Workers = lists:foldl(fun({I, SK}, Acc) ->
                                   {ok, W} = hbbft_relcast_worker:start_link([
                                                                      {id, I},
-                                                                     {sk, tpke_privkey:serialize(SK)},
+                                                                     {sk, tc_key_share:serialize(SK)},
                                                                      {n, N},
                                                                      {f, F},
                                                                      {data_dir, DataDir},
@@ -229,17 +226,6 @@ two_actors_missing_test(Config) ->
     ?assertEqual(0, sets:size(ConvergedResults)),
     ok.
 
-encrypt_decrypt_test(Config) ->
-    PubKey = proplists:get_value(pubkey, Config),
-    PrivateKeys = proplists:get_value(privatekeys, Config),
-
-    PlainText = crypto:strong_rand_bytes(24),
-    Enc = hbbft:encrypt(PubKey, PlainText),
-    {ok, EncKey} = hbbft:get_encrypted_key(hd(PrivateKeys), Enc),
-    DecKey = tpke_pubkey:combine_shares(PubKey, EncKey, [ tpke_privkey:decrypt_share(SK, EncKey) || SK <- PrivateKeys]),
-    ?assertEqual(PlainText, hbbft:decrypt(DecKey, Enc)),
-    ok.
-
 start_on_demand_test(Config) ->
     PubKey = proplists:get_value(pubkey, Config),
     N = proplists:get_value(n, Config),
@@ -252,7 +238,7 @@ start_on_demand_test(Config) ->
     Workers = lists:foldl(fun({I, SK}, Acc) ->
                                   {ok, W} = hbbft_relcast_worker:start_link([
                                                                      {id, I},
-                                                                     {sk, tpke_privkey:serialize(SK)},
+                                                                     {sk, tc_key_share:serialize(SK)},
                                                                      {n, N},
                                                                      {f, F},
                                                                      {data_dir, DataDir},

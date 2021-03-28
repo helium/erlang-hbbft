@@ -19,8 +19,8 @@ init_per_testcase(_, Config) ->
     F = 1,
     Module = hbbft,
     BatchSize = 10,
-    {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
-    {ok, {PubKey, PrivateKeys}} = dealer:deal(Dealer),
+    PrivateKeys = tc_key_share:deal(N, F),
+    PubKey = tc_key_share:public_key(hd(PrivateKeys)),
     [{n, N}, {f, F}, {batchsize, BatchSize}, {module, Module}, {pubkey, PubKey}, {privatekeys, PrivateKeys} | Config].
 
 end_per_testcase(_, _Config) ->

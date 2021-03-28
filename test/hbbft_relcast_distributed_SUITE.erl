@@ -58,8 +58,7 @@ simple_test(Config) ->
     N = length(Nodes),
     F = (N div 3),
     BatchSize = 20,
-    {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
-    {ok, {PubKey, PrivateKeys}} = dealer:deal(Dealer),
+    PrivateKeys = tc_key_share:deal(N, F),
 
     %% each node gets a secret key
     NodesSKs = lists:zip(Nodes, PrivateKeys),
@@ -75,7 +74,7 @@ simple_test(Config) ->
     Workers = [{Node, ct_rpc:call(Node,
                                hbbft_relcast_worker,
                                start_link,
-                               [[{id, I}, {sk, tpke_privkey:serialize(SK)}, {n, N}, {f, F}, {batchsize, BatchSize}, {data_dir, DataDir}]]
+                               [[{id, I}, {sk, tc_key_share:serialize(SK)}, {n, N}, {f, F}, {batchsize, BatchSize}, {data_dir, DataDir}]]
                               )} || {I, {Node, SK}} <- hbbft_test_utils:enumerate(NodesSKs)],
     ok = global:sync(),
 
@@ -118,7 +117,7 @@ simple_test(Config) ->
                           ct:pal("chain is of height ~p~n", [length(Chain)]),
 
                           %% verify they are cryptographically linked,
-                          true = hbbft_relcast_worker:verify_chain(Chain, PubKey),
+                          true = hbbft_relcast_worker:verify_chain(Chain, tc_key_share:public_key(hd(PrivateKeys))),
 
                           %% check all transactions are unique
                           BlockTxns = lists:flatten([ hbbft_relcast_worker:block_transactions(B) || B <- Chain ]),
@@ -154,8 +153,7 @@ partition_test_(Config, Filter) ->
     N = length(Nodes),
     F = (N div 3),
     BatchSize = 20,
-    {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
-    {ok, {PubKey, PrivateKeys}} = dealer:deal(Dealer),
+    PrivateKeys = tc_key_share:deal(N, F),
 
     %% each node gets a secret key
     NodesSKs = lists:zip(Nodes, PrivateKeys),
@@ -180,7 +178,7 @@ partition_test_(Config, Filter) ->
     Workers = [{Node, ct_rpc:call(Node,
                                hbbft_relcast_worker,
                                start_link,
-                               [[{id, I}, {sk, tpke_privkey:serialize(SK)}, {n, N}, {f, F}, {batchsize, BatchSize}, {data_dir, DataDir}]]
+                               [[{id, I}, {sk, tc_key_share:serialize(SK)}, {n, N}, {f, F}, {batchsize, BatchSize}, {data_dir, DataDir}]]
                               )} || {I, {Node, SK}} <- hbbft_test_utils:enumerate(NodesSKs)],
     ok = global:sync(),
 
@@ -250,7 +248,7 @@ partition_test_(Config, Filter) ->
                           ct:pal("chain is of height ~p~n", [length(Chain)]),
 
                           %% verify they are cryptographically linked,
-                          true = hbbft_relcast_worker:verify_chain(Chain, PubKey),
+                          true = hbbft_relcast_worker:verify_chain(Chain, tc_key_share:public_key(hd(PrivateKeys))),
 
                           %% check all transactions are unique
                           BlockTxns = lists:flatten([ hbbft_relcast_worker:block_transactions(B) || B <- Chain ]),
