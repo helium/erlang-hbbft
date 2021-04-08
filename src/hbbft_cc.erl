@@ -112,7 +112,7 @@ share(Data, J, Share) ->
 serialize(#cc_data{state=State, sid=SID, n=N, f=F, shares=Shares}) ->
     #cc_serialized_data{state=State, sid=SID, n=N, f=F, shares=serialize_shares(Shares)}.
 
--spec deserialize(cc_serialized_data(), secret_key_share:sk_share()) -> cc_data().
+-spec deserialize(cc_serialized_data(), tc_key_share:tc_key_share()) -> cc_data().
 deserialize(#cc_serialized_data{state=State, sid=SID, n=N, f=F, shares=Shares}, SK) ->
     #cc_data{state=State, sk=SK, sid=SID, n=N, f=F, shares=deserialize_shares(Shares)}.
 

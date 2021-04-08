@@ -55,7 +55,7 @@
     },
     decrypted = #{} :: #{non_neg_integer() => [binary()]},
     sig_shares = #{} :: #{non_neg_integer() => {non_neg_integer(), signature_share:sig_share()}},
-    thingtosign :: undefined | fr:fr(),
+    thingtosign :: undefined | binary(),
     stampfun :: undefined | {atom(), atom(), list()},
     stamps = [] :: [{non_neg_integer(), binary()}],
     failed_combine = [] :: [non_neg_integer()],
