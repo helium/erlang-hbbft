@@ -5,7 +5,7 @@
   0},
  {<<"erlang_tc">>,
   {git,"https://github.com/helium/erlang-tc.git",
-       {ref,"a0f7978bfdc17e0ee57efbaf860b1787c6642e8c"}},
+       {ref,"4df790b0b79b2e26e6ba41d177a72253236281d7"}},
   0},
  {<<"merkerl">>,{pkg,<<"merkerl">>,<<"1.0.1">>},0}]}.
 [
