@@ -4,6 +4,9 @@
 -include_lib("kernel/include/inet.hrl").
 
 -export([
+    groups/0,
+    init_per_group/2,
+    end_per_group/2,
     init_per_suite/1,
     end_per_suite/1,
     init_per_testcase/2,
@@ -13,9 +16,22 @@
 
 -export([simple_test/1, serialization_test/1, partition_test/1, partition_and_filter_test/1]).
 
-%% common test callbacks
+all() ->
+    [{group, ss512}, {group, bls12_381}].
 
-all() -> [simple_test, serialization_test, partition_test, partition_and_filter_test].
+groups() ->
+    [{ss512, [], test_cases()},
+     {bls12_381, [], test_cases()}].
+
+init_per_group(ss512, Config) ->
+    [{curve, 'SS512'} | Config];
+init_per_group(bls12_381, Config) ->
+    [{curve, 'BLS12-381'} | Config].
+
+end_per_group(_, _Config) ->
+    ok.
+
+test_cases() -> [simple_test, serialization_test, partition_test, partition_and_filter_test].
 
 init_per_suite(Config) ->
     os:cmd(os:find_executable("epmd") ++ " -daemon"),
@@ -55,12 +71,13 @@ end_per_testcase(_TestCase, Config) ->
 
 simple_test(Config) ->
     Nodes = proplists:get_value(nodes, Config),
+    Curve = proplists:get_value(curve, Config),
 
     %% master starts the dealer
     N = length(Nodes),
     F = (N div 3),
     BatchSize = 20,
-    KeyShares = tc_key_share:deal(N, F),
+    KeyShares = keyshares(Config),
 
     %% each node gets a secret key
     NodesSKs = lists:zip(Nodes, KeyShares),
@@ -81,7 +98,7 @@ simple_test(Config) ->
                 N,
                 F,
                 I,
-                hbbft_test_utils:serialize_key('BLS12-381', SK),
+                hbbft_test_utils:serialize_key(Curve, SK),
                 BatchSize,
                 false
             ])}
@@ -175,12 +192,13 @@ simple_test(Config) ->
 
 serialization_test(Config) ->
     Nodes = proplists:get_value(nodes, Config),
+    Curve = proplists:get_value(curve, Config),
 
     %% master starts the dealer
     N = length(Nodes),
     F = (N div 3),
     BatchSize = 20,
-    KeyShares = tc_key_share:deal(N, F),
+    KeyShares = keyshares(Config),
 
     %% each node gets a secret key
     NodesSKs = lists:zip(Nodes, KeyShares),
@@ -201,7 +219,7 @@ serialization_test(Config) ->
                 N,
                 F,
                 I,
-                hbbft_test_utils:serialize_key('BLS12-381', SK),
+                hbbft_test_utils:serialize_key(Curve, SK),
                 BatchSize,
                 false
             ])}
@@ -303,13 +321,14 @@ partition_and_filter_test(Config) ->
 
 partition_test_(Config, Filter) ->
     Nodes = proplists:get_value(nodes, Config),
+    Curve = proplists:get_value(curve, Config),
 
     %% master starts the dealer
     N = length(Nodes),
     F = (N div 3),
     ct:pal("N is ~p, F is ~p", [N, F]),
     BatchSize = 20,
-    KeyShares = tc_key_share:deal(N, F),
+    KeyShares = keyshares(Config),
 
     %% each node gets a secret key
     NodesSKs = lists:zip(Nodes, KeyShares),
@@ -353,7 +372,7 @@ partition_test_(Config, Filter) ->
                 N,
                 F,
                 I,
-                hbbft_test_utils:serialize_key('BLS12-381', SK),
+                hbbft_test_utils:serialize_key(Curve, SK),
                 BatchSize,
                 false
             ])}
@@ -473,3 +492,16 @@ random_n(N, List) ->
 
 shuffle(List) ->
     [X || {_, X} <- lists:sort([{rand:uniform(), N} || N <- List])].
+
+keyshares(Config) ->
+    Nodes = proplists:get_value(nodes, Config),
+    N = length(Nodes),
+    F = (N div 3),
+    case proplists:get_value(curve, Config, 'BLS12-381') of
+        'BLS12-381' ->
+            KeyShares = tc_key_share:deal(N, F);
+        'SS512' ->
+            {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
+            {ok, {_PubKey, KeyShares}} = dealer:deal(Dealer)
+    end,
+    KeyShares.
