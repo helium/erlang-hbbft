@@ -59,8 +59,7 @@ verify_chain([G], KeyShare) ->
     case G#block.prev_hash == <<>> of
         true ->
             %% genesis block should have a valid signature
-            Signature = signature:deserialize(G#block.signature),
-            tc_key_share:verify(KeyShare, Signature, term_to_binary(G#block{signature= <<>>}));
+            verify_block_signature(KeyShare, G);
         false ->
             ct:log("no genesis block~n"),
             false
@@ -80,8 +79,7 @@ verify_block_fit([A, B | _], KeyShare) ->
     case A#block.prev_hash == hash_block(B) of
         true ->
             %% A should have a valid signature
-            Signature = signature:deserialize(A#block.signature),
-            case tc_key_share:verify(KeyShare, Signature, term_to_binary(A#block{signature= <<>>})) of
+            case verify_block_signature(KeyShare, A) of
                 true ->
                     true;
                 false ->
@@ -93,12 +91,25 @@ verify_block_fit([A, B | _], KeyShare) ->
             false
     end.
 
+verify_block_signature(KeyShare, A) ->
+    case tc_key_share:is_key_share(KeyShare) of
+        true ->
+            Signature = signature:deserialize(A#block.signature),
+            tc_key_share:verify(KeyShare, Signature, term_to_binary(A#block{signature= <<>>}));
+        false ->
+            PubKey = tpke_privkey:public_key(KeyShare),
+            HM = tpke_pubkey:hash_message(PubKey, term_to_binary(A#block{signature= <<>>})),
+            Signature = tpke_pubkey:deserialize_element(PubKey, A#block.signature),
+            tpke_pubkey:verify_signature(PubKey, Signature, HM)
+    end.
+
+
 block_transactions(Block) ->
     Block#block.transactions.
 
 init([N, F, ID, SK, BatchSize, ToSerialize]) ->
     %% deserialize the secret key once
-    DSK = tc_key_share:deserialize(SK),
+    DSK = hbbft_test_utils:deserialize_key(SK),
     %% init hbbft
     HBBFT = hbbft:init(DSK, N, F, ID, BatchSize, infinity),
     %% store the serialized state and serialized SK

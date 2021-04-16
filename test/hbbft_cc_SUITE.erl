@@ -3,7 +3,7 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
--export([all/0, init_per_testcase/2, end_per_testcase/2]).
+-export([all/0, groups/0, init_per_group/2, end_per_group/2, init_per_testcase/2, end_per_testcase/2]).
 -export([
          init_test/1,
          f_dead_test/1,
@@ -15,6 +15,9 @@
         ]).
 
 all() ->
+    [{group, ss512}, {group, bls12_381}].
+
+test_cases() ->
     [
      init_test,
      f_dead_test,
@@ -25,11 +28,30 @@ all() ->
      mixed_keys_test
     ].
 
+groups() ->
+    [{ss512, [], test_cases()},
+     {bls12_381, [], test_cases()}].
+
+init_per_group(ss512, Config) ->
+    [{curve, 'SS512'} | Config];
+init_per_group(bls12_381, Config) ->
+    [{curve, 'BLS12-381'} | Config].
+
+end_per_group(_, _Config) ->
+    ok.
+
 init_per_testcase(_, Config) ->
     N = list_to_integer(os:getenv("N", "34")),
     F = N div 4,
     Module = hbbft_cc,
-    KeyShares = tc_key_share:deal(N, F),
+
+    case proplists:get_value(curve, Config, 'BLS12-381') of
+        'BLS12-381' ->
+            KeyShares = tc_key_share:deal(N, F);
+        'SS512' ->
+            {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
+            {ok, {_PubKey, KeyShares}} = dealer:deal(Dealer)
+    end,
 
     [{n, N}, {f, F}, {key_shares, KeyShares}, {module, Module} | Config].
 
@@ -138,9 +160,17 @@ too_many_dead_test(Config) ->
 key_mismatch_f9_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
+    Curve = proplists:get_value(curve, Config),
     Module = proplists:get_value(module, Config),
     PrivateKeys = proplists:get_value(key_shares, Config),
-    PrivateKeys2 = tc_key_share:deal(N, F),
+    PrivateKeys2 = case Curve of
+                       'BLS12-381' ->
+                           tc_key_share:deal(N, F);
+                       'SS512' ->
+                           {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
+                           {ok, {_PubKey, KeyShares}} = dealer:deal(Dealer),
+                           KeyShares
+                   end,
     Sid = crypto:strong_rand_bytes(32),
     %% choose 20 from pk1
     %% choose 17 from pk2
@@ -164,9 +194,17 @@ key_mismatch_f9_test(Config) ->
 key_mismatch_f10_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config) + 1,
+    Curve = proplists:get_value(curve, Config),
     Module = proplists:get_value(module, Config),
     PrivateKeys = proplists:get_value(key_shares, Config),
-    PrivateKeys2 = tc_key_share:deal(N, F),
+    PrivateKeys2 = case Curve of
+                       'BLS12-381' ->
+                           tc_key_share:deal(N, F);
+                       'SS512' ->
+                           {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
+                           {ok, {_PubKey, KeyShares}} = dealer:deal(Dealer),
+                           KeyShares
+                   end,
     Sid = crypto:strong_rand_bytes(32),
     InitialStates = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- lists:sublist(PrivateKeys, N-F) ++ lists:sublist(PrivateKeys2, F)],
     StatesWithId = lists:zip(lists:seq(0, N - 1), InitialStates),
@@ -189,10 +227,17 @@ key_mismatch_f10_test(Config) ->
 mixed_keys_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
+    Curve = proplists:get_value(curve, Config),
     Module = proplists:get_value(module, Config),
     PrivateKeys = proplists:get_value(key_shares, Config),
-    PrivateKeys2 = tc_key_share:deal(N, F),
-
+    PrivateKeys2 = case Curve of
+                       'BLS12-381' ->
+                           tc_key_share:deal(N, F);
+                       'SS512' ->
+                           {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
+                           {ok, {_PubKey, KeyShares}} = dealer:deal(Dealer),
+                           KeyShares
+                   end,
     Sid = crypto:strong_rand_bytes(32),
 
     InitialState1 = [hbbft_cc:init(Sk, Sid, N, F) || Sk <- PrivateKeys],

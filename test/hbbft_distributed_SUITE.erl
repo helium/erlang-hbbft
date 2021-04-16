@@ -81,7 +81,7 @@ simple_test(Config) ->
                 N,
                 F,
                 I,
-                tc_key_share:serialize(SK),
+                hbbft_test_utils:serialize_key('BLS12-381', SK),
                 BatchSize,
                 false
             ])}
@@ -201,7 +201,7 @@ serialization_test(Config) ->
                 N,
                 F,
                 I,
-                tc_key_share:serialize(SK),
+                hbbft_test_utils:serialize_key('BLS12-381', SK),
                 BatchSize,
                 false
             ])}
@@ -353,7 +353,7 @@ partition_test_(Config, Filter) ->
                 N,
                 F,
                 I,
-                tc_key_share:serialize(SK),
+                hbbft_test_utils:serialize_key('BLS12-381', SK),
                 BatchSize,
                 false
             ])}
