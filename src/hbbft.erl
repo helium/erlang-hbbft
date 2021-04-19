@@ -105,6 +105,7 @@ have_key(#hbbft_data{key_share = Key}) ->
 -spec status(hbbft_data()) -> map().
 status(HBBFTData) ->
     #{
+        curve => HBBFTData#hbbft_data.curve,
         batch_size => HBBFTData#hbbft_data.batch_size,
         buf => length(HBBFTData#hbbft_data.buf),
         max_buf => HBBFTData#hbbft_data.max_buf,
