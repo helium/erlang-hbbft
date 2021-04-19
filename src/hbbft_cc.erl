@@ -32,7 +32,7 @@ status(undefined) ->
     undefined;
 status(CCData) ->
     #{state => CCData#cc_data.state,
-      shares => serialize_shares(curve(CCData#cc_data.sk), CCData#cc_data.shares)
+      shares => serialize_shares(hbbft_utils:curve(CCData#cc_data.sk), CCData#cc_data.shares)
      }.
 
 %% Figure12. Bullet1
@@ -60,7 +60,7 @@ init(KeyShare, Sid0, N, F) ->
 get_coin(Data = #cc_data{state=done}) ->
     {Data, ok};
 get_coin(Data = #cc_data{sk=SK}) ->
-    case curve(SK) of
+    case hbbft_utils:curve(SK) of
         'BLS12-381' ->
             Share = tc_key_share:sign_share(Data#cc_data.sk, Data#cc_data.sid),
             {Data, {send, [{multicast, {share, hbbft_utils:sig_share_to_binary('BLS12-381', Share)}}]}};
@@ -87,7 +87,7 @@ share(#cc_data{state=done}, _J, _Share) ->
 share(Data=#cc_data{sk=SK}, J, Share) ->
     case maps:is_key(J, Data#cc_data.shares) of
         false ->
-            Curve = curve(SK),
+            Curve = hbbft_utils:curve(SK),
             DeserializedShare = hbbft_utils:binary_to_sig_share(Curve, SK, Share),
             ValidShare = case Curve of
                              'BLS12-381' ->
@@ -141,12 +141,26 @@ share(Data=#cc_data{sk=SK}, J, Share) ->
     end.
 
 -spec serialize(cc_data()) -> cc_serialized_data().
-serialize(#cc_data{state=State, sid=SID, n=N, sk=SK, f=F, shares=Shares}) ->
-    #cc_serialized_data{state=State, sid=serialize_sid(SID), n=N, f=F, shares=serialize_shares(curve(SK), Shares)}.
+serialize(#cc_data{state = State, sid = SID, n = N, sk = SK, f = F, shares = Shares}) ->
+    #cc_serialized_data{
+        state = State,
+        sid = serialize_sid(SID),
+        n = N,
+        f = F,
+        shares = serialize_shares(hbbft_utils:curve(SK), Shares)
+    }.
 
--spec deserialize(cc_serialized_data(), tc_key_share:tc_key_share() | tpke_privkey:privkey()) -> cc_data().
-deserialize(#cc_serialized_data{state=State, sid=SID, n=N, f=F, shares=Shares}, SK) ->
-    #cc_data{state=State, sk=SK, sid=deserialize_sid(SK, SID), n=N, f=F, shares=deserialize_shares(curve(SK), SK, Shares)}.
+-spec deserialize(cc_serialized_data(), tc_key_share:tc_key_share() | tpke_privkey:privkey()) ->
+    cc_data().
+deserialize(#cc_serialized_data{state = State, sid = SID, n = N, f = F, shares = Shares}, SK) ->
+    #cc_data{
+        state = State,
+        sk = SK,
+        sid = deserialize_sid(SK, SID),
+        n = N,
+        f = F,
+        shares = deserialize_shares(hbbft_utils:curve(SK), SK, Shares)
+    }.
 
 -spec serialize_shares('BLS12-381' | 'SS512', #{non_neg_integer() => signature_share:sig_share()}) -> #{non_neg_integer() => binary()}.
 serialize_shares(Curve, Shares) ->
@@ -156,19 +170,13 @@ serialize_shares(Curve, Shares) ->
 deserialize_shares(Curve, SK, Shares) ->
     maps:map(fun(_K, V) -> hbbft_utils:binary_to_sig_share(Curve, SK, V) end, Shares).
 
-curve(SK) ->
-    case tc_key_share:is_key_share(SK) of
-        true -> 'BLS12-381';
-        false -> 'SS512'
-    end.
-
 serialize_sid(SID) when is_binary(SID) ->
     SID;
 serialize_sid(SID) ->
     erlang_pbc:element_to_binary(SID).
 
 deserialize_sid(SK, SID) ->
-    case curve(SK) of
+    case hbbft_utils:curve(SK) of
         'BLS12-381' -> SID;
         'SS512' -> tpke_pubkey:deserialize_element(tpke_privkey:public_key(SK), SID)
     end.

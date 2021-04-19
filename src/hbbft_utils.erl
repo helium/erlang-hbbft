@@ -5,7 +5,16 @@
 
 -export_type([unicast/1, multicast/1]).
 
--export([sig_share_to_binary/2, binary_to_sig_share/3, dec_share_to_binary/2, binary_to_dec_share/3, wrap/2, random_n/2, shuffle/1]).
+-export([
+    sig_share_to_binary/2,
+    binary_to_sig_share/3,
+    dec_share_to_binary/2,
+    binary_to_dec_share/3,
+    wrap/2,
+    random_n/2,
+    shuffle/1,
+    curve/1
+]).
 
 sig_share_to_binary('BLS12-381', {ShareIdx, SigShare}) ->
     %% Assume less than 256 members in the consensus group
@@ -54,3 +63,12 @@ random_n(N, List) ->
 -spec shuffle(list()) -> list().
 shuffle(List) ->
     [X || {_,X} <- lists:sort([{rand:uniform(), N} || N <- List])].
+
+-spec curve(KeyShare :: hbbft:key_share()) -> hbbft:curve().
+curve(KeyShare) ->
+    case tc_key_share:is_key_share(KeyShare) of
+        true ->
+            'BLS12-381';
+        false ->
+            'SS512'
+    end.

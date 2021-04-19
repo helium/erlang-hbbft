@@ -82,6 +82,8 @@
     {{acs, non_neg_integer()}, hbbft_acs:bba_msg()}
 ).
 
+-export_type([curve/0, key_share/0]).
+
 -if(?OTP_RELEASE > 22).
 %% Ericsson why do you hate us so?
 -define(ENCRYPT(Key, IV, AAD, PlainText, TagLength),
@@ -172,7 +174,7 @@ init(KeyShare, N, F, J, BatchSize, MaxBuf, {M, Fn, A}) ->
     init(KeyShare, N, F, J, BatchSize, MaxBuf, {M, Fn, A}, 0, []).
 
 init(KeyShare, N, F, J, BatchSize, MaxBuf, StampFun, Round, Buf) ->
-    Curve = curve(KeyShare),
+    Curve = hbbft_utils:curve(KeyShare),
     #hbbft_data{
         curve = Curve,
         key_share = KeyShare,
@@ -839,7 +841,7 @@ deserialize(M0, SK) ->
         enc_keys := EncKeys0
     } = M,
 
-    Curve = curve(SK),
+    Curve = hbbft_utils:curve(SK),
 
     EncKeys = maps:map(
                 fun(_, Ciphertext) ->
@@ -1044,12 +1046,3 @@ decode_list(<<Length:24/integer-unsigned-little, Entry:Length/binary, Tail/binar
     decode_list(Tail, [Entry | Acc]);
 decode_list(_, _Acc) ->
     {error, bad_chunk_encoding}.
-
--spec curve(KeyShare :: key_share()) -> curve().
-curve(KeyShare) ->
-    case tc_key_share:is_key_share(KeyShare) of
-        true ->
-            'BLS12-381';
-        false ->
-            'SS512'
-    end.
