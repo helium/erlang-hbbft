@@ -802,9 +802,15 @@ serialize(Data) ->
 serialize(#hbbft_data{key_share = SK} = Data, false) ->
     %% dont serialize the private key
     {serialize_hbbft_data(Data), SK};
-serialize(#hbbft_data{key_share = SK} = Data, true) ->
+serialize(#hbbft_data{key_share = SK, curve=Curve} = Data, true) ->
     %% serialize the private key as well
-    {serialize_hbbft_data(Data), tc_key_share:serialize(SK)}.
+    SerSK = case Curve of
+        'BLS12-381' ->
+            tc_key_share:serialize(SK);
+        'SS512' ->
+            tpke_privkey:serialize(SK)
+    end,
+    {serialize_hbbft_data(Data), SerSK}.
 
 -spec deserialize(#{atom() => binary() | map()}, tc_key_share:tc_key_share()) -> hbbft_data().
 deserialize(M0, SK) ->
