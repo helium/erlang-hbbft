@@ -38,8 +38,8 @@
 
 -record(hbbft_data, {
     batch_size :: pos_integer(),
-    curve :: 'SS512' | 'BLS12-381',
-    key_share :: undefined | tc_key_share:tc_key_share() | tpke_privkey:privkey(),
+    curve :: curve(),
+    key_share :: key_share(),
     n :: pos_integer(),
     f :: pos_integer(),
     j :: non_neg_integer(),
@@ -66,6 +66,8 @@
     failed_decrypt = [] :: [non_neg_integer()]
 }).
 
+-type curve() :: 'SS512' | 'BLS12-381'.
+-type key_share() :: undefined | tc_key_share:tc_key_share() | tpke_privkey:privkey().
 -type hbbft_data() :: #hbbft_data{}.
 -type acs_msg() :: {{acs, non_neg_integer()}, hbbft_acs:msgs()}.
 -type dec_msg() :: {dec, non_neg_integer(), non_neg_integer(), {non_neg_integer(), binary()}}.
@@ -170,12 +172,7 @@ init(KeyShare, N, F, J, BatchSize, MaxBuf, {M, Fn, A}) ->
     init(KeyShare, N, F, J, BatchSize, MaxBuf, {M, Fn, A}, 0, []).
 
 init(KeyShare, N, F, J, BatchSize, MaxBuf, StampFun, Round, Buf) ->
-    Curve = case tc_key_share:is_key_share(KeyShare) of
-                true ->
-                    'BLS12-381';
-                false ->
-                    'SS512'
-            end,
+    Curve = curve(KeyShare),
     #hbbft_data{
         curve = Curve,
         key_share = KeyShare,
@@ -842,12 +839,7 @@ deserialize(M0, SK) ->
         enc_keys := EncKeys0
     } = M,
 
-    Curve = case tc_key_share:is_key_share(SK) of
-                true ->
-                    'BLS12-381';
-                false ->
-                    'SS512'
-            end,
+    Curve = curve(SK),
 
     EncKeys = maps:map(
                 fun(_, Ciphertext) ->
@@ -992,14 +984,21 @@ check_completion(Data) ->
             {Data, ok}
     end.
 
--spec combine_shares(
+-spec combine_shares
+    (
         'BLS12-381',
-    pos_integer(),
-    tc_key_share:tc_key_share(),
-    [{non_neg_integer(), decryption_share:dec_share()}],
-    ciphertext:ciphertext()
-) -> undefined | binary();
-                    ('SS512', pos_integer(), tpke_privkey:privkey(), [{non_neg_integer(), erlang_pbc:element()}], erlang_pbc:element()) -> undefined | binary().
+        pos_integer(),
+        tc_key_share:tc_key_share(),
+        [{non_neg_integer(), decryption_share:dec_share()}],
+        ciphertext:ciphertext()
+    ) -> undefined | binary();
+    (
+        'SS512',
+        pos_integer(),
+        tpke_privkey:privkey(),
+        [{non_neg_integer(), erlang_pbc:element()}],
+        erlang_pbc:element()
+    ) -> undefined | binary().
 combine_shares(Curve, F, SK, SharesForThisBundle, Ciphertext) ->
     %% only use valid shares so an invalid share doesn't corrupt our result
     ValidSharesForThisBundle = [S || {true, S} <- SharesForThisBundle],
@@ -1008,13 +1007,17 @@ combine_shares(Curve, F, SK, SharesForThisBundle, Ciphertext) ->
             case Curve of
                 'BLS12-381' ->
                     {ok, Bin} = tc_key_share:combine_decryption_shares(
-                                  SK,
-                                  ValidSharesForThisBundle,
-                                  Ciphertext
-                                 ),
+                        SK,
+                        ValidSharesForThisBundle,
+                        Ciphertext
+                    ),
                     Bin;
                 'SS512' ->
-                    tpke_pubkey:combine_shares(tpke_privkey:public_key(SK), Ciphertext, ValidSharesForThisBundle)
+                    tpke_pubkey:combine_shares(
+                        tpke_privkey:public_key(SK),
+                        Ciphertext,
+                        ValidSharesForThisBundle
+                    )
             end;
         false ->
             %% not enough valid shares to bother trying to combine them
@@ -1041,3 +1044,12 @@ decode_list(<<Length:24/integer-unsigned-little, Entry:Length/binary, Tail/binar
     decode_list(Tail, [Entry | Acc]);
 decode_list(_, _Acc) ->
     {error, bad_chunk_encoding}.
+
+-spec curve(KeyShare :: key_share()) -> curve().
+curve(KeyShare) ->
+    case tc_key_share:is_key_share(KeyShare) of
+        true ->
+            'BLS12-381';
+        false ->
+            'SS512'
+    end.
