@@ -836,8 +836,12 @@ deserialize(M0, SK) ->
         enc_keys := EncKeys0
     } = M,
 
-    % Upgrades are from old SS512 code
-    Curve = maps:get(curve, M, 'SS512'),
+    Curve = case tc_key_share:is_key_share(SK) of
+                true ->
+                    'BLS12-381';
+                false ->
+                    'SS512'
+            end,
 
     EncKeys = maps:map(
                 fun(_, Ciphertext) ->
@@ -886,8 +890,8 @@ deserialize(M0, SK) ->
 
 -spec serialize_hbbft_data(hbbft_data()) -> #{atom() => binary() | map()}.
 serialize_hbbft_data(#hbbft_data{
-    curve = Curve,
     batch_size = BatchSize,
+    curve = Curve,
     n = N,
     f = F,
     j = J,
@@ -909,7 +913,6 @@ serialize_hbbft_data(#hbbft_data{
     stamps = Stamps
 }) ->
     M = #{
-        curve => Curve,
         batch_size => BatchSize,
         n => N,
         f => F,
