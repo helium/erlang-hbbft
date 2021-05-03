@@ -14,12 +14,12 @@
 
 -record(state, {
           hbbft :: hbbft:hbbft(),
-          sk :: tpke_privkey:privkey(),
-          ssk :: tpke_privkey:privkey_serialized()
+          sk :: tc_key_share:tc_key_share(),
+          ssk :: binary()
          }).
 
 init(HBBFTArgs) ->
-    SK = tpke_privkey:deserialize(proplists:get_value(sk, HBBFTArgs)),
+    SK = tc_key_share:deserialize(proplists:get_value(sk, HBBFTArgs)),
     N = proplists:get_value(n, HBBFTArgs),
     F = proplists:get_value(f, HBBFTArgs),
     ID = proplists:get_value(id, HBBFTArgs),
@@ -73,7 +73,7 @@ handle_message(Msg, Actor, State) ->
             self() ! {transactions, Txns},
             {State#state{hbbft=HBBFT}, []};
         {HBBFT, {result, {signature, Sig}}} ->
-            self() ! {signature, Sig, tpke_privkey:public_key(State#state.sk)},
+            self() ! {signature, Sig},
             {State#state{hbbft=HBBFT}, []}
     end.
 
@@ -86,7 +86,7 @@ serialize(State) ->
 
 deserialize(Binary) ->
     State = binary_to_term(Binary),
-    SK = tpke_privkey:deserialize(State#state.ssk),
+    SK = tc_key_share:deserialize(State#state.ssk),
     HBBFT = hbbft:deserialize(State#state.hbbft, SK),
     #state{hbbft=HBBFT}.
 
