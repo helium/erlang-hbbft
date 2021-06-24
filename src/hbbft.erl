@@ -70,7 +70,7 @@
 -type key_share() :: undefined | tc_key_share:tc_key_share() | tpke_privkey:privkey().
 -type hbbft_data() :: #hbbft_data{}.
 -type acs_msg() :: {{acs, non_neg_integer()}, hbbft_acs:msgs()}.
--type dec_msg() :: {dec, non_neg_integer(), non_neg_integer(), {non_neg_integer(), binary()}}.
+-type dec_msg() :: {dec, non_neg_integer(), non_neg_integer(), binary()}.
 -type sign_msg() :: {sign, non_neg_integer(), binary()}.
 -type rbc_wrapped_output() ::
     hbbft_utils:unicast({{acs, non_neg_integer()}, {{rbc, non_neg_integer()}, hbbft_rbc:val_msg()}})
