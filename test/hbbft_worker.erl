@@ -92,16 +92,9 @@ verify_block_fit([A, B | _], KeyShare) ->
     end.
 
 verify_block_signature(KeyShare, A) ->
-    case tc_key_share:is_key_share(KeyShare) of
-        true ->
-            Signature = tc_signature:deserialize(A#block.signature),
-            tc_key_share:verify(KeyShare, Signature, term_to_binary(A#block{signature= <<>>}));
-        false ->
-            PubKey = tpke_privkey:public_key(KeyShare),
-            HM = tpke_pubkey:hash_message(PubKey, term_to_binary(A#block{signature= <<>>})),
-            Signature = tpke_pubkey:deserialize_element(PubKey, A#block.signature),
-            tpke_pubkey:verify_signature(PubKey, Signature, HM)
-    end.
+    true = tc_key_share:is_key_share(KeyShare),
+    Signature = tc_signature:deserialize(A#block.signature),
+    tc_key_share:verify(KeyShare, Signature, term_to_binary(A#block{signature= <<>>})).
 
 
 block_transactions(Block) ->

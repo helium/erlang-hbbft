@@ -1,8 +1,5 @@
 -module(hbbft_distributed_SUITE).
 
--include_lib("common_test/include/ct.hrl").
--include_lib("kernel/include/inet.hrl").
-
 -export([
     groups/0,
     init_per_group/2,
@@ -17,14 +14,11 @@
 -export([simple_test/1, serialization_test/1, partition_test/1, partition_and_filter_test/1]).
 
 all() ->
-    [{group, ss512}, {group, bls12_381}].
+    [{group, bls12_381}].
 
 groups() ->
-    [{ss512, [], test_cases()},
-     {bls12_381, [], test_cases()}].
+    [{bls12_381, [], test_cases()}].
 
-init_per_group(ss512, Config) ->
-    [{curve, 'SS512'} | Config];
 init_per_group(bls12_381, Config) ->
     [{curve, 'BLS12-381'} | Config].
 
@@ -497,11 +491,5 @@ keyshares(Config) ->
     Nodes = proplists:get_value(nodes, Config),
     N = length(Nodes),
     F = (N div 3),
-    case proplists:get_value(curve, Config, 'BLS12-381') of
-        'BLS12-381' ->
-            KeyShares = tc_key_share:deal(N, F);
-        'SS512' ->
-            {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
-            {ok, {_PubKey, KeyShares}} = dealer:deal(Dealer)
-    end,
-    KeyShares.
+    'BLS12-381' = proplists:get_value(curve, Config),
+    tc_key_share:deal(N, F).

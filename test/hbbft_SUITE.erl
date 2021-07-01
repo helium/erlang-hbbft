@@ -21,7 +21,7 @@
 ]).
 
 all() ->
-    [{group, ss512}, {group, bls12_381}].
+    [{group, bls12_381}].
 
 test_cases() ->
     [
@@ -40,11 +40,8 @@ test_cases() ->
     ].
 
 groups() ->
-    [{ss512, [], test_cases() -- [batch_size_limit_minimal_test]},
-     {bls12_381, [], test_cases()}].
+    [{bls12_381, [], test_cases()}].
 
-init_per_group(ss512, Config) ->
-    [{curve, 'SS512'} | Config];
 init_per_group(bls12_381, Config) ->
     [{curve, 'BLS12-381'} | Config].
 
@@ -56,13 +53,7 @@ init_per_testcase(_, Config) ->
     F = N div 4,
     Module = hbbft,
     BatchSize = 20,
-    case proplists:get_value(curve, Config, 'BLS12-381') of
-        'BLS12-381' ->
-            PrivateKeys = tc_key_share:deal(N, F);
-        'SS512' ->
-            {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
-            {ok, {_PubKey, PrivateKeys}} = dealer:deal(Dealer)
-    end,
+    PrivateKeys = tc_key_share:deal(N, F),
     [{n, N}, {f, F}, {batchsize, BatchSize}, {module, Module}, {privatekeys, PrivateKeys} | Config].
 
 end_per_testcase(_, _Config) ->
@@ -282,23 +273,12 @@ two_actors_missing_test(Config) ->
     ok.
 
 encrypt_decrypt_test(Config) ->
-    case proplists:get_value(curve, Config, 'BLS12-381') of
-        'BLS12-381' ->
-            PrivateKeys = [SK1 | _RemainingSKs] = proplists:get_value(privatekeys, Config),
-            PlainText = crypto:strong_rand_bytes(24),
-            Ciphertext = tc_ciphertext:deserialize(hbbft:encrypt('BLS12-381', hd(PrivateKeys), PlainText)),
-            DecShares = [tc_key_share:decrypt_share(SK, Ciphertext) || SK <- PrivateKeys],
-            {ok, Decrypted} = tc_key_share:combine_decryption_shares(SK1, DecShares, Ciphertext),
-            ?assertEqual(PlainText, Decrypted);
-        'SS512' ->
-            PrivateKeys = proplists:get_value(privatekeys, Config),
-            PubKey = tpke_privkey:public_key(hd(PrivateKeys)),
-            PlainText = crypto:strong_rand_bytes(24),
-            Enc = hbbft:encrypt('SS512', hd(PrivateKeys), PlainText),
-            {ok, EncKey} = hbbft:get_encrypted_key(hd(PrivateKeys), Enc),
-            DecKey = tpke_pubkey:combine_shares(PubKey, EncKey, [ tpke_privkey:decrypt_share(SK, EncKey) || SK <- PrivateKeys]),
-            ?assertEqual(PlainText, hbbft:decrypt(DecKey, Enc))
-    end,
+    PrivateKeys = [SK1 | _RemainingSKs] = proplists:get_value(privatekeys, Config),
+    PlainText = crypto:strong_rand_bytes(24),
+    Ciphertext = tc_ciphertext:deserialize(hbbft:encrypt('BLS12-381', hd(PrivateKeys), PlainText)),
+    DecShares = [tc_key_share:decrypt_share(SK, Ciphertext) || SK <- PrivateKeys],
+    {ok, Decrypted} = tc_key_share:combine_decryption_shares(SK1, DecShares, Ciphertext),
+    ?assertEqual(PlainText, Decrypted),
     ok.
 
 start_on_demand_test(Config) ->
@@ -357,13 +337,7 @@ one_actor_wrong_key_test(Config) ->
     Curve = proplists:get_value(curve, Config),
     BatchSize = proplists:get_value(batchsize, Config),
     PrivateKeys0 = proplists:get_value(privatekeys, Config),
-    case Curve of
-        'BLS12-381' ->
-            PrivateKeys1 = tc_key_share:deal(N, F);
-        'SS512' ->
-            {ok, Dealer} = dealer:new(N, F+1, 'SS512'),
-            {ok, {_PubKey, PrivateKeys1}} = dealer:deal(Dealer)
-    end,
+    PrivateKeys1 = tc_key_share:deal(N, F),
     %% give actor 1 a completely unrelated key
     %% this will prevent it from doing any valid threshold cryptography
     %% and thus it will not be able to reach consensus
@@ -416,11 +390,8 @@ one_actor_corrupted_key_test(Config) ->
     %% this will not prevent the actor for encrypting their bundle
     %% merely prevent it producing valid decryption shares
     %% thus all the actors will be able to converge
-    {Pos, Val} = case Curve of
-              'BLS12-381' -> {4, element(4, PK1) + 1000};
-              'SS512' -> {3, erlang_pbc:element_random(element(3, PK1))}
-          end,
-    PK2 = setelement(Pos, PK1, Val),
+    Pos = 4,
+    PK2 = setelement(Pos, PK1, element(Pos, PK1) + 1000),
     PrivateKeys = [PK2 | PrivateKeys0],
 
     Workers = [
