@@ -82,23 +82,6 @@
 
 -export_type([curve/0, key_share/0]).
 
--if(?OTP_RELEASE > 22).
-%% Ericsson why do you hate us so?
--define(ENCRYPT(Key, IV, AAD, PlainText, TagLength),
-    crypto:crypto_one_time_aead(aes_256_gcm, Key, IV, PlainText, AAD, TagLength, true)
-).
--define(DECRYPT(Key, IV, AAD, CipherText, Tag),
-    crypto:crypto_one_time_aead(aes_256_gcm, Key, IV, CipherText, AAD, Tag, false)
-).
--else.
--define(ENCRYPT(Key, IV, AAD, PlainText, TagLength),
-    crypto:block_encrypt(aes_gcm, Key, IV, {AAD, PlainText, TagLength})
-).
--define(DECRYPT(Key, IV, AAD, CipherText, Tag),
-    crypto:block_decrypt(aes_gcm, Key, IV, {AAD, CipherText, Tag})
-).
--endif.
-
 -spec have_key(hbbft_data()) -> boolean().
 have_key(#hbbft_data{key_share = Key}) ->
     %% we don't have a key if it's undefined
