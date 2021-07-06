@@ -1,12 +1,12 @@
 -module(hbbft_test_utils).
 
--export([serialize_key/2, deserialize_key/1, do_send_outer/4, shuffle/1, random_n/2, enumerate/1, merge_replies/3]).
-
-serialize_key('BLS12-381'=Curve, SK) ->
-    {Curve, tc_key_share:serialize(SK)}.
-
-deserialize_key({'BLS12-381', SerKey}) ->
-    tc_key_share:deserialize(SerKey).
+-export([
+    do_send_outer/4,
+    shuffle/1,
+    random_n/2,
+    enumerate/1,
+    merge_replies/3
+]).
 
 % TODO Type of Acc elements
 % TODO Type of States elements

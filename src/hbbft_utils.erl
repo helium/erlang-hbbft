@@ -6,31 +6,30 @@
 -export_type([unicast/1, multicast/1]).
 
 -export([
-    sig_share_to_binary/2,
-    binary_to_sig_share/3,
-    dec_share_to_binary/2,
-    binary_to_dec_share/3,
+    sig_share_to_binary/1,
+    binary_to_sig_share/1,
+    dec_share_to_binary/1,
+    binary_to_dec_share/1,
     wrap/2,
     random_n/2,
-    shuffle/1,
-    curve/1
+    shuffle/1
 ]).
 
-sig_share_to_binary('BLS12-381', {ShareIdx, SigShare}) ->
+sig_share_to_binary({ShareIdx, SigShare}) ->
     %% Assume less than 256 members in the consensus group
     ShareBinary = tc_signature_share:serialize(SigShare),
     <<ShareIdx:8/integer-unsigned, ShareBinary/binary>>.
 
-binary_to_sig_share('BLS12-381', _SK, <<ShareIdx:8/integer-unsigned, ShareBinary/binary>>) ->
+binary_to_sig_share(<<ShareIdx:8/integer-unsigned, ShareBinary/binary>>) ->
     SigShare = tc_signature_share:deserialize(ShareBinary),
     {ShareIdx, SigShare}.
 
-dec_share_to_binary('BLS12-381', {ShareIdx, DecShare}) ->
+dec_share_to_binary({ShareIdx, DecShare}) ->
     %% Assume less than 256 members in the consensus group
     ShareBinary = tc_decryption_share:serialize(DecShare),
     <<ShareIdx:8/integer-unsigned, ShareBinary/binary>>.
 
-binary_to_dec_share('BLS12-381', _SK, <<ShareIdx:8/integer-unsigned, ShareBinary/binary>>) ->
+binary_to_dec_share(<<ShareIdx:8/integer-unsigned, ShareBinary/binary>>) ->
     DecShare = tc_decryption_share:deserialize(ShareBinary),
     {ShareIdx, DecShare}.
 
@@ -47,11 +46,7 @@ wrap(Id, [{unicast, Dest, Msg}|T]) ->
 random_n(N, List) ->
     lists:sublist(shuffle(List), N).
 
+%% FIXME Assumes numeric list - update spec or replace with generic shuffle.
 -spec shuffle(list()) -> list().
 shuffle(List) ->
     [X || {_,X} <- lists:sort([{rand:uniform(), N} || N <- List])].
-
--spec curve(KeyShare :: hbbft:key_share()) -> hbbft:curve().
-curve(KeyShare) ->
-    true = tc_key_share:is_key_share(KeyShare),
-    'BLS12-381'.

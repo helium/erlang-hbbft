@@ -4,7 +4,12 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("relcast/include/fakecast.hrl").
 
--export([all/0, groups/0, init_per_group/2, end_per_group/2, init_per_testcase/2, end_per_testcase/2]).
+-export([
+    all/0,
+    init_per_testcase/2,
+    end_per_testcase/2
+]).
+
 -export([
     init_test/1,
     one_actor_no_txns_test/1,
@@ -21,9 +26,6 @@
 ]).
 
 all() ->
-    [{group, bls12_381}].
-
-test_cases() ->
     [
         init_test,
         one_actor_no_txns_test,
@@ -39,15 +41,6 @@ test_cases() ->
         initial_fakecast_test
     ].
 
-groups() ->
-    [{bls12_381, [], test_cases()}].
-
-init_per_group(bls12_381, Config) ->
-    [{curve, 'BLS12-381'} | Config].
-
-end_per_group(_, _Config) ->
-    ok.
-
 init_per_testcase(_, Config) ->
     N = 4,
     F = N div 4,
@@ -62,12 +55,11 @@ end_per_testcase(_, _Config) ->
 init_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
-    Curve = proplists:get_value(curve, Config),
     BatchSize = proplists:get_value(batchsize, Config),
     PrivateKeys = proplists:get_value(privatekeys, Config),
     ct:pal("privkeys ~p", [PrivateKeys]),
     Workers = [
-        element(2, hbbft_worker:start_link(N, F, I, hbbft_test_utils:serialize_key(Curve, SK), BatchSize, false))
+        element(2, hbbft_worker:start_link(N, F, I, tc_key_share:serialize(SK), BatchSize, false))
      || {I, SK} <- enumerate(PrivateKeys)
     ],
     Msgs = [crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N * 20)],
@@ -275,7 +267,7 @@ two_actors_missing_test(Config) ->
 encrypt_decrypt_test(Config) ->
     PrivateKeys = [SK1 | _RemainingSKs] = proplists:get_value(privatekeys, Config),
     PlainText = crypto:strong_rand_bytes(24),
-    Ciphertext = tc_ciphertext:deserialize(hbbft:encrypt('BLS12-381', hd(PrivateKeys), PlainText)),
+    Ciphertext = tc_ciphertext:deserialize(hbbft:encrypt(hd(PrivateKeys), PlainText)),
     DecShares = [tc_key_share:decrypt_share(SK, Ciphertext) || SK <- PrivateKeys],
     {ok, Decrypted} = tc_key_share:combine_decryption_shares(SK1, DecShares, Ciphertext),
     ?assertEqual(PlainText, Decrypted),
@@ -284,11 +276,10 @@ encrypt_decrypt_test(Config) ->
 start_on_demand_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
-    Curve = proplists:get_value(curve, Config),
     BatchSize = proplists:get_value(batchsize, Config),
     PrivateKeys = proplists:get_value(privatekeys, Config),
     Workers = [
-        element(2, hbbft_worker:start_link(N, F, I, hbbft_test_utils:serialize_key(Curve, SK), BatchSize, false))
+        element(2, hbbft_worker:start_link(N, F, I, tc_key_share:serialize(SK), BatchSize, false))
      || {I, SK} <- enumerate(PrivateKeys)
     ],
 
@@ -334,7 +325,6 @@ start_on_demand_test(Config) ->
 one_actor_wrong_key_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
-    Curve = proplists:get_value(curve, Config),
     BatchSize = proplists:get_value(batchsize, Config),
     PrivateKeys0 = proplists:get_value(privatekeys, Config),
     PrivateKeys1 = tc_key_share:deal(N, F),
@@ -344,7 +334,7 @@ one_actor_wrong_key_test(Config) ->
     PrivateKeys = [hd(PrivateKeys1) | tl(PrivateKeys0)],
 
     Workers = [
-        element(2, hbbft_worker:start_link(N, F, I, hbbft_test_utils:serialize_key(Curve, SK), BatchSize, false))
+        element(2, hbbft_worker:start_link(N, F, I, tc_key_share:serialize(SK), BatchSize, false))
      || {I, SK} <- enumerate(PrivateKeys)
     ],
     Msgs = [crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N * 20)],
@@ -383,7 +373,6 @@ one_actor_wrong_key_test(Config) ->
 one_actor_corrupted_key_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
-    Curve = proplists:get_value(curve, Config),
     BatchSize = proplists:get_value(batchsize, Config),
     [PK1 | PrivateKeys0] = proplists:get_value(privatekeys, Config),
     %% scramble the index of the key
@@ -395,7 +384,7 @@ one_actor_corrupted_key_test(Config) ->
     PrivateKeys = [PK2 | PrivateKeys0],
 
     Workers = [
-        element(2, hbbft_worker:start_link(N, F, I, hbbft_test_utils:serialize_key(Curve, SK), BatchSize, false))
+        element(2, hbbft_worker:start_link(N, F, I, tc_key_share:serialize(SK), BatchSize, false))
      || {I, SK} <- enumerate(PrivateKeys)
     ],
     Msgs = [crypto:strong_rand_bytes(128) || _ <- lists:seq(1, N * 20)],
@@ -431,16 +420,15 @@ one_actor_corrupted_key_test(Config) ->
 one_actor_oversized_batch_test(Config) ->
     N = proplists:get_value(n, Config),
     F = proplists:get_value(f, Config),
-    Curve = proplists:get_value(curve, Config),
     B = proplists:get_value(batchsize, Config),
     PrivateKeys = [SK1 | SKs] = proplists:get_value(privatekeys, Config),
 
     % with an oversized batch parameter
     BadWorker =
-        ok(hbbft_worker:start_link(N, F, 0, hbbft_test_utils:serialize_key(Curve, SK1), B + 1, false)),
+        ok(hbbft_worker:start_link(N, F, 0, tc_key_share:serialize(SK1), B + 1, false)),
     GoodWorkers =
         [
-            ok(hbbft_worker:start_link(N, F, I + 1, hbbft_test_utils:serialize_key(Curve, SKi), B, false))
+            ok(hbbft_worker:start_link(N, F, I + 1, tc_key_share:serialize(SKi), B, false))
          || {I, SKi} <- enumerate(SKs)
         ],
 
@@ -482,12 +470,11 @@ one_actor_oversized_batch_test(Config) ->
     ?assertMatch([], CommittedTxns -- GoodTxns),
     ok.
 
-batch_size_limit_minimal_test(Config) ->
+batch_size_limit_minimal_test(_Config) ->
     % Same test goal as one_actor_oversized_batch_test, but
     % the absolute minimal to test the state transition.
     N = 1,
     F = 0,
-    Curve = proplists:get_value(curve, Config),
     BatchSize = 1,
     [SK | _] = tc_key_share:deal(N, F),
 
@@ -516,7 +503,7 @@ batch_size_limit_minimal_test(Config) ->
                 dec,
                 hbbft:round(State_2),
                 AcsInstanceId,
-                hbbft_utils:dec_share_to_binary(Curve, tc_key_share:decrypt_share(SK, Enc))
+                hbbft_utils:dec_share_to_binary(tc_key_share:decrypt_share(SK, Enc))
             }
         ),
     ?assertMatch({result, {transactions, [], []}}, Result),

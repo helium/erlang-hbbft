@@ -65,7 +65,6 @@ end_per_testcase(_TestCase, Config) ->
 
 simple_test(Config) ->
     Nodes = proplists:get_value(nodes, Config),
-    Curve = proplists:get_value(curve, Config),
 
     %% master starts the dealer
     N = length(Nodes),
@@ -92,7 +91,7 @@ simple_test(Config) ->
                 N,
                 F,
                 I,
-                hbbft_test_utils:serialize_key(Curve, SK),
+                tc_key_share:serialize(SK),
                 BatchSize,
                 false
             ])}
@@ -186,7 +185,6 @@ simple_test(Config) ->
 
 serialization_test(Config) ->
     Nodes = proplists:get_value(nodes, Config),
-    Curve = proplists:get_value(curve, Config),
 
     %% master starts the dealer
     N = length(Nodes),
@@ -213,7 +211,7 @@ serialization_test(Config) ->
                 N,
                 F,
                 I,
-                hbbft_test_utils:serialize_key(Curve, SK),
+                tc_key_share:serialize(SK),
                 BatchSize,
                 false
             ])}
@@ -315,7 +313,6 @@ partition_and_filter_test(Config) ->
 
 partition_test_(Config, Filter) ->
     Nodes = proplists:get_value(nodes, Config),
-    Curve = proplists:get_value(curve, Config),
 
     %% master starts the dealer
     N = length(Nodes),
@@ -366,7 +363,7 @@ partition_test_(Config, Filter) ->
                 N,
                 F,
                 I,
-                hbbft_test_utils:serialize_key(Curve, SK),
+                tc_key_share:serialize(SK),
                 BatchSize,
                 false
             ])}

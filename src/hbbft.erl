@@ -24,7 +24,7 @@
 
 -ifdef(TEST).
 -export([
-    encrypt/3,
+    encrypt/2,
     encode_list/1,
     abstraction_breaking_set_acs_results/2,
     abstraction_breaking_set_enc_keys/2
@@ -36,8 +36,7 @@
 
 -record(hbbft_data, {
     batch_size :: pos_integer(),
-    curve :: curve(),
-    key_share :: key_share(),
+    key_share :: undefined | tc_key_share:tc_key_share(),
     n :: pos_integer(),
     f :: pos_integer(),
     j :: non_neg_integer(),
@@ -64,8 +63,6 @@
     failed_decrypt = [] :: [non_neg_integer()]
 }).
 
--type curve() :: 'BLS12-381'.
--type key_share() :: undefined | tc_key_share:tc_key_share().
 -type hbbft_data() :: #hbbft_data{}.
 -type acs_msg() :: {{acs, non_neg_integer()}, hbbft_acs:msgs()}.
 -type dec_msg() :: {dec, Round :: non_neg_integer(), ActorID :: non_neg_integer(), SerializedShare :: binary()}.
@@ -80,8 +77,6 @@
     {{acs, non_neg_integer()}, hbbft_acs:bba_msg()}
 ).
 
--export_type([curve/0, key_share/0]).
-
 -spec have_key(hbbft_data()) -> boolean().
 have_key(#hbbft_data{key_share = Key}) ->
     %% we don't have a key if it's undefined
@@ -90,7 +85,6 @@ have_key(#hbbft_data{key_share = Key}) ->
 -spec status(hbbft_data()) -> map().
 status(HBBFTData) ->
     #{
-        curve => HBBFTData#hbbft_data.curve,
         batch_size => HBBFTData#hbbft_data.batch_size,
         buf => length(HBBFTData#hbbft_data.buf),
         max_buf => HBBFTData#hbbft_data.max_buf,
@@ -155,9 +149,7 @@ init(KeyShare, N, F, J, BatchSize, MaxBuf, {M, Fn, A}) ->
     init(KeyShare, N, F, J, BatchSize, MaxBuf, {M, Fn, A}, 0, []).
 
 init(KeyShare, N, F, J, BatchSize, MaxBuf, StampFun, Round, Buf) ->
-    Curve = hbbft_utils:curve(KeyShare),
     #hbbft_data{
-        curve = Curve,
         key_share = KeyShare,
         n = N,
         f = F,
@@ -198,7 +190,6 @@ start_on_demand(
         j = J,
         n = N,
         key_share = KeyShare,
-        curve = Curve,
         batch_size = BatchSize,
         acs_init = false,
         stamps = Stamps,
@@ -216,7 +207,7 @@ start_on_demand(
             {M, F, A} -> erlang:apply(M, F, A)
         end,
     true = is_binary(Stamp),
-    EncX = encrypt(Curve, KeyShare, encode_list([Stamp|Proposed])),
+    EncX = encrypt(KeyShare, encode_list([Stamp|Proposed])),
     %% time to kick off a round
     {NewACSState, {send, ACSResponse}} = hbbft_acs:input(Data#hbbft_data.acs, EncX),
     %% add this to acs set in data and send out the ACS response(s)
@@ -251,7 +242,7 @@ input(Data = #hbbft_data{buf = _Buf}, _Txn) when is_binary(_Txn) ->
 %% should not be placed in TransactionsToRemove. Once this returns, the user should call next_round/1.
 -spec finalize_round(hbbft_data(), [binary()], binary()) ->
     {hbbft_data(), {send, [hbbft_utils:multicast(sign_msg())]}}.
-finalize_round(#hbbft_data{curve='BLS12-381'}=Data, TransactionsToRemove, ThingToSign) ->
+finalize_round(#hbbft_data{}=Data, TransactionsToRemove, ThingToSign) ->
     NewBuf = lists:filter(
         fun(Item) ->
             not lists:member(Item, TransactionsToRemove)
@@ -259,7 +250,7 @@ finalize_round(#hbbft_data{curve='BLS12-381'}=Data, TransactionsToRemove, ThingT
         Data#hbbft_data.buf
     ),
     SigShare = tc_key_share:sign_share(Data#hbbft_data.key_share, ThingToSign),
-    BinSigShare = hbbft_utils:sig_share_to_binary(Data#hbbft_data.curve, SigShare),
+    BinSigShare = hbbft_utils:sig_share_to_binary(SigShare),
     %% multicast the signature to everyone
     {Data#hbbft_data{thingtosign = ThingToSign, buf = NewBuf},
         {send, [{multicast, {sign, Data#hbbft_data.round, BinSigShare}}]}}.
@@ -360,7 +351,7 @@ buf(Buf, Data) ->
 handle_msg(Data = #hbbft_data{round = R}, _J, {{acs, R2}, _ACSMsg}) when R2 > R ->
     %% ACS requested we defer this message for now
     {Data, defer};
-handle_msg(Data = #hbbft_data{round = R, curve = 'BLS12-381'}, J, {{acs, R}, ACSMsg}) ->
+handle_msg(Data = #hbbft_data{round = R}, J, {{acs, R}, ACSMsg}) ->
     %% ACS message for this round
     case hbbft_acs:handle_msg(Data#hbbft_data.acs, J, ACSMsg) of
         ignore ->
@@ -381,7 +372,7 @@ handle_msg(Data = #hbbft_data{round = R, curve = 'BLS12-381'}, J, {{acs, R}, ACS
                         true ->
                             %% we've validated the ciphertext, this is now safe to do
                             Share = tc_key_share:decrypt_share(Data#hbbft_data.key_share, EncKey),
-                            SerializedShare = hbbft_utils:dec_share_to_binary(Data#hbbft_data.curve, Share),
+                            SerializedShare = hbbft_utils:dec_share_to_binary(Share),
                             {[
                                     {multicast, {dec, Data#hbbft_data.round, I, SerializedShare}}
                                     | RepliesAcc
@@ -448,7 +439,7 @@ handle_msg(Data = #hbbft_data{round = R, curve = 'BLS12-381'}, J, {{acs, R}, ACS
     end;
 handle_msg(Data = #hbbft_data{round = R}, _J, {dec, R2, _I, _Share}) when R2 > R ->
     {Data, defer};
-handle_msg(Data = #hbbft_data{round = R, curve = Curve = 'BLS12-381', key_share = SK}, J, {dec, R, I, Share}) ->
+handle_msg(Data = #hbbft_data{round = R, key_share = SK}, J, {dec, R, I, Share}) ->
     %% check if we have enough to decode the bundle
 
     %% have we already decrypted for this instance?
@@ -463,7 +454,7 @@ handle_msg(Data = #hbbft_data{round = R, curve = Curve = 'BLS12-381', key_share 
             ignore;
         false ->
             %% the Share now is a binary, deserialize it and then store in the dec_shares map
-            DeserializedShare = hbbft_utils:binary_to_dec_share(Curve, SK, Share),
+            DeserializedShare = hbbft_utils:binary_to_dec_share(Share),
             %% add share to map and validate any previously unvalidated shares
             %%
             %% check if we have a copy of our own proposal. this will always be true
@@ -481,7 +472,7 @@ handle_msg(Data = #hbbft_data{round = R, curve = Curve = 'BLS12-381', key_share 
                                 %% we validated the ciphertext above so we don't need to re-check it here
                                 Valid =
                                     tc_key_share:verify_decryption_share(
-                                        Data#hbbft_data.key_share,
+                                        SK,
                                         AShare,
                                         EncKey
                                      ),
@@ -508,9 +499,8 @@ handle_msg(Data = #hbbft_data{round = R, curve = Curve = 'BLS12-381', key_share 
                     EncKey = maps:get(I, Data#hbbft_data.enc_keys),
                     case
                         combine_shares(
-                            Data#hbbft_data.curve,
                             Data#hbbft_data.f,
-                            Data#hbbft_data.key_share,
+                            SK,
                             SharesForThisBundle,
                             EncKey
                         )
@@ -576,16 +566,16 @@ handle_msg(Data = #hbbft_data{round = R, thingtosign = ThingToSign}, _J, {sign, 
     ThingToSign == undefined orelse R2 > R
 ->
     {Data, defer};
-handle_msg(Data = #hbbft_data{round = R, thingtosign = ThingToSign, curve = Curve = 'BLS12-381', key_share = SK}, J, {sign, R, BinShare}) when
+handle_msg(Data = #hbbft_data{round = R, thingtosign = ThingToSign, key_share = SK}, J, {sign, R, BinShare}) when
     ThingToSign /= undefined
 ->
     %% messages related to signing the final block for this round, see finalize_round for more information
     %% Note: this is an extension to the HoneyBadger BFT specification
-    Share = hbbft_utils:binary_to_sig_share(Curve, SK, BinShare),
+    Share = hbbft_utils:binary_to_sig_share(BinShare),
     %% verify the share
     case
         tc_key_share:verify_signature_share(
-            Data#hbbft_data.key_share,
+            SK,
             Share,
             ThingToSign
         )
@@ -598,12 +588,12 @@ handle_msg(Data = #hbbft_data{round = R, thingtosign = ThingToSign, curve = Curv
                     %% ok, we have enough people agreeing with us we can combine the signature shares
                     {ok, Sig} =
                         tc_key_share:combine_signature_shares(
-                            Data#hbbft_data.key_share,
+                            SK,
                             maps:values(NewSigShares)
                         ),
                     ValidSignature =
                         tc_key_share:verify(
-                            Data#hbbft_data.key_share,
+                            SK,
                             Sig,
                             ThingToSign
                         ),
@@ -632,7 +622,6 @@ maybe_start_acs(
         n = N,
         j = J,
         key_share = KeyShare,
-        curve = Curve,
         batch_size = BatchSize,
         decrypted = Decrypted,
         stamps = Stamps
@@ -657,7 +646,7 @@ maybe_start_acs(
                     {M, F, A} -> erlang:apply(M, F, A)
                 end,
             true = is_binary(Stamp),
-            EncX = encrypt(Curve, KeyShare, encode_list([Stamp|Proposed])),
+            EncX = encrypt(KeyShare, encode_list([Stamp|Proposed])),
             %% time to kick off a round
             {NewACSState, {send, ACSResponse}} = hbbft_acs:input(Data#hbbft_data.acs, EncX),
             %% add this to acs set in data and send out the ACS response(s)
@@ -676,8 +665,8 @@ maybe_start_acs(
             {Data, ok}
     end.
 
--spec encrypt('BLS12-381', tc_key_share:tc_key_share(), binary()) -> binary().
-encrypt('BLS12-381', SK, Bin) ->
+-spec encrypt(tc_key_share:tc_key_share(), binary()) -> binary().
+encrypt(SK, Bin) ->
     tc_ciphertext:serialize(tc_key_share:encrypt(SK, Bin)).
 
 -spec serialize(hbbft_data()) ->
@@ -691,7 +680,7 @@ serialize(Data) ->
 serialize(#hbbft_data{key_share = SK} = Data, false) ->
     %% dont serialize the private key
     {serialize_hbbft_data(Data), SK};
-serialize(#hbbft_data{key_share = SK, curve='BLS12-381'} = Data, true) ->
+serialize(#hbbft_data{key_share = SK} = Data, true) ->
     %% serialize the private key as well
     {serialize_hbbft_data(Data), tc_key_share:serialize(SK)}.
 
@@ -724,15 +713,11 @@ deserialize(M0, SK) ->
         stamps := Stamps,
         enc_keys := EncKeys0
     } = M,
-
-    Curve = hbbft_utils:curve(SK),
-
     EncKeys = maps:map(
                 fun(_, Ciphertext) -> tc_ciphertext:deserialize(Ciphertext) end,
                 EncKeys0
                ),
     #hbbft_data{
-        curve = Curve,
         key_share = SK,
         batch_size = BatchSize,
         n = N,
@@ -750,12 +735,12 @@ deserialize(M0, SK) ->
         enc_keys = EncKeys,
         dec_shares = maps:map(
             fun(_, {Valid, Share}) ->
-                {Valid, hbbft_utils:binary_to_dec_share(Curve, SK, Share)}
+                {Valid, hbbft_utils:binary_to_dec_share(Share)}
             end,
             DecShares
         ),
         sig_shares = maps:map(
-            fun(_, Share) -> hbbft_utils:binary_to_sig_share(Curve, SK, Share) end,
+            fun(_, Share) -> hbbft_utils:binary_to_sig_share(Share) end,
             SigShares
         ),
         thingtosign = ThingToSign,
@@ -768,7 +753,6 @@ deserialize(M0, SK) ->
 -spec serialize_hbbft_data(hbbft_data()) -> #{atom() => binary() | map()}.
 serialize_hbbft_data(#hbbft_data{
     batch_size = BatchSize,
-    curve = Curve,
     n = N,
     f = F,
     j = J,
@@ -804,10 +788,10 @@ serialize_hbbft_data(#hbbft_data{
         acs_results => ACSResults,
         enc_keys => maps:map(fun(_, Ciphertext) -> tc_ciphertext:serialize(Ciphertext) end, EncKeys),
         dec_shares => maps:map(
-            fun(_, {Valid, Share}) -> {Valid, hbbft_utils:dec_share_to_binary(Curve, Share)} end,
+            fun(_, {Valid, Share}) -> {Valid, hbbft_utils:dec_share_to_binary(Share)} end,
             DecShares
         ),
-        sig_shares => maps:map(fun(_, V) -> hbbft_utils:sig_share_to_binary(Curve, V) end, SigShares),
+        sig_shares => maps:map(fun(_, V) -> hbbft_utils:sig_share_to_binary(V) end, SigShares),
         thingtosign => ThingToSign,
         failed_combine => FailedCombine,
         failed_decrypt => FailedDecrypt,
@@ -859,13 +843,12 @@ check_completion(Data) ->
 
 -spec combine_shares
     (
-        'BLS12-381',
         pos_integer(),
         tc_key_share:tc_key_share(),
         [{non_neg_integer(), tc_decryption_share:dec_share()}],
         tc_ciphertext:ciphertext()
     ) -> undefined | binary().
-combine_shares('BLS12-381', F, SK, SharesForThisBundle, Ciphertext) ->
+combine_shares(F, SK, SharesForThisBundle, Ciphertext) ->
     %% only use valid shares so an invalid share doesn't corrupt our result
     ValidSharesForThisBundle = [S || {true, S} <- SharesForThisBundle],
     case length(ValidSharesForThisBundle) > F of

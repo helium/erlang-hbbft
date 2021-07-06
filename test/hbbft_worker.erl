@@ -102,7 +102,7 @@ block_transactions(Block) ->
 
 init([N, F, ID, SK, BatchSize, ToSerialize]) ->
     %% deserialize the secret key once
-    DSK = hbbft_test_utils:deserialize_key(SK),
+    DSK = tc_key_share:deserialize(SK),
     %% init hbbft
     HBBFT = hbbft:init(DSK, N, F, ID, BatchSize, infinity),
     %% store the serialized state and serialized SK

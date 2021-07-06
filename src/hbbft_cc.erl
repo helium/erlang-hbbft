@@ -32,7 +32,7 @@ status(undefined) ->
     undefined;
 status(CCData) ->
     #{state => CCData#cc_data.state,
-      shares => serialize_shares(hbbft_utils:curve(CCData#cc_data.sk), CCData#cc_data.shares)
+      shares => serialize_shares(CCData#cc_data.shares)
      }.
 
 %% Figure12. Bullet1
@@ -54,10 +54,9 @@ init(KeyShare, Sid, N, F) ->
 -spec get_coin(cc_data()) -> {cc_data(), ok | {send, [hbbft_utils:multicast(share_msg())]}}.
 get_coin(Data = #cc_data{state=done}) ->
     {Data, ok};
-get_coin(Data = #cc_data{sk=SK}) ->
-    'BLS12-381' = hbbft_utils:curve(SK),
+get_coin(Data = #cc_data{}) ->
     Share = tc_key_share:sign_share(Data#cc_data.sk, Data#cc_data.sid),
-    {Data, {send, [{multicast, {share, hbbft_utils:sig_share_to_binary('BLS12-381', Share)}}]}}.
+    {Data, {send, [{multicast, {share, hbbft_utils:sig_share_to_binary(Share)}}]}}.
 
 
 %% upon receiving at least f + 1 shares, attempt to combine them
@@ -76,8 +75,7 @@ share(#cc_data{state=done}, _J, _Share) ->
 share(Data=#cc_data{sk=SK}, J, Share) ->
     case maps:is_key(J, Data#cc_data.shares) of
         false ->
-            Curve = 'BLS12-381' = hbbft_utils:curve(SK),
-            DeserializedShare = hbbft_utils:binary_to_sig_share(Curve, SK, Share),
+            DeserializedShare = hbbft_utils:binary_to_sig_share(Share),
             ValidShare =
                 tc_key_share:verify_signature_share(
                     Data#cc_data.sk,
@@ -124,13 +122,13 @@ share(Data=#cc_data{sk=SK}, J, Share) ->
     end.
 
 -spec serialize(cc_data()) -> cc_serialized_data().
-serialize(#cc_data{state = State, sid = <<SID/binary>>, n = N, sk = SK, f = F, shares = Shares}) ->
+serialize(#cc_data{state = State, sid = <<SID/binary>>, n = N, f = F, shares = Shares}) ->
     #cc_serialized_data{
         state = State,
         sid = SID,
         n = N,
         f = F,
-        shares = serialize_shares(hbbft_utils:curve(SK), Shares)
+        shares = serialize_shares(Shares)
     }.
 
 -spec deserialize(cc_serialized_data(), tc_key_share:tc_key_share()) ->
@@ -142,13 +140,13 @@ deserialize(#cc_serialized_data{state = State, sid = <<SID/binary>>, n = N, f = 
         sid = SID,
         n = N,
         f = F,
-        shares = deserialize_shares(hbbft_utils:curve(SK), SK, Shares)
+        shares = deserialize_shares(Shares)
     }.
 
--spec serialize_shares('BLS12-381', #{non_neg_integer() => tc_signature_share:sig_share()}) -> #{non_neg_integer() => binary()}.
-serialize_shares(Curve, Shares) ->
-    maps:map(fun(_K, V) -> hbbft_utils:sig_share_to_binary(Curve, V) end, Shares).
+-spec serialize_shares(#{non_neg_integer() => tc_signature_share:sig_share()}) -> #{non_neg_integer() => binary()}.
+serialize_shares(Shares) ->
+    maps:map(fun(_K, V) -> hbbft_utils:sig_share_to_binary(V) end, Shares).
 
--spec deserialize_shares('BLS12-381', tc_key_share:tc_key_share(), #{non_neg_integer() => binary()}) -> #{non_neg_integer() => tc_signature_share:sig_share()}.
-deserialize_shares(Curve, SK, Shares) ->
-    maps:map(fun(_K, V) -> hbbft_utils:binary_to_sig_share(Curve, SK, V) end, Shares).
+-spec deserialize_shares(#{non_neg_integer() => binary()}) -> #{non_neg_integer() => tc_signature_share:sig_share()}.
+deserialize_shares(Shares) ->
+    maps:map(fun(_K, V) -> hbbft_utils:binary_to_sig_share(V) end, Shares).
