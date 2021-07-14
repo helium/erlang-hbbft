@@ -18,7 +18,6 @@
     serialize/2,
     deserialize/2,
     status/1,
-    have_key/1,
     is_serialized/1
 ]).
 
@@ -36,7 +35,7 @@
 
 -record(hbbft_data, {
     batch_size :: pos_integer(),
-    key_share :: undefined | tc_key_share:tc_key_share(),
+    key_share :: tc_key_share:tc_key_share(),
     n :: pos_integer(),
     f :: pos_integer(),
     j :: non_neg_integer(),
@@ -76,11 +75,6 @@
 -type bba_wrapped_output() :: hbbft_utils:multicast(
     {{acs, non_neg_integer()}, hbbft_acs:bba_msg()}
 ).
-
--spec have_key(hbbft_data()) -> boolean().
-have_key(#hbbft_data{key_share = Key}) ->
-    %% we don't have a key if it's undefined
-    Key /= undefined.
 
 -spec status(hbbft_data()) -> map().
 status(HBBFTData) ->
