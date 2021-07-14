@@ -1,22 +1,12 @@
 -module(hbbft_test_utils).
 
--export([serialize_key/2, deserialize_key/1, do_send_outer/4, shuffle/1, random_n/2, enumerate/1, merge_replies/3]).
-
-serialize_key(Curve, SK) ->
-    case Curve of
-        'BLS12-381' ->
-            {Curve, tc_key_share:serialize(SK)};
-        'SS512' ->
-            {Curve, tpke_privkey:serialize(SK)}
-    end.
-
-deserialize_key({Curve, SerKey}) ->
-    case Curve of
-        'BLS12-381' ->
-            tc_key_share:deserialize(SerKey);
-        'SS512' ->
-            tpke_privkey:deserialize(SerKey)
-    end.
+-export([
+    do_send_outer/4,
+    shuffle/1,
+    random_n/2,
+    enumerate/1,
+    merge_replies/3
+]).
 
 % TODO Type of Acc elements
 % TODO Type of States elements

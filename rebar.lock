@@ -3,17 +3,9 @@
   {git,"https://github.com/helium/erlang-erasure.git",
        {ref,"c73354ca9914225a825569693dc72db6691d91f1"}},
   0},
- {<<"erlang_pbc">>,
-  {git,"https://github.com/helium/erlang_pbc.git",
-       {ref,"1d2651ba01ba81b748c553d9f729c0e167eeab72"}},
-  1},
  {<<"erlang_tc">>,
   {git,"https://github.com/helium/erlang-tc.git",
        {ref,"b3ef1d5541586f5c85b6d231345a921d57be32a3"}},
-  0},
- {<<"erlang_tpke">>,
-  {git,"https://github.com/helium/erlang-tpke.git",
-       {ref,"02e955cd16ca31519b1b9aaf46cf98ddc406b469"}},
   0},
  {<<"merkerl">>,{pkg,<<"merkerl">>,<<"1.0.1">>},0}]}.
 [
