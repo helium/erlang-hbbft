@@ -30,6 +30,7 @@ end_per_testcase(_, _Config) ->
 -record(state,
         {
          round = 0 :: non_neg_integer(),
+         module :: atom(), % So we can call accessors to module's private state.
          node_count :: integer(),
          all_msgs :: [term()],
          to_deliver :: [term()],
@@ -92,6 +93,7 @@ mr(_Message, _From, _To, _State, NewState, Nothing,
 mr(_Message, _From, _To, _State, NewState,
    {result, {transactions, _Stamps, Txns}},
    #state{results = Results,
+          module = Module,
           all_msgs = Msgs,
           txns = StateTxns} = ModelState) ->
     %% !!!!!!  note that this is fragile and may break if the record changes
@@ -100,7 +102,7 @@ mr(_Message, _From, _To, _State, NewState,
     %% finalize the round for this node
     NewNewState = hbbft:finalize_round(NewState, Txns),
     {NewNewNewState, Actions} = hbbft:next_round(NewNewState),
-    fakecast:trace("buffer remaining ~p", [length(element(9, NewNewNewState))]),
+    fakecast:trace("buffer remaining ~p", [length(Module:buf(NewNewNewState))]),
 
     %% check if all messages have been put into the queue, and if all
     %% messages have appeared as transactions.
@@ -158,6 +160,7 @@ multi_round_fakecast_test(Config) ->
                        max_time = 20000
                       },
                     #state{node_count = N,
+                           module = Module,
                            all_msgs = Msgs,
                            to_deliver = LaterMsgs}
                    }
