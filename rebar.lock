@@ -1,14 +1,16 @@
-{"1.1.0",
+{"1.2.0",
 [{<<"erasure">>,
   {git,"https://github.com/helium/erlang-erasure.git",
        {ref,"c73354ca9914225a825569693dc72db6691d91f1"}},
   0},
  {<<"erlang_tc">>,
   {git,"https://github.com/helium/erlang-tc.git",
-       {ref,"b3ef1d5541586f5c85b6d231345a921d57be32a3"}},
+       {ref,"f2aa5e1ba9ea3091d6037304e57fa3720102cd55"}},
   0},
  {<<"merkerl">>,{pkg,<<"merkerl">>,<<"1.0.1">>},0}]}.
 [
 {pkg_hash,[
- {<<"merkerl">>, <<"FFFA7591CB3C62E837533A1C71B3C3795194FC3E09541E25369F1C87AF38EFE1">>}]}
+ {<<"merkerl">>, <<"FFFA7591CB3C62E837533A1C71B3C3795194FC3E09541E25369F1C87AF38EFE1">>}]},
+{pkg_hash_ext,[
+ {<<"merkerl">>, <<"6043DAC833781772AAE8D8EED101FE2CD8E51383853B485C8A59EDFFBA4DB631">>}]}
 ].
