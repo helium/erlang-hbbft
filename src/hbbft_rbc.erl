@@ -1,6 +1,6 @@
 -module(hbbft_rbc).
 
--export([init/4, input/2, handle_msg/3, status/1]).
+-export([init/4, input/2, handle_msg/3, status/1, serialize/1, deserialize/1]).
 
 -record(rbc_data, {
           state = init :: init | waiting | done,
@@ -17,7 +17,7 @@
           seen_val = false :: boolean(),
           ready_sent = false :: boolean(),
           %% roothash: #{sender: {size, shard}}
-          stripes = #{} :: #{merkerl:hash() => #{non_neg_integer() => {pos_integer(), binary()}}}
+          stripes = #{} :: #{merkerl:hash() => #{non_neg_integer() => {pos_integer(), pos_integer(), binary()}}}
          }).
 
 %% rbc protocol requires three message types: ECHO(h, bj, sj), VAL(h, bj, sj) and READY(h)
@@ -278,3 +278,20 @@ hash_key(Map) ->
     maps:fold(fun(Key, Value, Acc) ->
                       maps:put(binary:part(Key, 0, Len), Value, Acc)
               end, #{}, Map).
+
+serialize(#rbc_data{stripes=Stripes}=Data) ->
+    io:format("Stripes ~p", [Stripes]),
+    #{data => Data#rbc_data{stripes=#{}}, stripes =>
+      maps:map(fun(_K, V) ->
+                       maps:map(fun(_K2, {Index, T, Shard}) ->
+                                        <<Index:8/integer, T:32/integer, Shard/binary>>
+                                end, V)
+               end, Stripes)}.
+
+deserialize(#{data := BinData, stripes := Stripes}) ->
+    Data = binary_to_term(BinData),
+    Data#rbc_data{stripes=maps:map(fun(_K, V) ->
+                       maps:map(fun(_K2, <<Index:8/integer, T:32/integer, Shard/binary>>) ->
+                                        {Index, T, Shard}
+                                end, V)
+               end, Stripes)}.
