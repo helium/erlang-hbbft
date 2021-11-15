@@ -281,7 +281,7 @@ hash_key(Map) ->
 
 serialize(#rbc_data{stripes=Stripes}=Data) ->
     io:format("Stripes ~p", [Stripes]),
-    #{data => Data#rbc_data{stripes=#{}}, stripes =>
+    #{data => term_to_binary(Data#rbc_data{stripes=#{}}), stripes =>
       maps:map(fun(_K, V) ->
                        maps:map(fun(_K2, {Index, T, Shard}) ->
                                         <<Index:8/integer, T:32/integer, Shard/binary>>
