@@ -683,7 +683,9 @@ deserialize(M0, SK) ->
     M = maps:map(
         fun
             (acs, V) -> V;
-            (_K, V) -> binary_to_term(V)
+            (_K, V) ->
+                lager:info("k ~p", [_K]),
+                binary_to_term(V)
         end,
         M0
     ),
