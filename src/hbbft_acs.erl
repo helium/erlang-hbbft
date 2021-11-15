@@ -309,13 +309,15 @@ deser_bba_key(AK) ->
     list_to_integer(Int).
 
 -spec serialize_rbc_state(rbc_state()) -> map().
+serialize_rbc_state(#rbc_state{rbc_data=RBCData, result=undefined}) ->
+    #{data => hbbft_rbc:serialize(RBCData)};
 serialize_rbc_state(#rbc_state{rbc_data=RBCData, result=Result}) ->
     #{result => Result, data => hbbft_rbc:serialize(RBCData)}.
 
 -spec deserialize_rbc_state(rbc_serialized_state() | #{}) -> rbc_state().
-deserialize_rbc_state(#{result := Result, data := RBCData}) ->
+deserialize_rbc_state(#{ data := RBCData}=Data) ->
     %% new RBC sub serialization
-    #rbc_state{rbc_data=RBCData, result=Result};
+    #rbc_state{rbc_data=RBCData, result=maps:get(result, Data, undefined)};
 deserialize_rbc_state(#rbc_serialized_state{rbc_data=RBCData, result=Result}) ->
     #rbc_state{rbc_data=RBCData, result=Result};
 deserialize_rbc_state(BinRec) ->
