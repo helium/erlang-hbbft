@@ -308,15 +308,19 @@ deser_bba_key(AK) ->
     "bba_" ++ Int = atom_to_list(AK),
     list_to_integer(Int).
 
--spec serialize_rbc_state(rbc_state()) -> binary().
+-spec serialize_rbc_state(rbc_state()) -> map().
+serialize_rbc_state(#rbc_state{rbc_data=RBCData, result=undefined}) ->
+    #{data => hbbft_rbc:serialize(RBCData)};
 serialize_rbc_state(#rbc_state{rbc_data=RBCData, result=Result}) ->
-    term_to_binary(#rbc_serialized_state{rbc_data=RBCData, result=Result},
-                   [compressed]).
+    #{result => Result, data => hbbft_rbc:serialize(RBCData)}.
 
 -spec deserialize_rbc_state(rbc_serialized_state() | #{}) -> rbc_state().
+deserialize_rbc_state(#{ data := RBCData}=Data) ->
+    %% new RBC sub serialization
+    #rbc_state{rbc_data=hbbft_rbc:deserialize(RBCData), result=maps:get(result, Data, undefined)};
 deserialize_rbc_state(#rbc_serialized_state{rbc_data=RBCData, result=Result}) ->
     #rbc_state{rbc_data=RBCData, result=Result};
-deserialize_rbc_state(BinRec) ->
+deserialize_rbc_state(BinRec) when is_binary(BinRec) ->
     #rbc_serialized_state{rbc_data=RBCData, result=Result} =
         binary_to_term(BinRec),
     #rbc_state{rbc_data=RBCData, result=Result}.
