@@ -859,17 +859,17 @@ combine_shares(F, SK, SharesForThisBundle, Ciphertext) ->
     end.
 
 encode_list(L) ->
-    encode_list(L, []).
+    encode_list(L, 5*1024*1024, []).
 
-encode_list([], Acc) ->
+encode_list([], _, Acc) ->
     list_to_binary(lists:reverse(Acc));
-encode_list([H | T], Acc) ->
+encode_list([H | T], Count, Acc) ->
     Sz = byte_size(H),
-    case Sz >= 16#ffffff of
+    case Sz >= 16#ffffff orelse (Count - Sz) =< 0 of
         true ->
-            encode_list(T, Acc);
+            encode_list(T, Count, Acc);
         false ->
-            encode_list(T, [<<Sz:24/integer-unsigned-little, H/binary>> | Acc])
+            encode_list(T, Count - Sz, [<<Sz:24/integer-unsigned-little, H/binary>> | Acc])
     end.
 
 decode_list(<<>>, Acc) ->
