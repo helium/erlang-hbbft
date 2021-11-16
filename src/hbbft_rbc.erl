@@ -283,7 +283,8 @@ serialize(#rbc_data{stripes=Stripes}=Data) when Stripes /= #{} ->
     #{rbc_data => term_to_binary(Data#rbc_data{stripes=#{}}), stripes =>
       maps:map(fun(_K, V) ->
                        maps:map(fun(_K2, {Index, Size, Shard}) ->
-                                        #{index => <<Index:8/integer>>, size => <<Size:32/integer>>, shard => Shard}
+                                        %% encode as u32 because rocks seems to like dropping smakk keys??
+                                        #{index => <<Index:32/integer>>, size => <<Size:32/integer>>, shard => Shard}
                                 end, V)
                end, Stripes)};
 serialize(#rbc_data{}=Data) ->
@@ -292,7 +293,13 @@ serialize(#rbc_data{}=Data) ->
 deserialize(#{rbc_data := BinData}=Map) ->
     Data = binary_to_term(BinData),
     Data#rbc_data{stripes=maps:map(fun(_K, V) ->
-                       maps:map(fun(_K2, #{index := <<Index:8/integer>>, size := <<Size:32/integer>>, shard := Shard}) ->
-                                        {Index, Size, Shard}
-                                end, V)
+                       maps:fold(fun(K2, #{index := <<Index:8/integer>>, size := <<Size:32/integer>>, shard := Shard}, Acc) ->
+                                        %% legacy decoding
+                                        maps:put(K2, {Index, Size, Shard}, Acc);
+                                   (K2, #{index := <<Index:32/integer>>, size := <<Size:32/integer>>, shard := Shard}, Acc) ->
+                                        maps:put(K2, {Index, Size, Shard}, Acc);
+                                   (_, _, Acc) ->
+                                         %% unable to deserialize???
+                                        Acc
+                                end, #{}, V)
                end, maps:get(stripes, Map, #{}))}.
