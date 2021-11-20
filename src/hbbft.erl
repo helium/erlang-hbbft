@@ -859,7 +859,8 @@ combine_shares(F, SK, SharesForThisBundle, Ciphertext) ->
     end.
 
 encode_list(L) ->
-    encode_list(L, 5*1024*1024, []).
+    %% 1MB hard limit for proposal
+    encode_list(L, 1*1024*1024, []).
 
 encode_list([], _, Acc) ->
     list_to_binary(lists:reverse(Acc));
