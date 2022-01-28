@@ -624,8 +624,21 @@ merge_replies(N, NewReplies, Replies) ->
     case lists:keyfind(N, 1, NewReplies) of
         false ->
             merge_replies(N - 1, lists:keydelete(N, 1, NewReplies), Replies);
-        {N, ok} ->
+        {N, {result, _}} ->
             merge_replies(N - 1, lists:keydelete(N, 1, NewReplies), Replies);
+        {N, {result_and_send, _, {send, ToSend}}} ->
+            NewSend =
+                case lists:keyfind(N, 1, Replies) of
+                    false ->
+                        {N, {send, ToSend}};
+                    {N, OldSend} ->
+                        {N, {send, OldSend ++ ToSend}}
+                end,
+            merge_replies(
+                N - 1,
+                lists:keydelete(N, 1, NewReplies),
+                lists:keystore(N, 1, Replies, NewSend)
+            );
         {N, {send, ToSend}} ->
             NewSend =
                 case lists:keyfind(N, 1, Replies) of

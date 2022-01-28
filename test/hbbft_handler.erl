@@ -29,11 +29,11 @@ init(HBBFTArgs) ->
 
 handle_command({txn, Txn}, State) ->
     case hbbft:input(State#state.hbbft, Txn) of
-        {HBBFT, ok} ->
+        {HBBFT, {result, _}} ->
             {reply, ok, [], State#state{hbbft=HBBFT}};
         {_HBBFT, full} ->
             {reply, {error, full}, ignore};
-        {HBBFT, {send, ToSend}} ->
+        {HBBFT, {result_and_send, _, {send, ToSend}}} ->
             {reply, ok, fixup_msgs(ToSend), State#state{hbbft=HBBFT}}
     end;
 handle_command({finalize_round, Txns, TempBlock}, State) ->
