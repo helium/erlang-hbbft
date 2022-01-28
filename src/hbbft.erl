@@ -910,13 +910,41 @@ decode_list(<<Length:24/integer-unsigned-little, Entry:Length/binary, Tail/binar
 decode_list(_, _Acc) ->
     {error, bad_chunk_encoding}.
 
+-spec add_to_buffer([A], A, fun((A) -> boolean())) -> {[A], non_neg_integer()}.
 add_to_buffer(Buffer, Element, InsertComparator) ->
     add_to_buffer(lists:reverse(Buffer), [], Element, InsertComparator).
 
+add_to_buffer([], Passed, Element, _InsertComparator) ->
+    {[Element | Passed], 1};
 add_to_buffer([Head|Buffer], Passed, Element, InsertComparator) ->
     case InsertComparator(Head) of
-        true ->
-            add_to_buffer(Buffer, [Head|Passed], Element, InsertComparator);
         false ->
-            {lists:reverse(Buffer) ++ [Element | Passed], length(Buffer)}
+            add_to_buffer(Buffer, [Head|Passed], Element, InsertComparator);
+        true ->
+            {lists:reverse(Buffer) ++ [Head, Element | Passed], length(Buffer) + 2}
     end.
+
+
+-ifdef(TEST).
+
+-include_lib("eunit/include/eunit.hrl").
+
+buf_insert_test_() ->
+    [
+        ?_assertMatch({[0], 1}, add_to_buffer([], 0, fun(_) -> true end)),
+        ?_assertMatch({[0], 1}, add_to_buffer([], 0, fun(_) -> false end)),
+
+        ?_assertMatch({[0, 1], 1}, add_to_buffer([1], 0, fun(X) -> X < 1 end)),
+        ?_assertMatch({[0, 1], 1}, add_to_buffer([1], 0, fun(X) -> X > 1 end)),
+        ?_assertMatch({[1, 0], 2}, add_to_buffer([1], 0, fun(X) -> X =:= 1 end)),
+        ?_assertMatch({[1, 0], 2}, add_to_buffer([1], 0, fun(X) -> X =< 1 end)),
+        ?_assertMatch({[1, 0], 2}, add_to_buffer([1], 0, fun(X) -> X >= 1 end)),
+
+        ?_assertMatch({[1, 2, 3, 5, 0], 5}, add_to_buffer([1, 2, 3, 5], 0, fun(X) -> X < 6 end)),
+        ?_assertMatch({[1, 2, 3, 0, 5], 4}, add_to_buffer([1, 2, 3, 5], 0, fun(X) -> X < 5 end)),
+        ?_assertMatch({[1, 2, 0, 3, 5], 3}, add_to_buffer([1, 2, 3, 5], 0, fun(X) -> X < 3 end)),
+        ?_assertMatch({[1, 0, 2, 3, 5], 2}, add_to_buffer([1, 2, 3, 5], 0, fun(X) -> X < 2 end)),
+        ?_assertMatch({[0, 1, 2, 3, 5], 1}, add_to_buffer([1, 2, 3, 5], 0, fun(X) -> X < 1 end))
+    ].
+
+-endif.
