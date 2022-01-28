@@ -220,17 +220,35 @@ start_on_demand(Data) ->
     {Data, already_started}.
 
 %% someone submitting a transaction to the replica set
--spec input(hbbft_data(), binary()) -> {hbbft_data(), ok | {send, [rbc_wrapped_output()]} | full}.
+-spec input(hbbft_data(), binary()) ->
+    {hbbft_data(), Next}
+    when
+        Next
+            :: {result, {Pos, BufSiz}}
+            |  {result_and_send, {Pos, BufSiz}, {send, Msg}}
+            |  full,
+        Msg :: [rbc_wrapped_output()],
+        Pos :: non_neg_integer(),
+        BufSiz :: non_neg_integer().
 input(Data, Txn) ->
     %% use a default function that will cause an append
     input(Data, Txn, fun(_) -> false end).
 
 %% someone submitting a transaction to the replica set
--spec input(hbbft_data(), binary(), fun((binary()) -> boolean()) ) -> {hbbft_data(), ok | {send, [rbc_wrapped_output()]} | full}.
-input(Data = #hbbft_data{buf = Buf, max_buf = MaxBuf}, Txn, InsertComparator) when
-    is_binary(Txn), length(Buf) < MaxBuf
+-spec input(hbbft_data(), binary(), fun((binary()) -> boolean()) ) ->
+    {hbbft_data(), Next}
+    when
+        Next
+            :: {result, {Pos, BufSiz}}
+            |  {result_and_send, {Pos, BufSiz}, {send, Msg}}
+            |  full,
+        Msg :: [rbc_wrapped_output()],
+        Pos :: non_neg_integer(),
+        BufSiz :: non_neg_integer().
+input(Data = #hbbft_data{buf = Buf, max_buf = MaxBuf}, <<Txn/binary>>, InsertComparator)
+    when length(Buf) < MaxBuf
 ->
-    %% add this txn to the the buffer
+    %% add txn to buffer
     {NewBuf, Position} = add_to_buffer(Buf, Txn, InsertComparator),
     case maybe_start_acs(Data#hbbft_data{buf = NewBuf}) of
         {NewData, ok} ->
@@ -238,7 +256,7 @@ input(Data = #hbbft_data{buf = Buf, max_buf = MaxBuf}, Txn, InsertComparator) wh
         {NewData, {send, Msg}} ->
             {NewData, {result_and_send, {Position, length(NewBuf)}, {send, Msg}}}
     end;
-input(Data = #hbbft_data{buf = _Buf}, _Txn, _InsertComparator) when is_binary(_Txn) ->
+input(Data = #hbbft_data{buf = _}, <<_/binary>>, _) ->
     %% drop the txn
     {Data, full}.
 
