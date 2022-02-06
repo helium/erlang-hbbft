@@ -7,6 +7,7 @@
     set_stamp_fun/4,
     start_on_demand/1,
     input/2,
+    input/3,
     finalize_round/3,
     finalize_round/2,
     next_round/1,
@@ -219,14 +220,43 @@ start_on_demand(Data) ->
     {Data, already_started}.
 
 %% someone submitting a transaction to the replica set
--spec input(hbbft_data(), binary()) -> {hbbft_data(), ok | {send, [rbc_wrapped_output()]} | full}.
-input(Data = #hbbft_data{buf = Buf, max_buf = MaxBuf}, Txn) when
-    is_binary(Txn), length(Buf) < MaxBuf
+-spec input(hbbft_data(), binary()) ->
+    {hbbft_data(), Next}
+    when
+        Next
+            :: {result, {Pos, BufSiz}}
+            |  {result_and_send, {Pos, BufSiz}, {send, Msg}}
+            |  full,
+        Msg :: [rbc_wrapped_output()],
+        Pos :: non_neg_integer(),
+        BufSiz :: non_neg_integer().
+input(Data, Txn) ->
+    %% use a default function that will cause an append
+    input(Data, Txn, fun(_) -> false end).
+
+%% someone submitting a transaction to the replica set
+-spec input(hbbft_data(), binary(), fun((binary()) -> boolean()) ) ->
+    {hbbft_data(), Next}
+    when
+        Next
+            :: {result, {Pos, BufSiz}}
+            |  {result_and_send, {Pos, BufSiz}, {send, Msg}}
+            |  full,
+        Msg :: [rbc_wrapped_output()],
+        Pos :: non_neg_integer(),
+        BufSiz :: non_neg_integer().
+input(Data = #hbbft_data{buf = Buf, max_buf = MaxBuf}, <<Txn/binary>>, InsertComparator)
+    when length(Buf) < MaxBuf
 ->
-    %% add this txn to the the buffer
-    NewBuf = Buf ++ [Txn],
-    maybe_start_acs(Data#hbbft_data{buf = NewBuf});
-input(Data = #hbbft_data{buf = _Buf}, _Txn) when is_binary(_Txn) ->
+    %% add txn to buffer
+    {NewBuf, Position} = add_to_buffer(Buf, Txn, InsertComparator),
+    case maybe_start_acs(Data#hbbft_data{buf = NewBuf}) of
+        {NewData, ok} ->
+            {NewData, {result, {Position, length(NewBuf)}}};
+        {NewData, {send, Msg}} ->
+            {NewData, {result_and_send, {Position, length(NewBuf)}, {send, Msg}}}
+    end;
+input(Data = #hbbft_data{buf = _}, <<_/binary>>, _) ->
     %% drop the txn
     {Data, full}.
 
@@ -879,3 +909,42 @@ decode_list(<<Length:24/integer-unsigned-little, Entry:Length/binary, Tail/binar
     decode_list(Tail, [Entry | Acc]);
 decode_list(_, _Acc) ->
     {error, bad_chunk_encoding}.
+
+-spec add_to_buffer([A], A, fun((A) -> boolean())) -> {[A], non_neg_integer()}.
+add_to_buffer(Buffer, Element, InsertComparator) ->
+    add_to_buffer(lists:reverse(Buffer), [], Element, InsertComparator).
+
+add_to_buffer([], Passed, Element, _InsertComparator) ->
+    {[Element | Passed], 1};
+add_to_buffer([Head|Buffer], Passed, Element, InsertComparator) ->
+    case InsertComparator(Head) of
+        false ->
+            add_to_buffer(Buffer, [Head|Passed], Element, InsertComparator);
+        true ->
+            {lists:reverse(Buffer) ++ [Head, Element | Passed], length(Buffer) + 2}
+    end.
+
+
+-ifdef(TEST).
+
+-include_lib("eunit/include/eunit.hrl").
+
+buf_insert_test_() ->
+    [
+        ?_assertMatch({[0], 1}, add_to_buffer([], 0, fun(_) -> true end)),
+        ?_assertMatch({[0], 1}, add_to_buffer([], 0, fun(_) -> false end)),
+
+        ?_assertMatch({[0, 1], 1}, add_to_buffer([1], 0, fun(X) -> X < 1 end)),
+        ?_assertMatch({[0, 1], 1}, add_to_buffer([1], 0, fun(X) -> X > 1 end)),
+        ?_assertMatch({[1, 0], 2}, add_to_buffer([1], 0, fun(X) -> X =:= 1 end)),
+        ?_assertMatch({[1, 0], 2}, add_to_buffer([1], 0, fun(X) -> X =< 1 end)),
+        ?_assertMatch({[1, 0], 2}, add_to_buffer([1], 0, fun(X) -> X >= 1 end)),
+
+        ?_assertMatch({[1, 2, 3, 5, 0], 5}, add_to_buffer([1, 2, 3, 5], 0, fun(X) -> X < 6 end)),
+        ?_assertMatch({[1, 2, 3, 0, 5], 4}, add_to_buffer([1, 2, 3, 5], 0, fun(X) -> X < 5 end)),
+        ?_assertMatch({[1, 2, 0, 3, 5], 3}, add_to_buffer([1, 2, 3, 5], 0, fun(X) -> X < 3 end)),
+        ?_assertMatch({[1, 0, 2, 3, 5], 2}, add_to_buffer([1, 2, 3, 5], 0, fun(X) -> X < 2 end)),
+        ?_assertMatch({[0, 1, 2, 3, 5], 1}, add_to_buffer([1, 2, 3, 5], 0, fun(X) -> X < 1 end))
+    ].
+
+-endif.

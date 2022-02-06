@@ -166,6 +166,9 @@ handle_info(Msg, State) ->
     ct:log("unhandled msg ~p~n", [Msg]),
     {noreply, State}.
 
+dispatch({NewHBBFT, {result_and_send, _, {send, ToSend}}}, State) ->
+    do_send(ToSend, State),
+    State#state{hbbft=maybe_serialize_HBBFT(NewHBBFT, State#state.to_serialize)};
 dispatch({NewHBBFT, {send, ToSend}}, State) ->
     do_send(ToSend, State),
     State#state{hbbft=maybe_serialize_HBBFT(NewHBBFT, State#state.to_serialize)};
