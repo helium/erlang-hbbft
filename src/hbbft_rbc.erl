@@ -280,7 +280,7 @@ hash_key(Map) ->
               end, #{}, Map).
 
 serialize(#rbc_data{stripes=Stripes}=Data) when Stripes /= #{} ->
-    #{rbc_data => term_to_binary(Data#rbc_data{stripes=#{}}), stripes =>
+    #{rbc_data => Data#rbc_data{stripes=#{}}, stripes =>
       maps:map(fun(_K, V) ->
                        maps:map(fun(_K2, {Index, Size, Shard}) ->
                                         %% encode as u32 because rocks seems to like dropping smakk keys??
@@ -288,7 +288,7 @@ serialize(#rbc_data{stripes=Stripes}=Data) when Stripes /= #{} ->
                                 end, V)
                end, Stripes)};
 serialize(#rbc_data{}=Data) ->
-    #{rbc_data => term_to_binary(Data)}.
+    #{rbc_data => Data}.
 
 deserialize(#{rbc_data := BinData}=Map) ->
     Data = binary_to_term(BinData),

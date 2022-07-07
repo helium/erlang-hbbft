@@ -257,8 +257,7 @@ sort_bba_msgs(Msgs) ->
 -spec serialize(acs_data()) -> #{atom() => #{} | binary()}.
 serialize(#acs_data{done=Done, n=N, f=F, j=J, rbc=RBCMap, bba=BBAMap}) ->
     M = #{done => Done, n => N, f => F, j => J},
-    M1 = maps:map(fun(_K, V) -> term_to_binary(V, [compressed]) end, M),
-    M1#{rbc => serialize_state(RBCMap, rbc),
+    M#{rbc => serialize_state(RBCMap, rbc),
         bba => serialize_state(BBAMap, bba)}.
 
 -spec deserialize(acs_serialized_data() | #{}, tc_key_share:tc_key_share()) -> acs_data().
@@ -269,7 +268,12 @@ deserialize(#acs_serialized_data{done=Done, n=N, f=F, j=J, rbc=RBCMap, bba=BBAMa
 deserialize(M, SK) ->
     {RBCMap, M1} = maps:take(rbc, M),
     {BBAMap, M2} = maps:take(bba, M1),
-    M3 = maps:map(fun(_K, V) -> binary_to_term(V) end, M2),
+    M3 = maps:map(fun(_K, V) when is_binary(V) ->
+                          %% old form
+                          binary_to_term(V);
+                     (_K, V) ->
+                          V
+                  end, M2),
     #{done :=  Done, n :=  N, f :=  F, j :=  J} = M3,
     #acs_data{done = Done, n = N, f = F, j = J,
               rbc = deserialize_state(RBCMap, rbc),
@@ -327,8 +331,7 @@ deserialize_rbc_state(BinRec) when is_binary(BinRec) ->
 
 -spec serialize_bba_state(bba_state()) -> binary().
 serialize_bba_state(#bba_state{bba_data=BBAData, input=Input, result=Result}) ->
-    term_to_binary(#bba_serialized_state{bba_data=hbbft_bba:serialize(BBAData), input=Input, result=Result},
-                   [compressed]).
+    #bba_serialized_state{bba_data=hbbft_bba:serialize(BBAData), input=Input, result=Result}.
 
 -spec deserialize_bba_state(bba_serialized_state() | #{}, tc_key_share:tc_key_share()) -> bba_state().
 deserialize_bba_state(#bba_serialized_state{bba_data=BBAData, input=Input, result=Result}, SK) ->
