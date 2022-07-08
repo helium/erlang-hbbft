@@ -709,14 +709,7 @@ serialize(#hbbft_data{key_share = SK} = Data, true) ->
     {serialize_hbbft_data(Data), tc_key_share:serialize(SK)}.
 
 -spec deserialize(#{atom() => binary() | map()}, tc_key_share:tc_key_share()) -> hbbft_data().
-deserialize(M0, SK) ->
-    M = maps:map(
-        fun
-            (acs, V) -> V;
-            (_K, V) -> binary_to_term(V)
-        end,
-        M0
-    ),
+deserialize(M, SK) ->
     #{
         batch_size := BatchSize,
         n := N,
@@ -926,6 +919,9 @@ buf_insert_test_() ->
     [
         ?_assertMatch({[0], 1}, add_to_buffer([], 0, fun(_) -> true end)),
         ?_assertMatch({[0], 1}, add_to_buffer([], 0, fun(_) -> false end)),
+        ?_assertMatch({[0, 1], 2}, add_to_buffer([0], 1, fun(_) -> true end)),
+        ?_assertMatch({[1, 0], 1}, add_to_buffer([0], 1, fun(_) -> false end)),
+        ?_assertMatch({[a, b, c, c, a, b, a], 4}, add_to_buffer([a, b, c, a, b, a], c, fun(E) -> E /= a andalso E /= b end)),
 
         ?_assertMatch({[0, 1], 1}, add_to_buffer([1], 0, fun(X) -> X < 1 end)),
         ?_assertMatch({[0, 1], 1}, add_to_buffer([1], 0, fun(X) -> X > 1 end)),
