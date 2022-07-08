@@ -280,13 +280,14 @@ hash_key(Map) ->
               end, #{}, Map).
 
 serialize(#rbc_data{stripes=Stripes}=Data) when Stripes /= #{} ->
-    #{rbc_data => Data#rbc_data{stripes=#{}}, stripes =>
-      maps:map(fun(_K, V) ->
-                       maps:map(fun(_K2, {Index, Size, Shard}) ->
-                                        %% encode as u32 because rocks seems to like dropping smakk keys??
-                                        #{index => <<Index:32/integer>>, size => <<Size:32/integer>>, shard => Shard}
-                                end, V)
-               end, Stripes)};
+    #{rbc_data => Data#rbc_data{stripes=#{}},
+      stripes =>
+        maps:map(fun(_K, V) ->
+                         maps:map(fun(_K2, {Index, Size, Shard}) ->
+                                          %% encode as u32 because rocks seems to like dropping smakk keys??
+                                          #{index => <<Index:32/integer>>, size => <<Size:32/integer>>, shard => Shard}
+                                  end, V)
+                 end, Stripes)};
 serialize(#rbc_data{}=Data) ->
     #{rbc_data => Data}.
 

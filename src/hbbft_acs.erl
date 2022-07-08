@@ -246,7 +246,7 @@ store_rbc_result(Data, I, Result) ->
 sort_bba_msgs(Msgs) ->
     lists:sort(fun({{bba, _}, BBA1}, {{bba, _}, BBA2}) ->
                        hbbft_bba:sort_msgs(BBA1, BBA2);
-                  ({{bba, _}, _}, _) ->
+                 ({{bba, _}, _}, _) ->
                        false;
                   (_, {{bba, _}, _}) ->
                        true;
@@ -254,11 +254,11 @@ sort_bba_msgs(Msgs) ->
                        false
                end, Msgs).
 
--spec serialize(acs_data()) -> #{atom() => #{} | binary()}.
+-spec serialize(acs_data()) -> #{atom() => term()}.
 serialize(#acs_data{done=Done, n=N, f=F, j=J, rbc=RBCMap, bba=BBAMap}) ->
-    M = #{done => Done, n => N, f => F, j => J},
-    M#{rbc => serialize_state(RBCMap, rbc),
-        bba => serialize_state(BBAMap, bba)}.
+    #{done => Done, n => N, f => F, j => J,
+      rbc => serialize_state(RBCMap, rbc),
+      bba => serialize_state(BBAMap, bba)}.
 
 -spec deserialize(acs_serialized_data() | #{}, tc_key_share:tc_key_share()) -> acs_data().
 deserialize(#acs_serialized_data{done=Done, n=N, f=F, j=J, rbc=RBCMap, bba=BBAMap}, SK) ->
@@ -268,13 +268,7 @@ deserialize(#acs_serialized_data{done=Done, n=N, f=F, j=J, rbc=RBCMap, bba=BBAMa
 deserialize(M, SK) ->
     {RBCMap, M1} = maps:take(rbc, M),
     {BBAMap, M2} = maps:take(bba, M1),
-    M3 = maps:map(fun(_K, V) when is_binary(V) ->
-                          %% old form
-                          binary_to_term(V);
-                     (_K, V) ->
-                          V
-                  end, M2),
-    #{done :=  Done, n :=  N, f :=  F, j :=  J} = M3,
+    #{done :=  Done, n :=  N, f :=  F, j :=  J} = M2,
     #acs_data{done = Done, n = N, f = F, j = J,
               rbc = deserialize_state(RBCMap, rbc),
               bba = deserialize_state(BBAMap, bba, SK)}.
@@ -329,7 +323,7 @@ deserialize_rbc_state(BinRec) when is_binary(BinRec) ->
         binary_to_term(BinRec),
     #rbc_state{rbc_data=RBCData, result=Result}.
 
--spec serialize_bba_state(bba_state()) -> binary().
+-spec serialize_bba_state(bba_state()) -> #bba_serialized_state{}.
 serialize_bba_state(#bba_state{bba_data=BBAData, input=Input, result=Result}) ->
     #bba_serialized_state{bba_data=hbbft_bba:serialize(BBAData), input=Input, result=Result}.
 
