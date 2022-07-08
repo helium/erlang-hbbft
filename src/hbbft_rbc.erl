@@ -291,8 +291,7 @@ serialize(#rbc_data{stripes=Stripes}=Data) when Stripes /= #{} ->
 serialize(#rbc_data{}=Data) ->
     #{rbc_data => Data}.
 
-deserialize(#{rbc_data := BinData}=Map) ->
-    Data = binary_to_term(BinData),
+deserialize(#{rbc_data := Data}=Map) ->
     Data#rbc_data{stripes=maps:map(fun(_K, V) ->
                        maps:fold(fun(K2, #{index := <<Index:8/integer>>, size := <<Size:32/integer>>, shard := Shard}, Acc) ->
                                         %% legacy decoding
