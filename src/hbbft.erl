@@ -694,13 +694,13 @@ encrypt(SK, Bin) ->
     tc_ciphertext:serialize(tc_key_share:encrypt(SK, Bin)).
 
 -spec serialize(hbbft_data()) ->
-    {#{atom() => binary() | map()}, binary() | tc_key_share:tc_key_share()}.
+    {#{atom() => term()}, binary() | tc_key_share:tc_key_share()}.
 serialize(Data) ->
     %% serialize the SK unless explicitly told not to
     serialize(Data, true).
 
 -spec serialize(hbbft_data(), boolean()) ->
-    {#{atom() => binary() | map()}, binary() | tc_key_share:tc_key_share()}.
+    {#{atom() => term()}, binary() | tc_key_share:tc_key_share()}.
 serialize(#hbbft_data{key_share = SK} = Data, false) ->
     %% dont serialize the private key
     {serialize_hbbft_data(Data), SK};
@@ -709,14 +709,7 @@ serialize(#hbbft_data{key_share = SK} = Data, true) ->
     {serialize_hbbft_data(Data), tc_key_share:serialize(SK)}.
 
 -spec deserialize(#{atom() => binary() | map()}, tc_key_share:tc_key_share()) -> hbbft_data().
-deserialize(M0, SK) ->
-    M = maps:map(
-        fun
-            (acs, V) -> V;
-            (_K, V) -> binary_to_term(V)
-        end,
-        M0
-    ),
+deserialize(M, SK) ->
     #{
         batch_size := BatchSize,
         n := N,
@@ -774,7 +767,7 @@ deserialize(M0, SK) ->
         stamps = Stamps
     }.
 
--spec serialize_hbbft_data(hbbft_data()) -> #{atom() => binary() | map()}.
+-spec serialize_hbbft_data(hbbft_data()) -> #{atom() => term()}.
 serialize_hbbft_data(#hbbft_data{
     batch_size = BatchSize,
     n = N,
@@ -797,38 +790,31 @@ serialize_hbbft_data(#hbbft_data{
     stampfun = Stampfun,
     stamps = Stamps
 }) ->
-    M = #{
-        batch_size => BatchSize,
-        n => N,
-        f => F,
-        round => Round,
-        max_buf => MaxBuf,
-        acs => hbbft_acs:serialize(ACSData),
-        acs_init => ACSInit,
-        sent_txns => SentTxns,
-        decrypted => Decrypted,
-        j => J,
-        sent_sig => SentSig,
-        acs_results => ACSResults,
-        enc_keys => maps:map(fun(_, Ciphertext) -> tc_ciphertext:serialize(Ciphertext) end, EncKeys),
-        dec_shares => maps:map(
-            fun(_, {Valid, Share}) -> {Valid, hbbft_utils:dec_share_to_binary(Share)} end,
-            DecShares
-        ),
-        sig_shares => maps:map(fun(_, V) -> hbbft_utils:sig_share_to_binary(V) end, SigShares),
-        thingtosign => ThingToSign,
-        failed_combine => FailedCombine,
-        failed_decrypt => FailedDecrypt,
-        stampfun => Stampfun,
-        stamps => Stamps
-    },
-    maps:map(
-        fun
-            (acs, V) -> V;
-            (_K, V) -> term_to_binary(V, [compressed])
-        end,
-        M
-    ).
+    #{
+      batch_size => BatchSize,
+      n => N,
+      f => F,
+      round => Round,
+      max_buf => MaxBuf,
+      acs => hbbft_acs:serialize(ACSData),
+      acs_init => ACSInit,
+      sent_txns => SentTxns,
+      decrypted => Decrypted,
+      j => J,
+      sent_sig => SentSig,
+      acs_results => ACSResults,
+      enc_keys => maps:map(fun(_, Ciphertext) -> tc_ciphertext:serialize(Ciphertext) end, EncKeys),
+      dec_shares => maps:map(
+                      fun(_, {Valid, Share}) -> {Valid, hbbft_utils:dec_share_to_binary(Share)} end,
+                      DecShares
+                     ),
+      sig_shares => maps:map(fun(_, V) -> hbbft_utils:sig_share_to_binary(V) end, SigShares),
+      thingtosign => ThingToSign,
+      failed_combine => FailedCombine,
+      failed_decrypt => FailedDecrypt,
+      stampfun => Stampfun,
+      stamps => Stamps
+     }.
 
 -spec is_serialized(hbbft_data() | #{atom() => binary() | map()}) -> boolean().
 is_serialized(Data) when is_map(Data) -> true;
@@ -933,6 +919,9 @@ buf_insert_test_() ->
     [
         ?_assertMatch({[0], 1}, add_to_buffer([], 0, fun(_) -> true end)),
         ?_assertMatch({[0], 1}, add_to_buffer([], 0, fun(_) -> false end)),
+        ?_assertMatch({[0, 1], 2}, add_to_buffer([0], 1, fun(_) -> true end)),
+        ?_assertMatch({[1, 0], 1}, add_to_buffer([0], 1, fun(_) -> false end)),
+        ?_assertMatch({[a, b, c, c, a, b, a], 4}, add_to_buffer([a, b, c, a, b, a], c, fun(E) -> E /= a andalso E /= b end)),
 
         ?_assertMatch({[0, 1], 1}, add_to_buffer([1], 0, fun(X) -> X < 1 end)),
         ?_assertMatch({[0, 1], 1}, add_to_buffer([1], 0, fun(X) -> X > 1 end)),
