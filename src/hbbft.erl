@@ -202,7 +202,12 @@ start_on_demand(
             {M, F, A} -> erlang:apply(M, F, A)
         end,
     true = is_binary(Stamp),
-    EncX = encrypt(KeyShare, encode_list([Stamp|Proposed])),
+    Encoded = encode_list([Stamp|Proposed]),
+    EncX = encrypt(KeyShare, Encoded),
+    %% encode_list can truncate large proposals, so determine what we actually proposed
+    %% so we can track it locally
+    [Stamp | ActuallyProposed ] = decode_list(Encoded, []),
+
     %% time to kick off a round
     {NewACSState, {send, ACSResponse}} = hbbft_acs:input(Data#hbbft_data.acs, EncX),
     %% add this to acs set in data and send out the ACS response(s)
@@ -213,7 +218,7 @@ start_on_demand(
             acs = NewACSState,
             acs_init = true,
             stamps = lists:keystore(J, 1, Stamps, {J, Stamp}),
-            decrypted = maps:put(J, Proposed, Decrypted)
+            decrypted = maps:put(J, ActuallyProposed, Decrypted)
         },
         {send, hbbft_utils:wrap({acs, Data#hbbft_data.round}, ACSResponse)}};
 start_on_demand(Data) ->
@@ -670,7 +675,11 @@ maybe_start_acs(
                     {M, F, A} -> erlang:apply(M, F, A)
                 end,
             true = is_binary(Stamp),
-            EncX = encrypt(KeyShare, encode_list([Stamp|Proposed])),
+            Encoded = encode_list([Stamp|Proposed]),
+            EncX = encrypt(KeyShare, Encoded),
+            %% encode_list can truncate large proposals, so determine what we actually proposed
+            %% so we can track it locally
+            [Stamp | ActuallyProposed ] = decode_list(Encoded, []),
             %% time to kick off a round
             {NewACSState, {send, ACSResponse}} = hbbft_acs:input(Data#hbbft_data.acs, EncX),
             %% add this to acs set in data and send out the ACS response(s)
@@ -681,7 +690,7 @@ maybe_start_acs(
                     acs = NewACSState,
                     acs_init = true,
                     stamps = lists:keystore(J, 1, Stamps, {J, Stamp}),
-                    decrypted = maps:put(J, Proposed, Decrypted)
+                    decrypted = maps:put(J, ActuallyProposed, Decrypted)
                 },
                 {send, hbbft_utils:wrap({acs, Data#hbbft_data.round}, ACSResponse)}};
         false ->
